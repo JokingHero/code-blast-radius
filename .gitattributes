@@ -1,0 +1,17 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Custom mappings for specific file types
+*.rs text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+
+# Lock files should be treated as binary to avoid merge conflicts
+*.lock binary
+package-lock.json binary
+pnpm-lock.yaml binary
