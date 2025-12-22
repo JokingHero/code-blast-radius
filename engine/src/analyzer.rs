@@ -1,13 +1,10 @@
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::fs;
+use std::collections::{HashMap, HashSet, VecDeque}; // <--- Added back for find_call_chain
 use std::path::{Path, PathBuf};
 use tree_sitter::{Parser, Query, QueryCursor};
-use walkdir::WalkDir;
-use tree_sitter::StreamingIterator;
+use tree_sitter::StreamingIterator; // <--- REQUIRED for matches.next()
 
 use crate::language::{get_language, LanguageConfig};
 
-// Represents a single function found in the codebase.
 #[derive(Debug, Clone)]
 pub struct FunctionInfo {
     pub name: String,
@@ -17,58 +14,25 @@ pub struct FunctionInfo {
     pub calls: Vec<String>,
 }
 
-// A map from function name to its info.
 pub type CodebaseGraph = HashMap<String, FunctionInfo>;
 
-// Main function to build the entire codebase graph.
-pub fn build_codebase_graph(
-    dir: &Path,
-    configs: &[&'static LanguageConfig],
-) -> CodebaseGraph {
-    let mut graph = CodebaseGraph::new();
-    let lang_map: HashMap<String, &'static LanguageConfig> = configs
-        .iter()
-        .flat_map(|&config| {
-            config
-                .file_extensions
-                .iter()
-                .map(move |&ext| (ext.to_string(), config))
-        })
-        .collect();
-
-    for entry in WalkDir::new(dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_file())
-    {
-        let path = entry.path();
-        if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-            if let Some(config) = lang_map.get(ext) {
-                if let Ok(functions) = parse_file(path, config) {
-                    for func in functions {
-                        graph.insert(func.name.clone(), func);
-                    }
-                }
-            }
-        }
-    }
-    graph
-}
-
-// Parses a single file and extracts all function information.
-fn parse_file(path: &Path, config: &LanguageConfig) -> Result<Vec<FunctionInfo>, String> {
-    let code = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let code_bytes = code.as_bytes();
+pub fn analyze_source(
+    path: &Path,
+    source_code: &str,
+    config: &LanguageConfig,
+) -> Result<Vec<FunctionInfo>, String> {
+    let code_bytes = source_code.as_bytes();
     let language = get_language(config.lang_enum);
 
     let mut parser = Parser::new();
-    parser
-        .set_language(&language)
-        .map_err(|e| e.to_string())?;
-    let tree = parser.parse(&code, None).ok_or("Failed to parse code")?;
+    parser.set_language(&language).map_err(|e| e.to_string())?;
+    
+    if source_code.trim().is_empty() {
+        return Ok(Vec::new());
+    }
 
-    // Unwrap is safe here because we hardcoded valid queries in language.rs
-    // If it panics now, it means our query syntax is wrong for the grammar (which we just fixed).
+    let tree = parser.parse(source_code, None).ok_or("Failed to parse code")?;
+
     let defs_query = Query::new(&language, config.query_defs).expect("Invalid definitions query");
     let docs_query = Query::new(&language, config.query_docs).expect("Invalid docs query");
     let calls_query = Query::new(&language, config.query_calls).expect("Invalid calls query");
@@ -76,81 +40,45 @@ fn parse_file(path: &Path, config: &LanguageConfig) -> Result<Vec<FunctionInfo>,
     let mut functions = Vec::new();
     let mut cursor = QueryCursor::new();
 
+    // matches() returns an iterator that requires StreamingIterator to be in scope
     let mut matches = cursor.matches(&defs_query, tree.root_node(), code_bytes);
     
-    // Iterate over every function definition found
     while let Some(match_) = matches.next() {
-        // Extract function definition node
-        let def_node = match_
-            .captures
-            .iter()
-            .find(|c| defs_query.capture_names()[c.index as usize] == "function.definition")
-            .unwrap()
-            .node;
-        
-        // Extract function name node
-        let name_node = match_
-            .captures
-            .iter()
-            .find(|c| defs_query.capture_names()[c.index as usize] == "function.name")
-            .unwrap()
-            .node;
+        let def_node = match_.captures.iter().find(|c| defs_query.capture_names()[c.index as usize] == "function.definition").unwrap().node;
+        let name_node = match_.captures.iter().find(|c| defs_query.capture_names()[c.index as usize] == "function.name").unwrap().node;
 
         let name = name_node.utf8_text(code_bytes).unwrap().to_string();
-        let source_code = def_node.utf8_text(code_bytes).unwrap().to_string();
+        let func_source = def_node.utf8_text(code_bytes).unwrap().to_string();
 
-        // 1. Find Calls inside this function
         let mut calls = Vec::new();
         let mut calls_cursor = QueryCursor::new();
         let mut call_matches = calls_cursor.matches(&calls_query, def_node, code_bytes);
         while let Some(call_match) = call_matches.next() {
-            let call_name_node = call_match
-                .captures
-                .iter()
-                .find(|c| calls_query.capture_names()[c.index as usize] == "call.name")
-                .unwrap()
-                .node;
-            
-            if let Ok(call_name) = call_name_node.utf8_text(code_bytes) {
-                calls.push(call_name.to_string());
+            let call_name_node = call_match.captures.iter().find(|c| calls_query.capture_names()[c.index as usize] == "call.name").unwrap().node;
+            if let Ok(call_name_str) = call_name_node.utf8_text(code_bytes) {
+                calls.push(call_name_str.to_string());
             }
         }
 
-        // 2. Find Documentation for this function
         let mut documentation = None;
         let mut doc_cursor = QueryCursor::new();
         let mut doc_matches = doc_cursor.matches(&docs_query, tree.root_node(), code_bytes);
-        
-        // We look for a doc match where the "function.definition" part matches our current def_node
         while let Some(doc_match) = doc_matches.next() {
-            let doc_def_node = doc_match
-                .captures
-                .iter()
-                .find(|c| docs_query.capture_names()[c.index as usize] == "function.definition")
-                .unwrap()
-                .node;
-            
+            let doc_def_node = doc_match.captures.iter().find(|c| docs_query.capture_names()[c.index as usize] == "function.definition").unwrap().node;
             if doc_def_node == def_node {
-                // COLLECT ALL DOC NODES (Fixes the Rust Docs bug)
-                let doc_lines: Vec<String> = doc_match
-                    .captures
-                    .iter()
+                 let doc_lines: Vec<String> = doc_match.captures.iter()
                     .filter(|c| docs_query.capture_names()[c.index as usize] == "function.docs")
                     .map(|c| c.node.utf8_text(code_bytes).unwrap_or("").to_string())
                     .collect();
-                
-                if !doc_lines.is_empty() {
-                     // Join multiple line comments with newline
-                    documentation = Some(doc_lines.join("\n"));
-                }
+                if !doc_lines.is_empty() { documentation = Some(doc_lines.join("\n")); }
                 break;
             }
         }
-
+        
         functions.push(FunctionInfo {
             name,
             file_path: path.to_path_buf(),
-            source_code,
+            source_code: func_source,
             documentation,
             calls,
         });
@@ -159,15 +87,16 @@ fn parse_file(path: &Path, config: &LanguageConfig) -> Result<Vec<FunctionInfo>,
     Ok(functions)
 }
 
-// Finds the call chain leading to the target function using a reverse BFS.
 pub fn find_call_chain(graph: &CodebaseGraph, target_function: &str) -> Option<Vec<String>> {
     if !graph.contains_key(target_function) {
         return None;
     }
 
-    let mut predecessors = HashMap::new();
+    // Fix: Explicitly type the HashMap so compiler doesn't panic on "unknown type"
+    let mut predecessors: HashMap<String, String> = HashMap::new();
     let mut queue = VecDeque::new();
     let mut visited = HashSet::new();
+    
     queue.push_back(target_function.to_string());
     visited.insert(target_function.to_string());
 
@@ -191,6 +120,8 @@ pub fn find_call_chain(graph: &CodebaseGraph, target_function: &str) -> Option<V
 
     let mut path = vec![root_node.clone()];
     let mut current = root_node;
+    
+    // Fix: explicitly hint types here implicitly by usage, but predecessors logic is fixed now
     while let Some(child) = inverted_predecessors.get(&current) {
         path.push(child.clone());
         if child == target_function {
@@ -206,7 +137,6 @@ pub fn find_call_chain(graph: &CodebaseGraph, target_function: &str) -> Option<V
     Some(path)
 }
 
-// Generates the final formatted context string.
 pub fn generate_context(
     graph: &CodebaseGraph,
     chain: &[String],
