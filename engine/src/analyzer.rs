@@ -1,26 +1,30 @@
-use std::collections::{HashMap, HashSet, VecDeque}; // <--- Added back for find_call_chain
-use std::path::{Path, PathBuf};
-use tree_sitter::{Parser, Query, QueryCursor};
-use tree_sitter::StreamingIterator; // <--- REQUIRED for matches.next()
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::Path;
+use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator};
 
 use crate::language::{get_language, LanguageConfig};
+use crate::schema::{ImportNode, WorkspaceIndex, SymbolId};
 
 #[derive(Debug, Clone)]
 pub struct FunctionInfo {
     pub name: String,
-    pub file_path: PathBuf,
+    pub range_start: usize,
+    pub range_end: usize,
     pub source_code: String,
     pub documentation: Option<String>,
-    pub calls: Vec<String>,
+    pub calls: Vec<String>, 
 }
 
-pub type CodebaseGraph = HashMap<String, FunctionInfo>;
+pub struct FileAnalysis {
+    pub functions: Vec<FunctionInfo>,
+    pub imports: Vec<ImportNode>,
+}
 
 pub fn analyze_source(
-    path: &Path,
+    _path: &Path,
     source_code: &str,
     config: &LanguageConfig,
-) -> Result<Vec<FunctionInfo>, String> {
+) -> Result<FileAnalysis, String> {
     let code_bytes = source_code.as_bytes();
     let language = get_language(config.lang_enum);
 
@@ -28,19 +32,50 @@ pub fn analyze_source(
     parser.set_language(&language).map_err(|e| e.to_string())?;
     
     if source_code.trim().is_empty() {
-        return Ok(Vec::new());
+        return Ok(FileAnalysis { functions: vec![], imports: vec![] });
     }
 
     let tree = parser.parse(source_code, None).ok_or("Failed to parse code")?;
 
+    // --- 1. Extract Imports ---
+    let mut imports = Vec::new();
+    if !config.query_imports.is_empty() {
+        let imports_query = Query::new(&language, config.query_imports).expect("Invalid imports query");
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&imports_query, tree.root_node(), code_bytes);
+
+        while let Some(match_) = matches.next() {
+            let mut current_source = String::new();
+            let mut current_name = String::new();
+
+            for capture in match_.captures {
+                let capture_name = imports_query.capture_names()[capture.index as usize];
+                let text = capture.node.utf8_text(code_bytes).unwrap_or("").to_string();
+
+                if capture_name == "import.source" {
+                    current_source = text.replace(['"', '\''], "");
+                } else if capture_name == "import.name" {
+                    current_name = text;
+                }
+            }
+
+            if !current_source.is_empty() && !current_name.is_empty() {
+                imports.push(ImportNode {
+                    name: current_name,
+                    source: current_source,
+                    alias: None, 
+                });
+            }
+        }
+    }
+
+    // --- 2. Extract Functions & Calls ---
     let defs_query = Query::new(&language, config.query_defs).expect("Invalid definitions query");
     let docs_query = Query::new(&language, config.query_docs).expect("Invalid docs query");
     let calls_query = Query::new(&language, config.query_calls).expect("Invalid calls query");
 
     let mut functions = Vec::new();
     let mut cursor = QueryCursor::new();
-
-    // matches() returns an iterator that requires StreamingIterator to be in scope
     let mut matches = cursor.matches(&defs_query, tree.root_node(), code_bytes);
     
     while let Some(match_) = matches.next() {
@@ -49,6 +84,9 @@ pub fn analyze_source(
 
         let name = name_node.utf8_text(code_bytes).unwrap().to_string();
         let func_source = def_node.utf8_text(code_bytes).unwrap().to_string();
+
+        let range_start = def_node.start_byte();
+        let range_end = def_node.end_byte();
 
         let mut calls = Vec::new();
         let mut calls_cursor = QueryCursor::new();
@@ -77,131 +115,104 @@ pub fn analyze_source(
         
         functions.push(FunctionInfo {
             name,
-            file_path: path.to_path_buf(),
+            range_start,
+            range_end,
             source_code: func_source,
             documentation,
             calls,
         });
     }
 
-    Ok(functions)
+    Ok(FileAnalysis { functions, imports })
 }
 
-pub fn find_call_chain(graph: &CodebaseGraph, target_name: &str) -> Option<Vec<String>> {
-    // 1. Find all nodes that match the target name (Handling Collisions)
-    // The keys are now "path::name", so we can't do a direct lookup.
-    // We filter the graph values.
-    let target_keys: Vec<String> = graph.iter()
-        .filter(|(_, info)| info.name == target_name)
-        .map(|(key, _)| key.clone())
-        .collect();
+pub fn find_call_chain_ids(index: &WorkspaceIndex, target_name: &str) -> Option<Vec<SymbolId>> {
+    let targets = index.symbol_map.get(target_name)?;
+    if targets.is_empty() { return None; }
 
-    if target_keys.is_empty() {
-        return None;
+    let mut predecessors: HashMap<SymbolId, SymbolId> = HashMap::new();
+    let mut queue: VecDeque<SymbolId> = VecDeque::new();
+    let mut visited: HashSet<SymbolId> = HashSet::new();
+
+    for &id in targets {
+        queue.push_back(id);
+        visited.insert(id);
     }
 
-    // Predecessors map: Child Key -> Parent Key
-    let mut predecessors: HashMap<String, String> = HashMap::new();
-    let mut queue = VecDeque::new();
-    let mut visited = HashSet::new();
-
-    // Initialize queue with ALL matching targets
-    // Example: if we look for "init", we start with "db.rs::init" AND "log.rs::init"
-    for key in &target_keys {
-        queue.push_back(key.clone());
-        visited.insert(key.clone());
-    }
-
-    while let Some(current_key) = queue.pop_front() {
-        // We need the Short Name of the current node to check if others call it.
-        // But wait, the `calls` list contains Short Names (e.g. "init").
-        // So we need to check: Does Caller have "init" in its calls list?
-        // AND does current_node.name == "init"? 
-        // Yes, this is implicit because we are traversing *up*.
-        
-        let current_short_name = &graph.get(&current_key)?.name;
-
-        for (caller_key, caller_info) in graph.iter() {
-            // Check if this caller calls our current function (by short name)
-            // Note: This is "Loose Resolution". If main() calls "init", 
-            // and we have DB::init and Log::init, main() becomes a parent of BOTH.
-            // This is desired behavior for a context tool (show all possibilities).
-            if caller_info.calls.contains(current_short_name) && !visited.contains(caller_key) {
-                visited.insert(caller_key.clone());
-                
-                // Record path
-                predecessors.insert(current_key.clone(), caller_key.clone());
-                
-                queue.push_back(caller_key.clone());
+    while let Some(current_id) = queue.pop_front() {
+        for (caller_id, callees) in &index.resolved_calls {
+            if callees.contains(&current_id) {
+                if !visited.contains(caller_id) {
+                    visited.insert(*caller_id);
+                    predecessors.insert(current_id, *caller_id); 
+                    queue.push_back(*caller_id);
+                }
             }
         }
     }
-    
-    let mut path = Vec::new();
-    
-    // Find a node that we reached (is in `visited`) and is likely a Root.
-    // We can just iterate `predecessors` to build a full chain.
-    // Let's try to find a chain from a Root to ONE of our targets.
-    
-    let mut current = target_keys[0].clone(); // Start at a target
-    // If we have predecessors for this target, trace up.
-    // If not, maybe another target has predecessors?
-    
-    for t in &target_keys {
-        if predecessors.contains_key(t) {
-            current = t.clone();
+
+    let mut current = targets[0]; 
+    for &t in targets {
+        if predecessors.contains_key(&t) {
+            current = t;
             break;
         }
     }
-    
-    // Trace upwards (Target -> Caller -> Caller)
-    path.push(current.clone());
-    while let Some(parent) = predecessors.get(&current) {
-        path.push(parent.clone());
-        current = parent.clone();
-    }
-    
-    // The path is now [Target, Caller, Root]. Reverse it for display [Root, Caller, Target].
-    path.reverse();
-    
-    // Verify valid chain
-    if path.len() == 1 && !target_keys.contains(&path[0]) {
-        return None;
+
+    let mut chain = vec![current];
+    while let Some(&parent) = predecessors.get(&current) {
+        chain.push(parent);
+        current = parent;
     }
 
-    Some(path)
+    chain.reverse(); 
+    Some(chain)
 }
 
-pub fn generate_context(
-    graph: &CodebaseGraph,
-    chain: &[String],
+pub fn generate_context_from_ids(
+    index: &WorkspaceIndex,
+    chain: &[SymbolId],
     include_docs: bool,
 ) -> String {
     let mut context = String::new();
+    let target_id = chain.last().unwrap();
+    let target_name = index.symbols.get(target_id).map(|s| s.name.as_str()).unwrap_or("Unknown");
+
+    context.push_str(&format!("// Context for function: `{}`\n", target_name));
     
-    // Extract short name for display
-    let target_key = chain.last().unwrap();
-    let target_name = graph.get(target_key).map(|i| i.name.as_str()).unwrap_or(target_key);
+    let names: Vec<String> = chain.iter()
+        .filter_map(|id| index.symbols.get(id).map(|s| s.name.clone()))
+        .collect();
+    context.push_str(&format!("// Call Chain: {}\n\n", names.join(" -> ")));
 
-    context.push_str(&format!(
-        "// Context for function: `{}`\n",
-        target_name
-    ));
-    context.push_str(&format!("// Call Chain: {}\n\n", chain.join(" -> ")));
+    for &sym_id in chain {
+        if let Some(sym) = index.symbols.get(&sym_id) {
+            if let Some(file_node) = index.files.values().find(|f| f.id == sym.file_id) {
+                context.push_str("// ==========================================================\n");
+                context.push_str(&format!("// File: {}\n", file_node.path));
+                context.push_str("// ==========================================================\n");
 
-    for func_name in chain {
-        if let Some(info) = graph.get(func_name) {
-            context.push_str("// ==========================================================\n");
-            context.push_str(&format!("// File: {}\n", info.file_path.display()));
-            context.push_str("// ==========================================================\n");
-            if include_docs {
-                if let Some(docs) = &info.documentation {
-                    context.push_str(docs);
-                    context.push('\n');
+                if include_docs {
+                    if let Some(docs) = &sym.doc_comment {
+                        context.push_str(docs);
+                        context.push('\n');
+                    }
                 }
+
+                if let Ok(content) = std::fs::read_to_string(&file_node.path) {
+                    if sym.range_end <= content.len() {
+                        let bytes = content.as_bytes();
+                        let slice = &bytes[sym.range_start..sym.range_end];
+                        let text = String::from_utf8_lossy(slice);
+                        context.push_str(&text);
+                    } else {
+                        context.push_str("// Error: Source range out of bounds");
+                    }
+                } else {
+                    context.push_str("// Error: Could not read file");
+                }
+                context.push_str("\n\n");
             }
-            context.push_str(&info.source_code);
-            context.push_str("\n\n");
         }
     }
     context

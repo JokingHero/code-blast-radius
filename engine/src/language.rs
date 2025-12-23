@@ -1,6 +1,5 @@
 use tree_sitter::Language;
 
-// An enum to represent our supported languages.
 #[derive(Clone, Copy, Debug)]
 pub enum SupportedLanguage {
     Rust,
@@ -14,7 +13,6 @@ pub enum SupportedLanguage {
     R,
 }
 
-// Returns the correct Tree-sitter Language object from the pre-compiled crate.
 pub fn get_language(lang: SupportedLanguage) -> Language {
     match lang {
         SupportedLanguage::Rust => tree_sitter_rust::LANGUAGE.into(),
@@ -29,16 +27,16 @@ pub fn get_language(lang: SupportedLanguage) -> Language {
     }
 }
 
-// A struct to hold all language-specific configurations.
 pub struct LanguageConfig {
     pub lang_enum: SupportedLanguage,
     pub file_extensions: &'static [&'static str],
     pub query_defs: &'static str,
     pub query_calls: &'static str,
     pub query_docs: &'static str,
+    pub query_imports: &'static str, // New field
 }
 
-// --- Existing Configurations ---
+// --- Configurations ---
 
 pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
     lang_enum: SupportedLanguage::Rust,
@@ -63,6 +61,7 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
           (function_item) @function.definition
         )
     "#,
+    query_imports: "", // Rust imports (use) are complex, skipping for now
 };
 
 pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
@@ -95,6 +94,19 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             (export_statement (variable_declaration))
         ] @function.definition
       )
+    "#,
+    // FIXED: import_clause comes BEFORE source in the grammar
+    query_imports: r#"
+        (import_statement
+            (import_clause
+                (named_imports
+                    (import_specifier
+                        name: (identifier) @import.name
+                    )
+                )
+            )
+            source: (string) @import.source
+        )
     "#,
 };
 
@@ -129,6 +141,19 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
         ] @function.definition
       )
     "#,
+    // FIXED: import_clause comes BEFORE source
+    query_imports: r#"
+        (import_statement
+            (import_clause
+                (named_imports
+                    (import_specifier
+                        name: (identifier) @import.name
+                    )
+                )
+            )
+            source: (string) @import.source
+        )
+    "#,
 };
 
 pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
@@ -142,11 +167,11 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
         (call
           function: [(identifier) @call.name (attribute attribute: (identifier) @call.name)])
     "#,
-    // Catches docstrings
     query_docs: r#"
         (function_definition
           body: (block . (expression_statement (string) @function.docs))) @function.definition
     "#,
+    query_imports: "", // TODO: Add python import parsing
 };
 
 pub const JAVA_CONFIG: LanguageConfig = LanguageConfig {
@@ -167,6 +192,7 @@ pub const JAVA_CONFIG: LanguageConfig = LanguageConfig {
           (method_declaration) @function.definition
         )
     "#,
+    query_imports: "",
 };
 
 pub const BASH_CONFIG: LanguageConfig = LanguageConfig {
@@ -176,7 +202,6 @@ pub const BASH_CONFIG: LanguageConfig = LanguageConfig {
         (function_definition
           name: (word) @function.name) @function.definition
     "#,
-    // This is a best-effort for bash, as commands can be complex
     query_calls: r#"
         (command
           name: (command_name (word) @call.name))
@@ -188,6 +213,7 @@ pub const BASH_CONFIG: LanguageConfig = LanguageConfig {
           (function_definition) @function.definition
         )
     "#,
+    query_imports: "",
 };
 
 pub const JULIA_CONFIG: LanguageConfig = LanguageConfig {
@@ -208,6 +234,7 @@ pub const JULIA_CONFIG: LanguageConfig = LanguageConfig {
           (function_definition) @function.definition
         )
     "#,
+    query_imports: "",
 };
 
 pub const R_CONFIG: LanguageConfig = LanguageConfig {
@@ -228,11 +255,9 @@ pub const R_CONFIG: LanguageConfig = LanguageConfig {
           (function_definition) @function.definition
         )
     "#,
+    query_imports: "",
 };
 
-// NOTE: Parsing function calls from HTML is non-trivial. This implementation
-// will only find globally-defined JavaScript functions within <script> tags.
-// It will not parse inline event handlers or complex module scripts effectively.
 pub const HTML_CONFIG: LanguageConfig = LanguageConfig {
     lang_enum: SupportedLanguage::Html,
     file_extensions: &["html", "htm"],
@@ -257,10 +282,9 @@ pub const HTML_CONFIG: LanguageConfig = LanguageConfig {
         (function_declaration) @function.definition
       )
     "#,
+    query_imports: "",
 };
 
-
-// A central list of all supported language configurations.
 pub fn get_language_configs() -> Vec<&'static LanguageConfig> {
     vec![
         &RUST_CONFIG,

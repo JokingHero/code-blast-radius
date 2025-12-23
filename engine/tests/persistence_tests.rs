@@ -2,9 +2,8 @@ mod common;
 use common::TestWorkspace;
 use rfc_engine::indexer::Indexer;
 
-// Helper to check for function presence by name
-fn has_func(graph: &rfc_engine::analyzer::CodebaseGraph, name: &str) -> bool {
-    graph.values().any(|f| f.name == name)
+fn has_func(index: &rfc_engine::schema::WorkspaceIndex, name: &str) -> bool {
+    index.symbol_map.contains_key(name)
 }
 
 #[test]
@@ -20,8 +19,8 @@ fn test_persistence_lifecycle() {
     {
         let mut indexer = Indexer::new();
         indexer.scan(&workspace.path);
-        let graph = indexer.export_graph();
-        assert!(has_func(&graph, "add"), "Initial scan failed to find 'add'");
+        indexer.resolve_references(); // Good practice to resolve before save
+        assert!(has_func(&indexer.index, "add"), "Initial scan failed to find 'add'");
         indexer.save(&index_file).expect("Failed to save index");
     }
 
@@ -29,8 +28,7 @@ fn test_persistence_lifecycle() {
     {
         let loaded_indexer = Indexer::load_from_file(&index_file)
             .expect("Failed to load index");
-        let graph = loaded_indexer.export_graph();
-        assert!(has_func(&graph, "add"), "Loaded index missing 'add' function");
+        assert!(has_func(&loaded_indexer.index, "add"), "Loaded index missing 'add' function");
     }
 }
 
@@ -53,15 +51,14 @@ fn test_incremental_updates() {
 
     {
         let mut indexer = Indexer::load_from_file(&index_file).unwrap();
-        let old_graph = indexer.export_graph();
-        assert!(has_func(&old_graph, "init_system"));
-        assert!(!has_func(&old_graph, "helper"));
+        
+        assert!(has_func(&indexer.index, "init_system"));
+        assert!(!has_func(&indexer.index, "helper"));
 
         indexer.scan(&workspace.path);
 
-        let new_graph = indexer.export_graph();
-        assert!(has_func(&new_graph, "helper"), "Incremental scan missed new file");
-        assert!(has_func(&new_graph, "init_system_v2"), "Incremental scan missed modified function");
+        assert!(has_func(&indexer.index, "helper"), "Incremental scan missed new file");
+        assert!(has_func(&indexer.index, "init_system_v2"), "Incremental scan missed modified function");
     }
 }
 

@@ -3,6 +3,7 @@ use crate::analyzer::analyze_source;
 use crate::language::{get_language_configs, LanguageConfig};
 
 use std::path::{Path, PathBuf};
+
 use std::fs::{self, File};
 use std::io::Write;
 use std::collections::{HashMap, HashSet};
@@ -55,20 +56,14 @@ impl Indexer {
         Ok(Self { index, configs: config_map })
     }
 
-    /// Removes all symbols, calls, and map entries associated with a specific file ID.
     fn clear_file_symbols(&mut self, file_id: u32) {
-        // 1. Find all Symbol IDs belonging to this file
-        // Note: In a production DB, we would have a reverse index for this.
-        // For now, iterating the symbol table is acceptable.
         let ids_to_remove: Vec<u32> = self.index.symbols.values()
             .filter(|s| s.file_id == file_id)
             .map(|s| s.id)
             .collect();
 
         for sym_id in ids_to_remove {
-            // Remove from main storage
             if let Some(sym) = self.index.symbols.remove(&sym_id) {
-                // Remove from name map (Reverse Index)
                 if let Some(id_list) = self.index.symbol_map.get_mut(&sym.name) {
                     id_list.retain(|&id| id != sym_id);
                     if id_list.is_empty() {
@@ -76,9 +71,14 @@ impl Indexer {
                     }
                 }
             }
-            // Remove from calls
-            self.index.calls.remove(&sym_id);
+            // Clear raw calls
+            self.index.raw_calls.remove(&sym_id);
+            // Clear resolved calls (though cleaning strictly involves iterating everything, 
+            // orphan IDs are acceptable for now)
+            self.index.resolved_calls.remove(&sym_id);
         }
+        // Clear imports
+        self.index.file_imports.remove(&file_id);
     }
 
     pub fn scan(&mut self, root: &Path) {
@@ -100,8 +100,6 @@ impl Indexer {
 
                     seen_paths.insert(path_str.clone());
 
-                    // Check if file is new or changed
-                    // We map to bool to drop the borrow immediately
                     let needs_update = match self.index.files.get(&path_str) {
                         Some(node) => node.hash != hash_bytes,
                         None => true, 
@@ -114,16 +112,13 @@ impl Indexer {
             }
         }
 
+        // Handle Deletions
         let all_known_paths: Vec<String> = self.index.files.keys().cloned().collect();
-        
         for path in all_known_paths {
             if !seen_paths.contains(&path) {
-                println!("Detected deletion: {}", path);
-                // This returns Option<u32> and drops the borrow of self.index.files immediately.
                 let id_to_remove = self.index.files.get(&path).map(|node| node.id);
-                
                 if let Some(id) = id_to_remove {
-                    self.clear_file_symbols(id); // no active borrow
+                    self.clear_file_symbols(id); 
                     self.index.files.remove(&path);
                 }
             }
@@ -138,30 +133,30 @@ impl Indexer {
         hash: [u8; 32], 
         config: &LanguageConfig
     ) {
-        // 1. Determine File ID
-        // FIX: Check existence and get ID without holding the borrow into the 'if' block
         let existing_id = self.index.files.get(path_key).map(|node| node.id);
 
         let file_id = if let Some(id) = existing_id {
-            // ISSUE B Fix: File exists, clear old symbols
-            self.clear_file_symbols(id); // Safe now
+            self.clear_file_symbols(id); 
             id
         } else {
-            // New file, generate new ID
             self.index.files.len() as u32
         };
 
-        // 2. Update/Insert File Node
         self.index.files.insert(path_key.to_string(), FileNode {
             id: file_id,
             path: path_key.to_string(),
             hash,
         });
 
-        // 3. Parse and Store New Symbols
-        if let Ok(functions) = analyze_source(path_obj, content, config) {
-            for func in functions {
-                // Safe ID generation
+        if let Ok(analysis) = analyze_source(path_obj, content, config) {
+            
+            // 1. Store Imports
+            if !analysis.imports.is_empty() {
+                self.index.file_imports.insert(file_id, analysis.imports);
+            }
+
+            // 2. Store Functions
+            for func in analysis.functions {
                 let symbol_id = self.index.symbols.keys().max().map(|k| k + 1).unwrap_or(0);
 
                 let node = SymbolNode {
@@ -169,8 +164,8 @@ impl Indexer {
                     file_id,
                     name: func.name.clone(),
                     kind: "function".to_string(),
-                    range_start: 0, 
-                    range_end: 0,
+                    range_start: func.range_start,
+                    range_end: func.range_end,
                     doc_comment: func.documentation,
                 };
 
@@ -180,32 +175,128 @@ impl Indexer {
                     .or_insert_with(Vec::new)
                     .push(symbol_id);
 
-                self.index.calls.insert(symbol_id, func.calls);
+                // Store raw calls for the Resolution phase
+                if !func.calls.is_empty() {
+                    self.index.raw_calls.insert(symbol_id, func.calls);
+                }
             }
         }
     }
-    
-    pub fn export_graph(&self) -> crate::analyzer::CodebaseGraph {
-        let mut graph = crate::analyzer::CodebaseGraph::new();
 
-        for (_id, sym) in &self.index.symbols {
-            let calls = self.index.calls.get(&sym.id).cloned().unwrap_or_default();
+    // --- RESOLUTION LOGIC ---
+
+    /// Converts raw string calls into concrete Symbol IDs based on imports.
+    pub fn resolve_references(&mut self) {
+        self.index.resolved_calls.clear();
+
+        // Clone entries to iterate while mutating the index
+        let entries: Vec<(u32, Vec<String>)> = self.index.raw_calls.iter()
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+
+        for (caller_id, called_names) in entries {
+            let caller_sym = self.index.symbols.get(&caller_id).unwrap();
+            let caller_file_id = caller_sym.file_id;
             
-            if let Some(file_node) = self.index.files.values().find(|f| f.id == sym.file_id) {
-                // ISSUE C FIX: Create a Unique Key for the graph
-                // Format: "path::function_name"
-                // This ensures 'utils.ts::add' and 'math.ts::add' coexist.
-                let unique_key = format!("{}::{}", file_node.path, sym.name);
+            let mut resolved_targets = Vec::new();
 
-                 graph.insert(unique_key, crate::analyzer::FunctionInfo {
-                    name: sym.name.clone(), // We keep the short name for matching calls
-                    file_path: PathBuf::from(&file_node.path),
-                    source_code: "TODO".to_string(), 
-                    documentation: sym.doc_comment.clone(),
-                    calls,
-                 });
+            for func_name in called_names {
+                // 1. Local File Check
+                // 2. Import Check
+                if let Some(target_id) = self.resolve_single_call(caller_file_id, &func_name) {
+                    resolved_targets.push(target_id);
+                } else {
+                    // 3. Global Fallback (Loose Mode)
+                    // If semantic resolution failed, find anything with that name.
+                    if let Some(candidates) = self.index.symbol_map.get(&func_name) {
+                        resolved_targets.extend(candidates.iter().cloned());
+                    }
+                }
+            }
+            
+            // Deduplicate
+            resolved_targets.sort();
+            resolved_targets.dedup();
+            
+            if !resolved_targets.is_empty() {
+                self.index.resolved_calls.insert(caller_id, resolved_targets);
             }
         }
-        graph
+    }
+
+    fn resolve_single_call(&self, file_id: u32, func_name: &str) -> Option<u32> {
+        // 1. Check Local File
+        if let Some(candidates) = self.index.symbol_map.get(func_name) {
+            for &id in candidates {
+                if let Some(sym) = self.index.symbols.get(&id) {
+                    if sym.file_id == file_id {
+                        return Some(id);
+                    }
+                }
+            }
+        }
+
+        // 2. Check Imports
+        if let Some(imports) = self.index.file_imports.get(&file_id) {
+            for import in imports {
+                if import.name == func_name {
+                    // Try to find the file `import.source` points to
+                    if let Some(target_file_id) = self.resolve_import_path(file_id, &import.source) {
+                        // Look for func_name inside target_file_id
+                        if let Some(candidates) = self.index.symbol_map.get(func_name) {
+                            for &id in candidates {
+                                if let Some(sym) = self.index.symbols.get(&id) {
+                                    if sym.file_id == target_file_id {
+                                        return Some(id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn resolve_import_path(&self, from_file_id: u32, import_source: &str) -> Option<u32> {
+        let from_file_node = self.index.files.values().find(|f| f.id == from_file_id)?;
+        let from_path = Path::new(&from_file_node.path);
+        let parent_dir = from_path.parent()?;
+
+        let extensions = ["ts", "js", "tsx", "jsx", "rs", "py"];
+        
+        let candidate_base = parent_dir.join(import_source);
+        
+        // Helper to check if a path exists in our index
+        // We use fs::canonicalize to resolve "." and ".." if the file actually exists on disk.
+        // Since WalkDir returns absolute paths in tests, this ensures we match keys.
+        let check_path = |p: PathBuf| -> Option<u32> {
+            let target = if p.exists() {
+                fs::canonicalize(&p).ok().map(|c| c.to_string_lossy().to_string())?
+            } else {
+                p.to_string_lossy().to_string()
+            };
+            self.index.files.get(&target).map(|n| n.id)
+        };
+
+        // Try file.ts
+        for ext in extensions {
+             let candidate = candidate_base.with_extension(ext);
+             if let Some(id) = check_path(candidate) {
+                 return Some(id);
+             }
+        }
+        
+        // Try file/index.ts
+        let index_base = candidate_base.join("index");
+        for ext in extensions {
+             let candidate = index_base.with_extension(ext);
+             if let Some(id) = check_path(candidate) {
+                 return Some(id);
+             }
+        }
+
+        None
     }
 }

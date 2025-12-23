@@ -4,7 +4,7 @@ use std::process;
 use std::time::Instant;
 
 use rfc_engine::indexer::Indexer;
-use rfc_engine::analyzer::{find_call_chain, generate_context};
+use rfc_engine::analyzer::{find_call_chain_ids, generate_context_from_ids};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -27,11 +27,9 @@ fn main() {
         process::exit(1);
     }
 
-    println!("--- Reverse Flow Context ---");
+    println!("--- Reverse Flow Context (Semantic) ---");
     println!("Target: {:?}", cli.path);
     
-    // Define the index file path (e.g., inside the repo or a global cache)
-    // For now, we put it in the root of the scanned folder for simplicity
     let index_path = cli.path.join(".index");
     
     // 1. Load or Initialize Indexer
@@ -48,27 +46,30 @@ fn main() {
     };
     
     // 2. Scan (Incremental)
-    // If loaded, this only parses files where the hash changed.
     let start_scan = Instant::now();
     indexer.scan(&cli.path);
     println!("Scan complete in {:.2?}", start_scan.elapsed());
 
-    // 3. Save Index (Persistence)
+    // 3. Resolve References (The Linking Phase)
+    let start_resolve = Instant::now();
+    indexer.resolve_references();
+    println!("Resolution complete in {:.2?}", start_resolve.elapsed());
+
+    // 4. Save Index (Persistence)
     if let Err(e) = indexer.save(&index_path) {
         eprintln!("Warning: Failed to save index: {}", e);
     } else {
         println!("Index saved to {:?}", index_path);
     }
     
-    // 4. Export & Logic
-    let graph = indexer.export_graph();
-    println!("Graph contains {} functions.", graph.len());
-
     println!("Finding call chain for `{}`...", cli.function_name);
-    if let Some(chain) = find_call_chain(&graph, &cli.function_name) {
-        println!("Call chain found: {}", chain.join(" -> "));
+    
+    // 5. Logic: Use ID-based lookup
+    // We pass the entire index, as we need to jump between resolved IDs and file content
+    if let Some(chain_ids) = find_call_chain_ids(&indexer.index, &cli.function_name) {
+        println!("Call chain found with {} functions.", chain_ids.len());
         
-        let context = generate_context(&graph, &chain, cli.include_docs);
+        let context = generate_context_from_ids(&indexer.index, &chain_ids, cli.include_docs);
         println!("\n--- Generated Context ---\n");
         println!("{}", context);
     } else {
