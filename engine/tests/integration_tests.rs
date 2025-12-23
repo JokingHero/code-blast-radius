@@ -3,7 +3,6 @@ use common::TestWorkspace;
 
 use rfc_engine::indexer::Indexer;
 use rfc_engine::analyzer::find_call_chain;
-// We don't need build_codebase_graph import anymore
 
 #[test]
 fn test_typescript_call_chain() {
@@ -27,11 +26,9 @@ fn test_typescript_call_chain() {
         }
     "#);
 
-    // --- CHANGED LOGIC HERE ---
     let mut indexer = Indexer::new();
     indexer.scan(&workspace.path);
     let graph = indexer.export_graph();
-    // --------------------------
 
     assert!(graph.contains_key("add"), "Function 'add' was not found in graph");
     assert!(graph.contains_key("calculateTotal"), "Function 'calculateTotal' was not found");

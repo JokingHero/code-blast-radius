@@ -1,8 +1,8 @@
 use clap::Parser;
 use std::path::PathBuf;
 use std::process;
+use std::time::Instant;
 
-// Use the new Indexer instead of analyzer directly
 use rfc_engine::indexer::Indexer;
 use rfc_engine::analyzer::{find_call_chain, generate_context};
 
@@ -28,20 +28,42 @@ fn main() {
     }
 
     println!("--- Reverse Flow Context ---");
-    println!("Scanning: {:?}", cli.path);
+    println!("Target: {:?}", cli.path);
     
-    // 1. Initialize Indexer
-    let mut indexer = Indexer::new();
+    // Define the index file path (e.g., inside the repo or a global cache)
+    // For now, we put it in the root of the scanned folder for simplicity
+    let index_path = cli.path.join(".index");
     
-    // 2. Scan (this hashes files and parses only what is needed)
+    // 1. Load or Initialize Indexer
+    let start_load = Instant::now();
+    let mut indexer = match Indexer::load_from_file(&index_path) {
+        Ok(idx) => {
+            println!("Index loaded in {:.2?}", start_load.elapsed());
+            idx
+        },
+        Err(e) => {
+            eprintln!("Failed to load index (starting fresh): {}", e);
+            Indexer::new()
+        }
+    };
+    
+    // 2. Scan (Incremental)
+    // If loaded, this only parses files where the hash changed.
+    let start_scan = Instant::now();
     indexer.scan(&cli.path);
-    
-    // 3. Export to the simple graph format for now (Bridge to old logic)
-    let graph = indexer.export_graph();
-    
-    println!("Graph built. Found {} functions.", graph.len());
+    println!("Scan complete in {:.2?}", start_scan.elapsed());
 
-    // 4. Find the chain
+    // 3. Save Index (Persistence)
+    if let Err(e) = indexer.save(&index_path) {
+        eprintln!("Warning: Failed to save index: {}", e);
+    } else {
+        println!("Index saved to {:?}", index_path);
+    }
+    
+    // 4. Export & Logic
+    let graph = indexer.export_graph();
+    println!("Graph contains {} functions.", graph.len());
+
     println!("Finding call chain for `{}`...", cli.function_name);
     if let Some(chain) = find_call_chain(&graph, &cli.function_name) {
         println!("Call chain found: {}", chain.join(" -> "));
