@@ -18,70 +18,75 @@ pub struct Indexer {
 
 impl Indexer {
     pub fn new() -> Self {
+        // ... same as before ...
         let mut config_map = HashMap::new();
         for config in get_language_configs() {
             for ext in config.file_extensions {
                 config_map.insert(ext.to_string(), config);
             }
         }
-
-        Self { 
-            index: WorkspaceIndex::default(),
-            configs: config_map 
-        }
+        Self { index: WorkspaceIndex::default(), configs: config_map }
     }
 
-    /// Serializes the in-memory index to disk using rkyv
+    // ... save() and load_from_file() remain the same ...
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
-        // Serialize to a bytes vector (rkyv handles alignment)
         let bytes = to_bytes::<_, 4096>(&self.index)
             .map_err(|e| anyhow::anyhow!("Serialization failed: {}", e))?;
-
         let mut file = File::create(path)?;
         file.write_all(&bytes)?;
         Ok(())
     }
 
-    /// Memory-maps the file and deserializes it back into a WorkspaceIndex
     pub fn load_from_file(path: &Path) -> anyhow::Result<Self> {
-        if !path.exists() {
-            return Ok(Self::new());
-        }
-
+        if !path.exists() { return Ok(Self::new()); }
         let file = File::open(path)?;
-        // Safety: We assume the file is not modified externally while mapped.
-        // For a CLI tool running in short bursts, this is generally acceptable.
         let mmap = unsafe { MmapOptions::new().map(&file)? };
-
-        // 1. Check integrity (Zero-copy check)
         if let Err(e) = check_archived_root::<WorkspaceIndex>(&mmap[..]) {
-            eprintln!("Index corrupted or incompatible, starting fresh: {}", e);
+            eprintln!("Index corrupted: {}", e);
             return Ok(Self::new());
         }
-
-        // 2. Deserialize to Heap (Deep Copy)
-        // We do this because we need to Mutate the index (add new files/symbols).
-        // If we only needed read-access, we could just use the mmap directly.
-        let index: WorkspaceIndex = unsafe {
-            rkyv::from_bytes_unchecked(&mmap[..])
-                .map_err(|e| anyhow::anyhow!("Deserialization failed: {}", e))?
+        let index: WorkspaceIndex = unsafe { 
+            rkyv::from_bytes_unchecked(&mmap[..]).map_err(|e| anyhow::anyhow!(e))? 
         };
-
         let mut config_map = HashMap::new();
         for config in get_language_configs() {
             for ext in config.file_extensions {
                 config_map.insert(ext.to_string(), config);
             }
         }
+        Ok(Self { index, configs: config_map })
+    }
 
-        Ok(Self {
-            index,
-            configs: config_map,
-        })
+    // --- FIX STARTS HERE ---
+
+    /// Removes all symbols, calls, and map entries associated with a specific file ID.
+    fn clear_file_symbols(&mut self, file_id: u32) {
+        // 1. Find all Symbol IDs belonging to this file
+        // Note: In a production DB, we would have a reverse index for this.
+        // For now, iterating the symbol table is acceptable.
+        let ids_to_remove: Vec<u32> = self.index.symbols.values()
+            .filter(|s| s.file_id == file_id)
+            .map(|s| s.id)
+            .collect();
+
+        for sym_id in ids_to_remove {
+            // Remove from main storage
+            if let Some(sym) = self.index.symbols.remove(&sym_id) {
+                // Remove from name map (Reverse Index)
+                if let Some(id_list) = self.index.symbol_map.get_mut(&sym.name) {
+                    id_list.retain(|&id| id != sym_id);
+                    if id_list.is_empty() {
+                        self.index.symbol_map.remove(&sym.name);
+                    }
+                }
+            }
+            // Remove from calls
+            self.index.calls.remove(&sym_id);
+        }
     }
 
     pub fn scan(&mut self, root: &Path) {
-        let mut seen_files = HashSet::new();
+        let mut seen_paths = HashSet::new();
 
         for entry in WalkDir::new(root)
             .into_iter()
@@ -97,9 +102,10 @@ impl Indexer {
                     let hash_bytes: [u8; 32] = hash.into();
                     let path_str = path.to_string_lossy().to_string();
 
-                    seen_files.insert(path_str.clone());
+                    seen_paths.insert(path_str.clone());
 
                     // Check if file is new or changed
+                    // We map to bool to drop the borrow immediately
                     let needs_update = match self.index.files.get(&path_str) {
                         Some(node) => node.hash != hash_bytes,
                         None => true, 
@@ -108,6 +114,21 @@ impl Indexer {
                     if needs_update {
                         self.update_file(&path_str, path, &content, hash_bytes, config);
                     }
+                }
+            }
+        }
+
+        let all_known_paths: Vec<String> = self.index.files.keys().cloned().collect();
+        
+        for path in all_known_paths {
+            if !seen_paths.contains(&path) {
+                println!("Detected deletion: {}", path);
+                // This returns Option<u32> and drops the borrow of self.index.files immediately.
+                let id_to_remove = self.index.files.get(&path).map(|node| node.id);
+                
+                if let Some(id) = id_to_remove {
+                    self.clear_file_symbols(id); // no active borrow
+                    self.index.files.remove(&path);
                 }
             }
         }
@@ -121,32 +142,38 @@ impl Indexer {
         hash: [u8; 32], 
         config: &LanguageConfig
     ) {
-        // 1. Get or Create File ID
-        let file_id = if let Some(node) = self.index.files.get(path_key) {
-            node.id
+        // 1. Determine File ID
+        // FIX: Check existence and get ID without holding the borrow into the 'if' block
+        let existing_id = self.index.files.get(path_key).map(|node| node.id);
+
+        let file_id = if let Some(id) = existing_id {
+            // ISSUE B Fix: File exists, clear old symbols
+            self.clear_file_symbols(id); // Safe now
+            id
         } else {
+            // New file, generate new ID
             self.index.files.len() as u32
         };
 
+        // 2. Update/Insert File Node
         self.index.files.insert(path_key.to_string(), FileNode {
             id: file_id,
             path: path_key.to_string(),
             hash,
         });
 
-        // 2. Parse Symbols
-        // Note: Currently we append. In a real system, we'd need to clear 
-        // old symbols associated with `file_id` before adding new ones.
+        // 3. Parse and Store New Symbols
         if let Ok(functions) = analyze_source(path_obj, content, config) {
             for func in functions {
-                let symbol_id = self.index.symbols.len() as u32;
-                
+                // Safe ID generation
+                let symbol_id = self.index.symbols.keys().max().map(|k| k + 1).unwrap_or(0);
+
                 let node = SymbolNode {
                     id: symbol_id,
                     file_id,
                     name: func.name.clone(),
                     kind: "function".to_string(),
-                    range_start: 0,
+                    range_start: 0, 
                     range_end: 0,
                     doc_comment: func.documentation,
                 };
@@ -161,18 +188,16 @@ impl Indexer {
             }
         }
     }
-
+    
     pub fn export_graph(&self) -> crate::analyzer::CodebaseGraph {
         let mut graph = crate::analyzer::CodebaseGraph::new();
-
         for (_id, sym) in &self.index.symbols {
             let calls = self.index.calls.get(&sym.id).cloned().unwrap_or_default();
-            
             if let Some(file_node) = self.index.files.values().find(|f| f.id == sym.file_id) {
                  graph.insert(sym.name.clone(), crate::analyzer::FunctionInfo {
                     name: sym.name.clone(),
                     file_path: PathBuf::from(&file_node.path),
-                    source_code: String::new(), // optimized out for graph
+                    source_code: "TODO".to_string(), 
                     documentation: sym.doc_comment.clone(),
                     calls,
                  });
