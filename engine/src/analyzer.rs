@@ -87,50 +87,85 @@ pub fn analyze_source(
     Ok(functions)
 }
 
-pub fn find_call_chain(graph: &CodebaseGraph, target_function: &str) -> Option<Vec<String>> {
-    if !graph.contains_key(target_function) {
+pub fn find_call_chain(graph: &CodebaseGraph, target_name: &str) -> Option<Vec<String>> {
+    // 1. Find all nodes that match the target name (Handling Collisions)
+    // The keys are now "path::name", so we can't do a direct lookup.
+    // We filter the graph values.
+    let target_keys: Vec<String> = graph.iter()
+        .filter(|(_, info)| info.name == target_name)
+        .map(|(key, _)| key.clone())
+        .collect();
+
+    if target_keys.is_empty() {
         return None;
     }
 
-    // Fix: Explicitly type the HashMap so compiler doesn't panic on "unknown type"
+    // Predecessors map: Child Key -> Parent Key
     let mut predecessors: HashMap<String, String> = HashMap::new();
     let mut queue = VecDeque::new();
     let mut visited = HashSet::new();
-    
-    queue.push_back(target_function.to_string());
-    visited.insert(target_function.to_string());
 
-    while let Some(current_func) = queue.pop_front() {
-        for (caller_name, caller_info) in graph.iter() {
-            if caller_info.calls.contains(&current_func) && !visited.contains(caller_name) {
-                visited.insert(caller_name.clone());
-                predecessors.insert(current_func.clone(), caller_name.clone());
-                queue.push_back(caller_name.clone());
+    // Initialize queue with ALL matching targets
+    // Example: if we look for "init", we start with "db.rs::init" AND "log.rs::init"
+    for key in &target_keys {
+        queue.push_back(key.clone());
+        visited.insert(key.clone());
+    }
+
+    while let Some(current_key) = queue.pop_front() {
+        // We need the Short Name of the current node to check if others call it.
+        // But wait, the `calls` list contains Short Names (e.g. "init").
+        // So we need to check: Does Caller have "init" in its calls list?
+        // AND does current_node.name == "init"? 
+        // Yes, this is implicit because we are traversing *up*.
+        
+        let current_short_name = &graph.get(&current_key)?.name;
+
+        for (caller_key, caller_info) in graph.iter() {
+            // Check if this caller calls our current function (by short name)
+            // Note: This is "Loose Resolution". If main() calls "init", 
+            // and we have DB::init and Log::init, main() becomes a parent of BOTH.
+            // This is desired behavior for a context tool (show all possibilities).
+            if caller_info.calls.contains(current_short_name) && !visited.contains(caller_key) {
+                visited.insert(caller_key.clone());
+                
+                // Record path
+                predecessors.insert(current_key.clone(), caller_key.clone());
+                
+                queue.push_back(caller_key.clone());
             }
         }
     }
-
-    let mut root_node = target_function.to_string();
-    while let Some(parent) = predecessors.get(&root_node) {
-        root_node = parent.clone();
-    }
-
-    let inverted_predecessors: HashMap<String, String> =
-        predecessors.into_iter().map(|(k, v)| (v, k)).collect();
-
-    let mut path = vec![root_node.clone()];
-    let mut current = root_node;
     
-    // Fix: explicitly hint types here implicitly by usage, but predecessors logic is fixed now
-    while let Some(child) = inverted_predecessors.get(&current) {
-        path.push(child.clone());
-        if child == target_function {
+    let mut path = Vec::new();
+    
+    // Find a node that we reached (is in `visited`) and is likely a Root.
+    // We can just iterate `predecessors` to build a full chain.
+    // Let's try to find a chain from a Root to ONE of our targets.
+    
+    let mut current = target_keys[0].clone(); // Start at a target
+    // If we have predecessors for this target, trace up.
+    // If not, maybe another target has predecessors?
+    
+    for t in &target_keys {
+        if predecessors.contains_key(t) {
+            current = t.clone();
             break;
         }
-        current = child.clone();
     }
     
-    if path.last().map_or(true, |p| p != target_function) && target_function != path.first().unwrap() {
+    // Trace upwards (Target -> Caller -> Caller)
+    path.push(current.clone());
+    while let Some(parent) = predecessors.get(&current) {
+        path.push(parent.clone());
+        current = parent.clone();
+    }
+    
+    // The path is now [Target, Caller, Root]. Reverse it for display [Root, Caller, Target].
+    path.reverse();
+    
+    // Verify valid chain
+    if path.len() == 1 && !target_keys.contains(&path[0]) {
         return None;
     }
 
@@ -143,9 +178,14 @@ pub fn generate_context(
     include_docs: bool,
 ) -> String {
     let mut context = String::new();
+    
+    // Extract short name for display
+    let target_key = chain.last().unwrap();
+    let target_name = graph.get(target_key).map(|i| i.name.as_str()).unwrap_or(target_key);
+
     context.push_str(&format!(
         "// Context for function: `{}`\n",
-        chain.last().unwrap()
+        target_name
     ));
     context.push_str(&format!("// Call Chain: {}\n\n", chain.join(" -> ")));
 

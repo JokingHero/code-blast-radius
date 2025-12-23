@@ -17,7 +17,8 @@ fn test_ghost_data_removal() {
         indexer.save(&index_file).unwrap();
         
         let graph = indexer.export_graph();
-        assert!(graph.contains_key("old_function"), "Setup failed: old_function not found");
+        // FIX: Check values().any() instead of contains_key
+        assert!(graph.values().any(|f| f.name == "old_function"), "Setup failed: old_function not found");
     }
 
     // 2. Modification: Change 'old_function' to 'new_function'
@@ -29,8 +30,10 @@ fn test_ghost_data_removal() {
         indexer.scan(&workspace.path);
         
         let graph = indexer.export_graph();
-        assert!(graph.contains_key("new_function"), "New function not found");
-        assert!(!graph.contains_key("old_function"), "Ghost Data: old_function still exists after rename!");
+        
+        // FIX: Check values().any()
+        assert!(graph.values().any(|f| f.name == "new_function"), "New function not found");
+        assert!(!graph.values().any(|f| f.name == "old_function"), "Ghost Data: old_function still exists after rename!");
     }
 
     // 3. Deletion: Remove 'temp.js' entirely
@@ -42,7 +45,9 @@ fn test_ghost_data_removal() {
         indexer.scan(&workspace.path);
         
         let graph = indexer.export_graph();
-        assert!(!graph.contains_key("new_function"), "Ghost Data: function still exists after file deletion!");
+        
+        // FIX: Check values().any()
+        assert!(!graph.values().any(|f| f.name == "new_function"), "Ghost Data: function still exists after file deletion!");
         assert!(graph.is_empty(), "Graph should be empty");
     }
 }

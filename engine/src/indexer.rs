@@ -18,7 +18,6 @@ pub struct Indexer {
 
 impl Indexer {
     pub fn new() -> Self {
-        // ... same as before ...
         let mut config_map = HashMap::new();
         for config in get_language_configs() {
             for ext in config.file_extensions {
@@ -28,7 +27,6 @@ impl Indexer {
         Self { index: WorkspaceIndex::default(), configs: config_map }
     }
 
-    // ... save() and load_from_file() remain the same ...
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         let bytes = to_bytes::<_, 4096>(&self.index)
             .map_err(|e| anyhow::anyhow!("Serialization failed: {}", e))?;
@@ -56,8 +54,6 @@ impl Indexer {
         }
         Ok(Self { index, configs: config_map })
     }
-
-    // --- FIX STARTS HERE ---
 
     /// Removes all symbols, calls, and map entries associated with a specific file ID.
     fn clear_file_symbols(&mut self, file_id: u32) {
@@ -191,11 +187,18 @@ impl Indexer {
     
     pub fn export_graph(&self) -> crate::analyzer::CodebaseGraph {
         let mut graph = crate::analyzer::CodebaseGraph::new();
+
         for (_id, sym) in &self.index.symbols {
             let calls = self.index.calls.get(&sym.id).cloned().unwrap_or_default();
+            
             if let Some(file_node) = self.index.files.values().find(|f| f.id == sym.file_id) {
-                 graph.insert(sym.name.clone(), crate::analyzer::FunctionInfo {
-                    name: sym.name.clone(),
+                // ISSUE C FIX: Create a Unique Key for the graph
+                // Format: "path::function_name"
+                // This ensures 'utils.ts::add' and 'math.ts::add' coexist.
+                let unique_key = format!("{}::{}", file_node.path, sym.name);
+
+                 graph.insert(unique_key, crate::analyzer::FunctionInfo {
+                    name: sym.name.clone(), // We keep the short name for matching calls
                     file_path: PathBuf::from(&file_node.path),
                     source_code: "TODO".to_string(), 
                     documentation: sym.doc_comment.clone(),
