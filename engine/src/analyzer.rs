@@ -14,6 +14,9 @@ pub struct FunctionInfo {
     pub documentation: Option<String>,
     pub calls: Vec<String>, 
     pub fingerprints: HashMap<String, Vec<String>>,
+    pub return_type: Option<String>, 
+    pub local_types: HashMap<String, String>, // var_name -> TypeName
+    pub local_assigns: HashMap<String, String>, // var_name -> FuncName
 }
 
 pub struct FileAnalysis {
@@ -21,6 +24,7 @@ pub struct FileAnalysis {
     pub imports: Vec<ImportNode>,
     pub literals: Vec<String>,
     pub implementations: Vec<(String, String)>, 
+    pub global_vars: HashMap<String, String>, // Added this
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -30,12 +34,11 @@ pub enum SliceDirection {
     Both,
 }
 
-/// Internal helper for find_related_symbols to prevent zig-zag pollution
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum TraversalMode {
-    Downstream, // Looking at what we use
-    Upstream,   // Looking at who uses us
-    Both,       // Initial state
+    Downstream,
+    Upstream,
+    Both,
 }
 
 pub fn analyze_source(
@@ -51,163 +54,203 @@ pub fn analyze_source(
     
     if source_code.trim().is_empty() {
         return Ok(FileAnalysis { 
-            functions: vec![], 
-            imports: vec![], 
-            literals: vec![], 
-            implementations: vec![] 
+            functions: vec![], imports: vec![], literals: vec![], 
+            implementations: vec![], global_vars: HashMap::new() 
         });
     }
 
     let tree = parser.parse(source_code, None).ok_or("Failed to parse code")?;
-
-    // --- 1. Extract Imports ---
     let mut imports = Vec::new();
-    if !config.query_imports.is_empty() {
-        let imports_query = Query::new(&language, config.query_imports).expect("Invalid imports query");
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&imports_query, tree.root_node(), code_bytes);
-
-        while let Some(match_) = matches.next() {
-            let mut current_source = String::new();
-            let mut current_name = String::new();
-
-            for capture in match_.captures {
-                let capture_name = imports_query.capture_names()[capture.index as usize];
-                let text = capture.node.utf8_text(code_bytes).unwrap_or("").to_string();
-
-                if capture_name == "import.source" {
-                    current_source = text.replace(['"', '\''], "");
-                } else if capture_name == "import.name" {
-                    current_name = text;
-                }
-            }
-
-            if !current_source.is_empty() {
-                imports.push(ImportNode {
-                    name: current_name,
-                    source: current_source,
-                    alias: None, 
-                });
-            }
-        }
-    }
-
-    // --- 2. Extract Literals ---
     let mut literals = Vec::new();
-    if !config.query_literals.is_empty() {
-        let lit_query = Query::new(&language, config.query_literals).expect("Invalid literals query");
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&lit_query, tree.root_node(), code_bytes);
+    let mut implementations = Vec::new();
+    let mut functions = Vec::new();
+    let global_vars = HashMap::new();
 
-        while let Some(match_) = matches.next() {
-            for capture in match_.captures {
-                let text = capture.node.utf8_text(code_bytes).unwrap_or("").to_string();
-                let clean = text.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_string();
-                if !clean.is_empty() && clean.len() > 1 {
-                    literals.push(clean);
+    // 1. Imports
+    if !config.query_imports.is_empty() {
+        if let Ok(q) = Query::new(&language, config.query_imports) {
+            let mut cursor = QueryCursor::new();
+            let mut matches = cursor.matches(&q, tree.root_node(), code_bytes);
+            while let Some(m) = matches.next() {
+                let mut src = String::new();
+                let mut name = String::new();
+                for cap in m.captures {
+                    let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
+                    let capture_name = q.capture_names()[cap.index as usize];
+                    if capture_name == "import.source" { src = text.replace(['"', '\''], ""); }
+                    else if capture_name == "import.name" { name = text; }
+                }
+                if !src.is_empty() { imports.push(ImportNode { name, source: src, alias: None }); }
+            }
+        }
+    }
+
+    // 2. Literals
+    if !config.query_literals.is_empty() {
+        if let Ok(q) = Query::new(&language, config.query_literals) {
+            let mut cursor = QueryCursor::new();
+            let mut matches = cursor.matches(&q, tree.root_node(), code_bytes);
+            while let Some(m) = matches.next() {
+                for cap in m.captures {
+                    let text = cap.node.utf8_text(code_bytes).unwrap_or("").trim_matches(|c| c == '"' || c == '\'' || c == '`').to_string();
+                    if text.len() > 1 { literals.push(text); }
                 }
             }
         }
     }
 
-    // --- 3. Extract Implementations ---
-    let mut implementations = Vec::new();
+    // 3. Implementations (Inheritance)
     if !config.query_implements.is_empty() {
-        let impl_query = Query::new(&language, config.query_implements).expect("Invalid implements query");
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&impl_query, tree.root_node(), code_bytes);
-        
-        while let Some(match_) = matches.next() {
-            let mut child = String::new();
-            let mut parent = String::new();
-            
-            for capture in match_.captures {
-                let name = impl_query.capture_names()[capture.index as usize];
-                let text = capture.node.utf8_text(code_bytes).unwrap_or("").to_string();
-                
-                if name == "impl.child" { child = text; } 
-                else if name == "impl.parent" { parent = text; }
-            }
-            
-            if !child.is_empty() && !parent.is_empty() {
-                implementations.push((child, parent));
+        if let Ok(q) = Query::new(&language, config.query_implements) {
+            let mut cursor = QueryCursor::new();
+            let mut matches = cursor.matches(&q, tree.root_node(), code_bytes);
+            while let Some(m) = matches.next() {
+                let mut child = String::new();
+                let mut parent = String::new();
+                for cap in m.captures {
+                    let name = q.capture_names()[cap.index as usize];
+                    let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
+                    if name == "impl.child" { child = text; } 
+                    else if name == "impl.parent" { parent = text; }
+                }
+                if !child.is_empty() && !parent.is_empty() { implementations.push((child, parent)); }
             }
         }
     }
 
-    // --- 4. Extract Functions, Calls & Fingerprints ---
-    let defs_query = Query::new(&language, config.query_defs).expect("Invalid definitions query");
-    let docs_query = Query::new(&language, config.query_docs).expect("Invalid docs query");
+    // 4. Definitions & Metadata Extraction
+    let defs_query = Query::new(&language, config.query_defs).expect("Invalid defs query");
     let calls_query = Query::new(&language, config.query_calls).expect("Invalid calls query");
+    let docs_query = Query::new(&language, config.query_docs).expect("Invalid docs query");
+    
+    let mut variable_hints = Vec::new(); // (range, name, type, assignment)
 
-    let mut functions = Vec::new();
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(&defs_query, tree.root_node(), code_bytes);
-    
+
     while let Some(match_) = matches.next() {
-        let def_node = match_.captures.iter().find(|c| defs_query.capture_names()[c.index as usize] == "function.definition").unwrap().node;
-        let name_node = match_.captures.iter().find(|c| defs_query.capture_names()[c.index as usize] == "function.name").unwrap().node;
-
-        let name = name_node.utf8_text(code_bytes).unwrap().to_string();
-        let func_source = def_node.utf8_text(code_bytes).unwrap().to_string();
-        let range_start = def_node.start_byte();
-        let range_end = def_node.end_byte();
-
-        let mut calls = Vec::new();
-        let mut fingerprints: HashMap<String, Vec<String>> = HashMap::new();
-        let mut calls_cursor = QueryCursor::new();
-        let mut call_matches = calls_cursor.matches(&calls_query, def_node, code_bytes);
-
-        while let Some(call_match) = call_matches.next() {
-            let mut method_name = None;
-            let mut receiver_name = None;
-
-            for capture in call_match.captures {
-                let capture_name = calls_query.capture_names()[capture.index as usize];
-                let text = capture.node.utf8_text(code_bytes).unwrap_or("").to_string();
-
-                if capture_name == "call.name" {
-                    method_name = Some(text);
-                } else if capture_name == "call.receiver" {
-                    receiver_name = Some(text);
-                }
-            }
-
-            if let Some(m) = method_name {
-                calls.push(m.clone());
-                if let Some(r) = receiver_name {
-                    fingerprints.entry(r).or_default().push(m);
-                }
-            }
-        }
-
-        let mut documentation = None;
-        let mut doc_cursor = QueryCursor::new();
-        let mut doc_matches = doc_cursor.matches(&docs_query, tree.root_node(), code_bytes);
-        while let Some(doc_match) = doc_matches.next() {
-            let doc_def_node = doc_match.captures.iter().find(|c| docs_query.capture_names()[c.index as usize] == "function.definition").unwrap().node;
-            if doc_def_node == def_node {
-                 let doc_lines: Vec<String> = doc_match.captures.iter()
-                    .filter(|c| docs_query.capture_names()[c.index as usize] == "function.docs")
-                    .map(|c| c.node.utf8_text(code_bytes).unwrap_or("").to_string())
-                    .collect();
-                if !doc_lines.is_empty() { documentation = Some(doc_lines.join("\n")); }
-                break;
-            }
-        }
+        let mut def_node = None;
+        let mut name = "anonymous".to_string();
+        let mut return_type = None;
         
-        functions.push(FunctionInfo {
-            name,
-            range_start,
-            range_end,
-            source_code: func_source,
-            documentation,
-            calls,
-            fingerprints,
-        });
+        let mut v_name = None;
+        let mut v_type = None;
+        let mut v_assign = None;
+
+        for capture in match_.captures {
+            let cap_name = defs_query.capture_names()[capture.index as usize];
+            let text = capture.node.utf8_text(code_bytes).unwrap_or("");
+            
+            match cap_name {
+                "function.definition" => def_node = Some(capture.node),
+                "function.name" => name = text.to_string(),
+                "function.return_type" => {
+                    return_type = Some(text.trim_start_matches(|c| c == ':' || c == '=' || c == '>').trim().to_string());
+                }
+                "variable.name" => {
+                    v_name = Some(text.to_string());
+                    // Sniff for Assignment: const user = db.getUser()
+                    if let Some(parent) = capture.node.parent() {
+                        if let Some(val) = parent.child_by_field_name("value") {
+                            if val.kind() == "call_expression" {
+                                if let Some(f) = val.child_by_field_name("function") {
+                                    let fn_name = if f.kind() == "member_expression" {
+                                        f.child_by_field_name("property")
+                                         .and_then(|p| p.utf8_text(code_bytes).ok())
+                                         .unwrap_or("")
+                                    } else { f.utf8_text(code_bytes).unwrap_or("") };
+                                    
+                                    if !fn_name.is_empty() { v_assign = Some(fn_name.to_string()); }
+                                }
+                            }
+                        }
+                    }
+                }
+                "variable.type" => {
+                    v_type = Some(text.trim_start_matches(':').trim().to_string());
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(node) = def_node {
+            // This is a primary symbol (Function/Class)
+            functions.push(FunctionInfo {
+                name,
+                range_start: node.start_byte(),
+                range_end: node.end_byte(),
+                source_code: node.utf8_text(code_bytes).unwrap_or("").to_string(),
+                documentation: None,
+                calls: Vec::new(),
+                fingerprints: HashMap::new(),
+                return_type,
+                local_types: HashMap::new(),
+                local_assigns: HashMap::new(),
+            });
+        } else if let Some(vn) = v_name {
+            // This is a local variable hint for bridging
+            variable_hints.push((match_.captures[0].node.byte_range(), vn, v_type, v_assign));
+        }
     }
 
-    Ok(FileAnalysis { functions, imports, literals, implementations })
+    // 5. Enrichment (Assign variables, calls, and docs to functions)
+    for func in &mut functions {
+        // Assign local variable hints to the function that contains them
+        for (v_range, v_name, v_type, v_assign) in &variable_hints {
+            // Check if the variable declaration is physically inside the function's body
+            if v_range.start >= func.range_start && v_range.end <= func.range_end {
+                if let Some(t) = v_type { 
+                    func.local_types.insert(v_name.clone(), t.clone()); 
+                }
+                if let Some(a) = v_assign { 
+                    func.local_assigns.insert(v_name.clone(), a.clone()); 
+                }
+            }
+        }
+
+        // Retrieve the specific node for this function to extract its internal calls and documentation
+        if let Some(node) = tree.root_node().descendant_for_byte_range(func.range_start, func.range_end) {
+            
+            // --- Extract Calls & Fingerprints ---
+            let mut c_cursor = QueryCursor::new();
+            let mut c_matches = c_cursor.matches(&calls_query, node, code_bytes);
+            while let Some(cm) = c_matches.next() {
+                let mut m_name = None;
+                let mut r_name = None;
+                for cp in cm.captures {
+                    let t = cp.node.utf8_text(code_bytes).unwrap_or("").to_string();
+                    let cap_name = calls_query.capture_names()[cp.index as usize];
+                    if cap_name == "call.name" { m_name = Some(t); }
+                    else if cap_name == "call.receiver" { r_name = Some(t); }
+                }
+                if let Some(m) = m_name {
+                    func.calls.push(m.clone());
+                    if let Some(r) = r_name {
+                        func.fingerprints.entry(r).or_default().push(m);
+                    }
+                }
+            }
+
+            // --- Extract Docs (checking if the doc match belongs to this function) ---
+            let mut d_cursor = QueryCursor::new();
+            let mut d_matches = d_cursor.matches(&docs_query, tree.root_node(), code_bytes);
+            while let Some(dm) = d_matches.next() {
+                let d_def = dm.captures.iter()
+                    .find(|c| docs_query.capture_names()[c.index as usize] == "function.definition")
+                    .unwrap().node;
+                
+                if d_def.start_byte() == func.range_start {
+                    func.documentation = Some(dm.captures.iter()
+                        .filter(|c| docs_query.capture_names()[c.index as usize] == "function.docs")
+                        .map(|c| c.node.utf8_text(code_bytes).unwrap_or("").to_string())
+                        .collect::<Vec<_>>().join("\n"));
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(FileAnalysis { functions, imports, literals, implementations, global_vars })
 }
 
 pub fn find_call_chain_ids(
@@ -356,7 +399,7 @@ pub fn find_related_symbols(
     }
 
     while let Some((current_id, mode)) = queue.pop_front() {
-        // 1. DOWNSTREAM Traversal (Dependencies)
+        // --- 1. DOWNSTREAM (Dependencies) ---
         if mode == TraversalMode::Both || mode == TraversalMode::Downstream {
             if let Some(callees) = index.resolved_calls.get(&current_id) {
                 for &callee_id in callees {
@@ -369,7 +412,7 @@ pub fn find_related_symbols(
             }
         }
 
-        // 2. UPSTREAM Traversal (Callers)
+        // --- 2. UPSTREAM (Callers) ---
         if mode == TraversalMode::Both || mode == TraversalMode::Upstream {
             for (caller_id, callees) in &index.resolved_calls {
                 if callees.contains(&current_id) {
@@ -382,7 +425,7 @@ pub fn find_related_symbols(
             }
         }
 
-        // 3. STRUCTURAL Traversal (Inheritance/Containers)
+        // --- 3. STRUCTURAL (Inheritance/Implements) ---
         if let Some(children) = index.inheritance.get(&current_id) {
             for &child_id in children {
                 if !visited.contains(&(child_id, mode)) {
@@ -399,6 +442,33 @@ pub fn find_related_symbols(
                     visited.insert((*parent_id, mode));
                     result_set.insert(*parent_id);
                     queue.push_back((*parent_id, mode));
+                }
+            }
+        }
+
+        // --- 4. CONTAINMENT (Method <-> Class) ---
+        // This is crucial for LLM Context: A method needs its class, and a class needs its methods.
+        if let Some(sym) = index.symbols.get(&current_id) {
+            // Move Up: Method -> Class
+            if let Some(p_id) = sym.parent_id {
+                if !visited.contains(&(p_id, mode)) { // Use 'mode', not 'Both'
+                    visited.insert((p_id, mode));
+                    result_set.insert(p_id);
+                    queue.push_back((p_id, mode));
+                }
+            }
+            
+            // Move Down: Class -> Methods
+            // Only perform this if the current symbol is actually a container
+            if sym.kind == "container" {
+                for (&s_id, s_node) in &index.symbols {
+                    if s_node.parent_id == Some(current_id) {
+                        if !visited.contains(&(s_id, mode)) { // Use 'mode', not 'Both'
+                            visited.insert((s_id, mode));
+                            result_set.insert(s_id);
+                            queue.push_back((s_id, mode));
+                        }
+                    }
                 }
             }
         }

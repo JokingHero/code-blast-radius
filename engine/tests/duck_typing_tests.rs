@@ -54,6 +54,8 @@ fn test_polymorphism_and_specificity() {
     let spec_id = indexer.index.symbol_map.get("calculateCircle").unwrap()[0];
     let spec_res = indexer.index.resolved_calls.get(&spec_id).unwrap();
 
+    println!("DEBUG: calculateCircle resolves to: {:?}", 
+        spec_res.iter().map(|id| indexer.index.symbols[id].name.as_str()).collect::<Vec<_>>());
     // It matches Circle because it has both "area" and "getRadius"
     assert!(spec_res.contains(&circle_id), "Should include Circle for .getRadius() + .area()");
     

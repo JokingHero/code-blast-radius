@@ -5,16 +5,36 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
     file_extensions: &["ts", "tsx"],
     query_defs: r#"
         [
-          (function_declaration name: (identifier) @function.name) @function.definition
-          ;; Capture methods in classes
-          (method_definition name: [(property_identifier) (identifier)] @function.name) @function.definition
-          ;; Capture methods in interfaces
-          (method_signature name: [(property_identifier) (identifier)] @function.name) @function.definition
-          ;; Capture containers
+          (function_declaration 
+            name: (identifier) @function.name 
+            return_type: (type_annotation)? @function.return_type  ;;
+          ) @function.definition
+
+          (method_definition 
+            name: [(property_identifier) (identifier)] @function.name 
+            return_type: (type_annotation)? @function.return_type  ;;
+          ) @function.definition
+
+          (method_signature 
+            name: [(property_identifier) (identifier)] @function.name 
+            return_type: (type_annotation)? @function.return_type  ;;
+          ) @function.definition
+
           (class_declaration name: (type_identifier) @function.name) @function.definition
           (interface_declaration name: [(type_identifier) (identifier)] @function.name) @function.definition
-          ;; Capture variable-assigned functions
-          ((variable_declarator name: (identifier) @function.name value: [(arrow_function) (function_expression)]) @function.definition)
+
+          ((variable_declarator 
+            name: (identifier) @function.name 
+            type: (type_annotation)? @variable.type               ;;
+            value: [(arrow_function) (function_expression)]
+          ) @function.definition)
+
+          ;; Variable Hints (Metadata only - No @function.definition)
+          ;; so we know 'const user: User'
+          (variable_declarator
+            name: (identifier) @variable.name
+            type: (type_annotation)? @variable.type
+          )
         ]
     "#,
     query_calls: r#"

@@ -31,6 +31,7 @@ pub struct SymbolNode {
     pub range_start: usize,
     pub range_end: usize,
     pub doc_comment: Option<String>,
+    pub return_type: Option<String>,
 }
 
 #[derive(Archive, Deserialize, Serialize, Debug, Default)]
@@ -46,6 +47,9 @@ pub struct WorkspaceIndex {
     // Mapping of Function -> (Variable Name -> Set of Methods called on it)
     // Example: "reset_func_id" -> { "device": ["stop", "start"] }
     pub fingerprints: HashMap<SymbolId, HashMap<String, Vec<String>>>,
+     // Mapping of FunctionSymbolID -> (VariableName -> TypeName)
+    // e.g., "main_id" -> { "user": "User" }
+    pub local_variable_types: HashMap<SymbolId, HashMap<String, String>>,
     
     // Explicit Calls
     pub raw_calls: HashMap<SymbolId, Vec<String>>,
