@@ -1,4 +1,3 @@
-// File: engine/src/schema.rs
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -8,12 +7,8 @@ pub type SymbolId = u32;
 #[derive(Archive, Deserialize, Serialize, Debug, Clone)]
 #[archive(check_bytes)]
 pub struct ImportNode {
-    // e.g., "add" in `import { add } from ...`
     pub name: String,
-    // e.g., "./utils" or "express"
     pub source: String, 
-    // e.g., "add_alias" in `import { add as add_alias } ...`
-    // For now, we'll keep it simple and just use `name`
     pub alias: Option<String>,
 }
 
@@ -25,7 +20,7 @@ pub struct FileNode {
     pub hash: [u8; 32],
 }
 
-#[derive(Archive, Deserialize, Serialize, Debug)]
+#[derive(Archive, Deserialize, Serialize, Debug, Clone)]
 #[archive(check_bytes)]
 pub struct SymbolNode {
     pub id: SymbolId,
@@ -43,13 +38,20 @@ pub struct WorkspaceIndex {
     pub files: HashMap<String, FileNode>,
     pub symbols: HashMap<SymbolId, SymbolNode>,
     pub symbol_map: HashMap<String, Vec<SymbolId>>,
-    
-    // What does this file import?
     pub file_imports: HashMap<FileId, Vec<ImportNode>>,
-
-    // We keep this for the "Scan" phase (Raw strings)
+    
+    // Explicit Calls
     pub raw_calls: HashMap<SymbolId, Vec<String>>,
-
-    // The "Linker" populates this (Resolved IDs)
     pub resolved_calls: HashMap<SymbolId, Vec<SymbolId>>, 
+
+    // Inheritance Graph (Parent Symbol ID -> List of Child Symbol IDs)
+    pub inheritance: HashMap<SymbolId, Vec<SymbolId>>,
+
+    // Implicit File Dependencies (File ID -> List of File IDs)
+    pub file_dependencies: HashMap<FileId, Vec<FileId>>,
+
+    // Temporary storage for linking phase (Map<FileId, ...>)
+    pub raw_literals: HashMap<FileId, Vec<String>>,
+    // Temporary storage for implementations (SymbolId -> Vec<ParentName>)
+    pub raw_implementations: HashMap<SymbolId, Vec<String>>, 
 }

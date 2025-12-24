@@ -3,7 +3,6 @@ use crate::analyzer::analyze_source;
 use crate::language::{get_language_configs, LanguageConfig};
 
 use std::path::{Path, PathBuf};
-
 use std::fs::{self, File};
 use std::io::Write;
 use std::collections::{HashMap, HashSet};
@@ -73,12 +72,18 @@ impl Indexer {
             }
             // Clear raw calls
             self.index.raw_calls.remove(&sym_id);
-            // Clear resolved calls (though cleaning strictly involves iterating everything, 
-            // orphan IDs are acceptable for now)
+            // Clear raw implementations
+            self.index.raw_implementations.remove(&sym_id);
+            // Clear resolved calls (will be rebuilt during resolve phase)
             self.index.resolved_calls.remove(&sym_id);
         }
         // Clear imports
         self.index.file_imports.remove(&file_id);
+        // Clear literals
+        self.index.raw_literals.remove(&file_id);
+        
+        // Note: We don't explicitly clear `file_dependencies` or `inheritance` here 
+        // because those are completely rebuilt from scratch during `resolve_references`.
     }
 
     pub fn scan(&mut self, root: &Path) {
@@ -155,7 +160,12 @@ impl Indexer {
                 self.index.file_imports.insert(file_id, analysis.imports);
             }
 
-            // 2. Store Functions
+            // 2. Store Literals (NEW)
+            if !analysis.literals.is_empty() {
+                self.index.raw_literals.insert(file_id, analysis.literals);
+            }
+
+            // 3. Store Functions & Implementations
             for func in analysis.functions {
                 let symbol_id = self.index.symbols.keys().max().map(|k| k + 1).unwrap_or(0);
 
@@ -163,7 +173,8 @@ impl Indexer {
                     id: symbol_id,
                     file_id,
                     name: func.name.clone(),
-                    kind: "function".to_string(),
+                    // We default to "function", but in the future we can refine this based on the query used
+                    kind: "function".to_string(), 
                     range_start: func.range_start,
                     range_end: func.range_end,
                     doc_comment: func.documentation,
@@ -180,13 +191,36 @@ impl Indexer {
                     self.index.raw_calls.insert(symbol_id, func.calls);
                 }
             }
+
+            // 4. Map Implementations (NEW - Dependency Injection support)
+            // analysis.implementations is a list of (ChildName, ParentName) strings.
+            // We need to attach these to the SymbolID of the Child in *this* file.
+            for (child_name, parent_name) in analysis.implementations {
+                // Find the symbol ID for 'child_name' belonging to 'file_id'
+                if let Some(ids) = self.index.symbol_map.get(&child_name) {
+                    if let Some(&child_id) = ids.iter().find(|&&id| {
+                        self.index.symbols.get(&id).map(|s| s.file_id) == Some(file_id)
+                    }) {
+                        self.index.raw_implementations.entry(child_id)
+                            .or_insert_with(Vec::new)
+                            .push(parent_name);
+                    }
+                }
+            }
         }
     }
 
     // --- RESOLUTION LOGIC ---
 
-    /// Converts raw string calls into concrete Symbol IDs based on imports.
     pub fn resolve_references(&mut self) {
+        // 1. Explicit Function Calls
+        self.resolve_function_calls();
+        
+        // 2. Implicit / Heuristic Connections (NEW)
+        self.resolve_implicit_connections();
+    }
+
+    fn resolve_function_calls(&mut self) {
         self.index.resolved_calls.clear();
 
         // Clone entries to iterate while mutating the index
@@ -207,7 +241,6 @@ impl Indexer {
                     resolved_targets.push(target_id);
                 } else {
                     // 3. Global Fallback (Loose Mode)
-                    // If semantic resolution failed, find anything with that name.
                     if let Some(candidates) = self.index.symbol_map.get(&func_name) {
                         resolved_targets.extend(candidates.iter().cloned());
                     }
@@ -264,39 +297,115 @@ impl Indexer {
         let from_path = Path::new(&from_file_node.path);
         let parent_dir = from_path.parent()?;
 
-        let extensions = ["ts", "js", "tsx", "jsx", "rs", "py"];
+        let extensions = ["ts", "js", "tsx", "jsx", "rs", "py", "html", "sh"];
         
+        // 1. Check strict relative path
         let candidate_base = parent_dir.join(import_source);
         
-        // Helper to check if a path exists in our index
-        // We use fs::canonicalize to resolve "." and ".." if the file actually exists on disk.
-        // Since WalkDir returns absolute paths in tests, this ensures we match keys.
+        // Helper to check path existence in index
         let check_path = |p: PathBuf| -> Option<u32> {
-            let target = if p.exists() {
-                fs::canonicalize(&p).ok().map(|c| c.to_string_lossy().to_string())?
-            } else {
-                p.to_string_lossy().to_string()
-            };
-            self.index.files.get(&target).map(|n| n.id)
+             // In a real file system we might canonicalize, but here we check our index keys
+             let s = p.to_string_lossy().to_string();
+             self.index.files.get(&s).map(|n| n.id)
         };
 
-        // Try file.ts
+        // Try exact
+        if let Some(id) = check_path(candidate_base.clone()) { return Some(id); }
+
+        // Try file.ext
         for ext in extensions {
-             let candidate = candidate_base.with_extension(ext);
-             if let Some(id) = check_path(candidate) {
-                 return Some(id);
-             }
+             if let Some(id) = check_path(candidate_base.with_extension(ext)) { return Some(id); }
         }
         
-        // Try file/index.ts
+        // Try file/index.ext
         let index_base = candidate_base.join("index");
         for ext in extensions {
-             let candidate = index_base.with_extension(ext);
-             if let Some(id) = check_path(candidate) {
-                 return Some(id);
-             }
+             if let Some(id) = check_path(index_base.with_extension(ext)) { return Some(id); }
         }
 
         None
+    }
+
+    fn resolve_implicit_connections(&mut self) {
+        self.index.file_dependencies.clear();
+        self.index.inheritance.clear();
+
+        // --- A. Build Inheritance Graph (Parent ID <- Child ID) ---
+        // raw_implementations maps ChildID -> [ParentName1, ParentName2]
+        
+        let raw_impls: Vec<(u32, Vec<String>)> = self.index.raw_implementations.iter()
+            .map(|(k, v)| (*k, v.clone())).collect();
+
+        for (child_id, parent_names) in raw_impls {
+            for parent_name in parent_names {
+                // Resolve ParentName to SymbolIDs
+                if let Some(parent_ids) = self.index.symbol_map.get(&parent_name) {
+                    for &parent_id in parent_ids {
+                        // Store: Parent -> Children
+                        self.index.inheritance.entry(parent_id)
+                            .or_default()
+                            .push(child_id);
+                    }
+                }
+            }
+        }
+
+        // --- B. Build Literal Bridge (File A depends on File B) ---
+        // We look for literals that match file paths or shared high-entropy strings
+        
+        let mut global_string_map: HashMap<String, Vec<u32>> = HashMap::new();
+        let entries: Vec<(u32, Vec<String>)> = self.index.raw_literals.iter()
+            .map(|(k, v)| (*k, v.clone())).collect();
+
+        for (src_id, literals) in entries {
+            for lit in literals {
+                
+                // 1. Path Resolution (Polyglot Calls)
+                if let Some(target_id) = self.resolve_import_path(src_id, &lit) {
+                    if src_id != target_id {
+                        self.index.file_dependencies.entry(src_id)
+                            .or_default()
+                            .push(target_id);
+                    }
+                }
+
+                // 2. High-Entropy String Matching (Events / Routes)
+                // Filter for "interesting" strings
+                let is_path = lit.contains('/') || lit.contains('.');
+                let is_constant = lit.len() > 5 && lit.chars().all(|c| c.is_uppercase() || c == '_');
+                
+                if is_path || is_constant {
+                    global_string_map.entry(lit.clone())
+                        .or_default()
+                        .push(src_id);
+                }
+            }
+        }
+
+        // Connect files that share the same high-entropy string
+        for (_, file_ids) in global_string_map {
+            if file_ids.len() < 2 { continue; }
+            if file_ids.len() > 50 { continue; } // Too noisy
+
+            for &f1 in &file_ids {
+                for &f2 in &file_ids {
+                    if f1 != f2 {
+                        self.index.file_dependencies.entry(f1)
+                            .or_default()
+                            .push(f2);
+                    }
+                }
+            }
+        }
+        
+        // Cleanup / Deduplicate
+        for deps in self.index.file_dependencies.values_mut() {
+            deps.sort();
+            deps.dedup();
+        }
+        for children in self.index.inheritance.values_mut() {
+            children.sort();
+            children.dedup();
+        }
     }
 }

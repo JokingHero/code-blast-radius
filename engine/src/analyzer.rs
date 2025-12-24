@@ -18,6 +18,10 @@ pub struct FunctionInfo {
 pub struct FileAnalysis {
     pub functions: Vec<FunctionInfo>,
     pub imports: Vec<ImportNode>,
+    // NEW: Captures string literals (e.g., "./script.py", "/api/v1/user")
+    pub literals: Vec<String>,
+    // NEW: Captures inheritance (Child Name -> Parent Name)
+    pub implementations: Vec<(String, String)>, 
 }
 
 pub fn analyze_source(
@@ -32,7 +36,12 @@ pub fn analyze_source(
     parser.set_language(&language).map_err(|e| e.to_string())?;
     
     if source_code.trim().is_empty() {
-        return Ok(FileAnalysis { functions: vec![], imports: vec![] });
+        return Ok(FileAnalysis { 
+            functions: vec![], 
+            imports: vec![], 
+            literals: vec![], 
+            implementations: vec![] 
+        });
     }
 
     let tree = parser.parse(source_code, None).ok_or("Failed to parse code")?;
@@ -69,7 +78,59 @@ pub fn analyze_source(
         }
     }
 
-    // --- 2. Extract Functions & Calls ---
+    // --- 2. Extract Literals (NEW) ---
+    // Used for connecting files via paths or route strings
+    let mut literals = Vec::new();
+    if !config.query_literals.is_empty() {
+        let lit_query = Query::new(&language, config.query_literals).expect("Invalid literals query");
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&lit_query, tree.root_node(), code_bytes);
+
+        while let Some(match_) = matches.next() {
+            for capture in match_.captures {
+                let text = capture.node.utf8_text(code_bytes).unwrap_or("").to_string();
+                // Clean up quotes ( "file.js" -> file.js )
+                let clean = text.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_string();
+                
+                // Filter out empty strings or very short noise
+                if !clean.is_empty() && clean.len() > 1 {
+                    literals.push(clean);
+                }
+            }
+        }
+    }
+
+    // --- 3. Extract Implementations (NEW) ---
+    // Used for Dependency Injection and Inheritance links
+    let mut implementations = Vec::new();
+    if !config.query_implements.is_empty() {
+        let impl_query = Query::new(&language, config.query_implements).expect("Invalid implements query");
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&impl_query, tree.root_node(), code_bytes);
+        
+        while let Some(match_) = matches.next() {
+            let mut child = String::new();
+            let mut parent = String::new();
+            
+            for capture in match_.captures {
+                let name = impl_query.capture_names()[capture.index as usize];
+                let text = capture.node.utf8_text(code_bytes).unwrap_or("").to_string();
+                
+                // FIXED: Use else if to prevent double-move error
+                if name == "impl.child" { 
+                    child = text; 
+                } else if name == "impl.parent" { 
+                    parent = text; 
+                }
+            }
+            
+            if !child.is_empty() && !parent.is_empty() {
+                implementations.push((child, parent));
+            }
+        }
+    }
+
+    // --- 4. Extract Functions & Calls ---
     let defs_query = Query::new(&language, config.query_defs).expect("Invalid definitions query");
     let docs_query = Query::new(&language, config.query_docs).expect("Invalid docs query");
     let calls_query = Query::new(&language, config.query_calls).expect("Invalid calls query");
@@ -123,7 +184,7 @@ pub fn analyze_source(
         });
     }
 
-    Ok(FileAnalysis { functions, imports })
+    Ok(FileAnalysis { functions, imports, literals, implementations })
 }
 
 pub fn find_call_chain_ids(index: &WorkspaceIndex, target_name: &str) -> Option<Vec<SymbolId>> {
@@ -140,12 +201,29 @@ pub fn find_call_chain_ids(index: &WorkspaceIndex, target_name: &str) -> Option<
     }
 
     while let Some(current_id) = queue.pop_front() {
+        
+        // 1. Explicit Calls (Who calls me?)
         for (caller_id, callees) in &index.resolved_calls {
             if callees.contains(&current_id) {
                 if !visited.contains(caller_id) {
                     visited.insert(*caller_id);
                     predecessors.insert(current_id, *caller_id); 
                     queue.push_back(*caller_id);
+                }
+            }
+        }
+
+        // 2. Inheritance Links (NEW)
+        // If I am a Parent, check my Children.
+        // E.g., if finding usage of "Shape", we also check usages of "Circle"
+        if let Some(children) = index.inheritance.get(&current_id) {
+            for &child_id in children {
+                // We add children to the context. This is "Sideways Expansion".
+                if !visited.contains(&child_id) {
+                    visited.insert(child_id);
+                    // Map Child -> Parent so we can trace back
+                    predecessors.insert(child_id, current_id); 
+                    queue.push_back(child_id);
                 }
             }
         }
@@ -159,6 +237,7 @@ pub fn find_call_chain_ids(index: &WorkspaceIndex, target_name: &str) -> Option<
         }
     }
 
+    // Trace path back to a root
     let mut chain = vec![current];
     while let Some(&parent) = predecessors.get(&current) {
         chain.push(parent);

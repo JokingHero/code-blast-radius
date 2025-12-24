@@ -33,7 +33,9 @@ pub struct LanguageConfig {
     pub query_defs: &'static str,
     pub query_calls: &'static str,
     pub query_docs: &'static str,
-    pub query_imports: &'static str, // New field
+    pub query_imports: &'static str,
+    pub query_literals: &'static str,
+    pub query_implements: &'static str,
 }
 
 // --- Configurations ---
@@ -41,27 +43,17 @@ pub struct LanguageConfig {
 pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
     lang_enum: SupportedLanguage::Rust,
     file_extensions: &["rs"],
-    query_defs: r#"
-        (function_item
-          name: (identifier) @function.name) @function.definition
-    "#,
-    query_calls: r#"
-        (call_expression
-          function: [(identifier) @call.name (field_expression field: (field_identifier) @call.name)])
-    "#,
-    query_docs: r#"
-        (
-          (line_comment)+ @function.docs
-          .
-          (function_item) @function.definition
-        )
-        (
-          (block_comment) @function.docs
-          .
-          (function_item) @function.definition
+    query_defs: r#"(function_item name: (identifier) @function.name) @function.definition"#,
+    query_calls: r#"(call_expression function: [(identifier) @call.name (field_expression field: (field_identifier) @call.name)])"#,
+    query_docs: r#"((line_comment)+ @function.docs . (function_item) @function.definition)"#,
+    query_imports: "",
+    query_literals: r#"(string_literal) @string"#,
+    query_implements: r#"
+        (impl_item
+            trait: (type_identifier) @impl.parent
+            type: (type_identifier) @impl.child
         )
     "#,
-    query_imports: "", // Rust imports (use) are complex, skipping for now
 };
 
 pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
@@ -69,33 +61,21 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
     file_extensions: &["ts", "tsx"],
     query_defs: r#"
         [
-          (function_declaration
-            name: (identifier) @function.name) @function.definition
-          (method_definition
-            name: (property_identifier) @function.name) @function.definition
-          (
-            (variable_declarator
-              name: (identifier) @function.name
-              value: [(arrow_function) (function_expression)]) @function.definition
-          )
+          (function_declaration name: (identifier) @function.name) @function.definition
+          (method_definition name: (property_identifier) @function.name) @function.definition
+          (class_declaration name: (type_identifier) @function.name) @function.definition
+          (interface_declaration name: (type_identifier) @function.name) @function.definition
+          ((variable_declarator name: (identifier) @function.name value: [(arrow_function) (function_expression)]) @function.definition)
         ]
     "#,
-    query_calls: r#"
-        (call_expression
-          function: [(identifier) @call.name (member_expression property: (property_identifier) @call.name)])
-    "#,
+    query_calls: r#"(call_expression function: [(identifier) @call.name (member_expression property: (property_identifier) @call.name)])"#,
     query_docs: r#"
       (
         (comment)+ @function.docs
         .
-        [
-            (function_declaration)
-            (method_definition)
-            (export_statement (variable_declaration))
-        ] @function.definition
+        [ (function_declaration) (method_definition) (export_statement (variable_declaration)) (class_declaration) (interface_declaration) ] @function.definition
       )
     "#,
-    // FIXED: import_clause comes BEFORE source in the grammar
     query_imports: r#"
         (import_statement
             (import_clause
@@ -107,6 +87,24 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             )
             source: (string) @import.source
         )
+    "#,
+    query_literals: r#"[ (string) (template_string) ] @string"#,
+    // 1. Class: uses `extends_clause` (field: value) and `implements_clause` (no field).
+    // 2. Interface: uses `extends_type_clause` (field: type).
+    query_implements: r#"
+        [
+          (class_declaration
+            name: (type_identifier) @impl.child
+            (class_heritage 
+                (extends_clause value: (identifier) @impl.parent)?
+                (implements_clause (type_identifier) @impl.parent)?
+            )
+          )
+          (interface_declaration
+            name: (type_identifier) @impl.child
+            (extends_type_clause type: (type_identifier) @impl.parent)
+          )
+        ]
     "#,
 };
 
@@ -115,43 +113,26 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
     file_extensions: &["js", "jsx", "mjs", "cjs"],
     query_defs: r#"
         [
-          (function_declaration
-            name: (identifier) @function.name) @function.definition
-          (method_definition
-            name: (property_identifier) @function.name) @function.definition
-          (
-            (variable_declarator
-              name: (identifier) @function.name
-              value: [(arrow_function) (function_expression)]) @function.definition
-          )
+          (function_declaration name: (identifier) @function.name) @function.definition
+          (method_definition name: (property_identifier) @function.name) @function.definition
+          (class_declaration name: (identifier) @function.name) @function.definition
+          ((variable_declarator name: (identifier) @function.name value: [(arrow_function) (function_expression)]) @function.definition)
         ]
     "#,
-    query_calls: r#"
-        (call_expression
-          function: [(identifier) @call.name (member_expression property: (property_identifier) @call.name)])
-    "#,
+    query_calls: TYPESCRIPT_CONFIG.query_calls,
     query_docs: r#"
       (
         (comment)+ @function.docs
         .
-        [
-            (function_declaration)
-            (method_definition)
-            (export_statement (variable_declaration))
-        ] @function.definition
+        [ (function_declaration) (method_definition) (export_statement (variable_declaration)) (class_declaration) ] @function.definition
       )
     "#,
-    // FIXED: import_clause comes BEFORE source
-    query_imports: r#"
-        (import_statement
-            (import_clause
-                (named_imports
-                    (import_specifier
-                        name: (identifier) @import.name
-                    )
-                )
-            )
-            source: (string) @import.source
+    query_imports: TYPESCRIPT_CONFIG.query_imports,
+    query_literals: r#"[ (string) (template_string) ] @string"#,
+    query_implements: r#"
+        (class_declaration
+            name: (identifier) @impl.child
+            (class_heritage (identifier) @impl.parent)
         )
     "#,
 };
@@ -159,103 +140,66 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
 pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
     lang_enum: SupportedLanguage::Python,
     file_extensions: &["py"],
-    query_defs: r#"
-        (function_definition
-          name: (identifier) @function.name) @function.definition
+    query_defs: r#"(function_definition name: (identifier) @function.name) @function.definition"#,
+    query_calls: r#"(call function: [(identifier) @call.name (attribute attribute: (identifier) @call.name)])"#,
+    query_docs: r#"(function_definition body: (block . (expression_statement (string) @function.docs))) @function.definition"#,
+    query_imports: "", 
+    query_literals: r#"(string) @string"#,
+    query_implements: r#"
+        (class_definition
+            name: (identifier) @impl.child
+            superclasses: (argument_list (identifier) @impl.parent)
+        )
     "#,
-    query_calls: r#"
-        (call
-          function: [(identifier) @call.name (attribute attribute: (identifier) @call.name)])
-    "#,
-    query_docs: r#"
-        (function_definition
-          body: (block . (expression_statement (string) @function.docs))) @function.definition
-    "#,
-    query_imports: "", // TODO: Add python import parsing
 };
 
 pub const JAVA_CONFIG: LanguageConfig = LanguageConfig {
     lang_enum: SupportedLanguage::Java,
     file_extensions: &["java"],
-    query_defs: r#"
-        (method_declaration
-          name: (identifier) @function.name) @function.definition
-    "#,
-    query_calls: r#"
-        (method_invocation
-          name: (identifier) @call.name)
-    "#,
-    query_docs: r#"
-        (
-          (block_comment) @function.docs
-          .
-          (method_declaration) @function.definition
+    query_defs: r#"(method_declaration name: (identifier) @function.name) @function.definition"#,
+    query_calls: r#"(method_invocation name: (identifier) @call.name)"#,
+    query_docs: r#"((block_comment) @function.docs . (method_declaration) @function.definition)"#,
+    query_imports: "",
+    query_literals: r#"(string_literal) @string"#,
+    query_implements: r#"
+        (class_declaration
+            name: (identifier) @impl.child
+            superclass: (superclass (type_identifier) @impl.parent)?
         )
     "#,
-    query_imports: "",
 };
 
 pub const BASH_CONFIG: LanguageConfig = LanguageConfig {
     lang_enum: SupportedLanguage::Bash,
     file_extensions: &["sh", "bash"],
-    query_defs: r#"
-        (function_definition
-          name: (word) @function.name) @function.definition
-    "#,
-    query_calls: r#"
-        (command
-          name: (command_name (word) @call.name))
-    "#,
-    query_docs: r#"
-        (
-          (comment)+ @function.docs
-          .
-          (function_definition) @function.definition
-        )
-    "#,
+    query_defs: r#"(function_definition name: (word) @function.name) @function.definition"#,
+    query_calls: r#"(command name: (command_name (word) @call.name))"#,
+    query_docs: r#"((comment)+ @function.docs . (function_definition) @function.definition)"#,
     query_imports: "",
+    query_literals: r#"(word) @string"#,
+    query_implements: "",
 };
 
 pub const JULIA_CONFIG: LanguageConfig = LanguageConfig {
     lang_enum: SupportedLanguage::Julia,
     file_extensions: &["jl"],
-    query_defs: r#"
-        (function_definition
-            name: (identifier) @function.name) @function.definition
-    "#,
-    query_calls: r#"
-        (call_expression
-            function: (identifier) @call.name)
-    "#,
-    query_docs: r#"
-        (
-          (block_comment) @function.docs
-          .
-          (function_definition) @function.definition
-        )
-    "#,
+    query_defs: r#"(function_definition name: (identifier) @function.name) @function.definition"#,
+    query_calls: r#"(call_expression function: (identifier) @call.name)"#,
+    query_docs: r#"((block_comment) @function.docs . (function_definition) @function.definition)"#,
     query_imports: "",
+    query_literals: r#"(string_literal) @string"#,
+    query_implements: "",
 };
 
 pub const R_CONFIG: LanguageConfig = LanguageConfig {
     lang_enum: SupportedLanguage::R,
     file_extensions: &["R", "r"],
-    query_defs: r#"
-        (function_definition
-            name: (identifier) @function.name) @function.definition
-    "#,
-    query_calls: r#"
-        (call_expression
-            function: (identifier) @call.name)
-    "#,
-    query_docs: r#"
-        (
-          (comment)+ @function.docs
-          .
-          (function_definition) @function.definition
-        )
-    "#,
+    query_defs: r#"(function_definition name: (identifier) @function.name) @function.definition"#,
+    query_calls: r#"(call_expression function: (identifier) @call.name)"#,
+    query_docs: r#"((comment)+ @function.docs . (function_definition) @function.definition)"#,
     query_imports: "",
+    query_literals: r#"(string) @string"#,
+    query_implements: "",
 };
 
 pub const HTML_CONFIG: LanguageConfig = LanguageConfig {
@@ -283,6 +227,8 @@ pub const HTML_CONFIG: LanguageConfig = LanguageConfig {
       )
     "#,
     query_imports: "",
+    query_literals: r#"(attribute_value) @string"#,
+    query_implements: "",
 };
 
 pub fn get_language_configs() -> Vec<&'static LanguageConfig> {
