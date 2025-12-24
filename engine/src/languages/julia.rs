@@ -1,0 +1,12 @@
+use crate::language::{LanguageConfig, SupportedLanguage};
+
+pub const JULIA_CONFIG: LanguageConfig = LanguageConfig {
+    lang_enum: SupportedLanguage::Julia,
+    file_extensions: &["jl"],
+    query_defs: r#"(function_definition name: (identifier) @function.name) @function.definition"#,
+    query_calls: r#"(call_expression function: (identifier) @call.name)"#,
+    query_docs: r#"((block_comment) @function.docs . (function_definition) @function.definition)"#,
+    query_imports: "",
+    query_literals: r#"(string_literal) @string"#,
+    query_implements: "",
+};

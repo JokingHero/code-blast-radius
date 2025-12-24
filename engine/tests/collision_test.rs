@@ -1,7 +1,7 @@
-mod common;
+mod common; // This looks for engine/tests/common.rs
 use common::TestWorkspace;
 use rfc_engine::indexer::Indexer;
-use rfc_engine::analyzer::find_call_chain_ids;
+use rfc_engine::analyzer::find_related_symbols;
 
 #[test]
 fn test_name_collision() {
@@ -25,18 +25,21 @@ fn test_name_collision() {
     // 3. Verify Graph has 3 nodes
     assert_eq!(indexer.index.symbols.len(), 3, "Graph should contain 3 unique nodes");
 
-    // 4. Verify Call Chain
-    let chain = find_call_chain_ids(&indexer.index, "duplicate_func");
+    // 4. Verify Semantic Cluster (Bidirectional)
+    // find_related_symbols will now find the target AND everything connected to it
+    let ids = find_related_symbols(&indexer.index, "duplicate_func");
     
-    assert!(chain.is_some(), "Should find a chain for duplicate_func");
-    let c = chain.unwrap();
+    assert!(ids.is_some(), "Should find related symbols for duplicate_func");
+    let symbol_ids = ids.unwrap();
     
-    // Check IDs
-    assert_eq!(c.len(), 2);
+    // It should find "main" (upstream) and "duplicate_func" (the targets)
+    assert!(symbol_ids.len() >= 2);
     
     // Helper to get name from ID
     let get_name = |id| indexer.index.symbols.get(&id).unwrap().name.as_str();
     
-    assert_eq!(get_name(c[0]), "main");
-    assert_eq!(get_name(c[1]), "duplicate_func");
+    let names: std::collections::HashSet<&str> = symbol_ids.iter().map(|id| get_name(*id)).collect();
+    
+    assert!(names.contains("main"), "Should have found the caller 'main'");
+    assert!(names.contains("duplicate_func"), "Should have found the target 'duplicate_func'");
 }

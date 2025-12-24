@@ -1,7 +1,7 @@
 mod common;
 use common::TestWorkspace;
 use rfc_engine::indexer::Indexer;
-use rfc_engine::analyzer::find_call_chain_ids;
+use rfc_engine::analyzer::find_related_symbols; // Updated Import
 
 // Helper to find ID by name
 fn has_func(index: &rfc_engine::schema::WorkspaceIndex, name: &str) -> bool {
@@ -33,19 +33,22 @@ fn test_typescript_call_chain() {
     assert!(has_func(&indexer.index, "add"), "Function 'add' not found");
     assert!(has_func(&indexer.index, "calculateTotal"), "Function 'calculateTotal' not found");
 
-    // Verify Chain Finding
-    let chain = find_call_chain_ids(&indexer.index, "add");
-    assert!(chain.is_some(), "Call chain not found");
-    let chain_vec = chain.unwrap();
+    // Verify Semantic Cluster Finding (Bidirectional)
+    let related = find_related_symbols(&indexer.index, "add");
+    assert!(related.is_some(), "Related symbols not found");
+    let symbol_ids = related.unwrap();
     
-    assert_eq!(chain_vec.len(), 2);
+    // Should find 'add' (the target) and 'calculateTotal' (the caller)
+    assert_eq!(symbol_ids.len(), 2);
     
-    // Resolve IDs back to names to verify order
-    let name_0 = &indexer.index.symbols.get(&chain_vec[0]).unwrap().name;
-    let name_1 = &indexer.index.symbols.get(&chain_vec[1]).unwrap().name;
+    // Get names and sort them for a stable assertion
+    let mut names: Vec<String> = symbol_ids.iter()
+        .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
+        .collect();
+    names.sort();
     
-    assert_eq!(name_0, "calculateTotal");
-    assert_eq!(name_1, "add");
+    assert_eq!(names[0], "add");
+    assert_eq!(names[1], "calculateTotal");
 }
 
 #[test]

@@ -70,54 +70,52 @@ impl Indexer {
                     }
                 }
             }
-            // Clear raw calls
             self.index.raw_calls.remove(&sym_id);
-            // Clear raw implementations
             self.index.raw_implementations.remove(&sym_id);
-            // Clear resolved calls (will be rebuilt during resolve phase)
             self.index.resolved_calls.remove(&sym_id);
         }
-        // Clear imports
         self.index.file_imports.remove(&file_id);
-        // Clear literals
         self.index.raw_literals.remove(&file_id);
-        
-        // Note: We don't explicitly clear `file_dependencies` or `inheritance` here 
-        // because those are completely rebuilt from scratch during `resolve_references`.
     }
 
-    pub fn scan(&mut self, root: &Path) {
+    /// Scans multiple roots into one workspace index.
+    pub fn scan_workspace(&mut self, roots: &[PathBuf]) {
         let mut seen_paths = HashSet::new();
 
-        for entry in WalkDir::new(root)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().is_file()) 
-        {
-            let path = entry.path();
-            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        for root in roots {
+            let root_abs = fs::canonicalize(root).unwrap_or_else(|_| root.clone());
+            
+            for entry in WalkDir::new(&root_abs)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().is_file()) 
+            {
+                let path = entry.path();
+                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
 
-            if let Some(config) = self.configs.get(ext) {
-                if let Ok(content) = fs::read_to_string(path) {
-                    let hash = blake3::hash(content.as_bytes());
-                    let hash_bytes: [u8; 32] = hash.into();
-                    let path_str = path.to_string_lossy().to_string();
+                if let Some(config) = self.configs.get(ext) {
+                    if let Ok(content) = fs::read_to_string(path) {
+                        let hash = blake3::hash(content.as_bytes());
+                        let hash_bytes: [u8; 32] = hash.into();
+                        
+                        // Use absolute path as key to prevent cross-repo collisions
+                        let path_key = path.to_string_lossy().to_string();
+                        seen_paths.insert(path_key.clone());
 
-                    seen_paths.insert(path_str.clone());
+                        let needs_update = match self.index.files.get(&path_key) {
+                            Some(node) => node.hash != hash_bytes,
+                            None => true, 
+                        };
 
-                    let needs_update = match self.index.files.get(&path_str) {
-                        Some(node) => node.hash != hash_bytes,
-                        None => true, 
-                    };
-
-                    if needs_update {
-                        self.update_file(&path_str, path, &content, hash_bytes, config);
+                        if needs_update {
+                            self.update_file(&path_key, path, &content, hash_bytes, config);
+                        }
                     }
                 }
             }
         }
 
-        // Handle Deletions
+        // Handle Deletions: Remove files that were in the index but not seen in any root
         let all_known_paths: Vec<String> = self.index.files.keys().cloned().collect();
         for path in all_known_paths {
             if !seen_paths.contains(&path) {
@@ -128,6 +126,11 @@ impl Indexer {
                 }
             }
         }
+    }
+
+    /// Original scan logic preserved for single-folder backwards compatibility
+    pub fn scan(&mut self, root: &Path) {
+        self.scan_workspace(&[root.to_path_buf()]);
     }
 
     fn update_file(
@@ -144,7 +147,8 @@ impl Indexer {
             self.clear_file_symbols(id); 
             id
         } else {
-            self.index.files.len() as u32
+            // Find a unique ID
+            self.index.files.values().map(|f| f.id).max().map(|id| id + 1).unwrap_or(0)
         };
 
         self.index.files.insert(path_key.to_string(), FileNode {
@@ -155,17 +159,14 @@ impl Indexer {
 
         if let Ok(analysis) = analyze_source(path_obj, content, config) {
             
-            // 1. Store Imports
             if !analysis.imports.is_empty() {
                 self.index.file_imports.insert(file_id, analysis.imports);
             }
 
-            // 2. Store Literals (NEW)
             if !analysis.literals.is_empty() {
                 self.index.raw_literals.insert(file_id, analysis.literals);
             }
 
-            // 3. Store Functions & Implementations
             for func in analysis.functions {
                 let symbol_id = self.index.symbols.keys().max().map(|k| k + 1).unwrap_or(0);
 
@@ -173,7 +174,6 @@ impl Indexer {
                     id: symbol_id,
                     file_id,
                     name: func.name.clone(),
-                    // We default to "function", but in the future we can refine this based on the query used
                     kind: "function".to_string(), 
                     range_start: func.range_start,
                     range_end: func.range_end,
@@ -186,17 +186,12 @@ impl Indexer {
                     .or_insert_with(Vec::new)
                     .push(symbol_id);
 
-                // Store raw calls for the Resolution phase
                 if !func.calls.is_empty() {
                     self.index.raw_calls.insert(symbol_id, func.calls);
                 }
             }
 
-            // 4. Map Implementations (NEW - Dependency Injection support)
-            // analysis.implementations is a list of (ChildName, ParentName) strings.
-            // We need to attach these to the SymbolID of the Child in *this* file.
             for (child_name, parent_name) in analysis.implementations {
-                // Find the symbol ID for 'child_name' belonging to 'file_id'
                 if let Some(ids) = self.index.symbol_map.get(&child_name) {
                     if let Some(&child_id) = ids.iter().find(|&&id| {
                         self.index.symbols.get(&id).map(|s| s.file_id) == Some(file_id)
@@ -210,20 +205,20 @@ impl Indexer {
         }
     }
 
-    // --- RESOLUTION LOGIC ---
-
     pub fn resolve_references(&mut self) {
-        // 1. Explicit Function Calls
+        // 1. Explicit Function Calls (Symbol to Symbol)
         self.resolve_function_calls();
         
-        // 2. Implicit / Heuristic Connections (NEW)
+        // 2. Bare Imports (File to File dependencies for side-effects)
+        self.resolve_bare_imports();
+        
+        // 3. Heuristic / Literal Connections (Polyglot literals and Inheritance)
         self.resolve_implicit_connections();
     }
 
     fn resolve_function_calls(&mut self) {
         self.index.resolved_calls.clear();
 
-        // Clone entries to iterate while mutating the index
         let entries: Vec<(u32, Vec<String>)> = self.index.raw_calls.iter()
             .map(|(k, v)| (*k, v.clone()))
             .collect();
@@ -235,24 +230,39 @@ impl Indexer {
             let mut resolved_targets = Vec::new();
 
             for func_name in called_names {
-                // 1. Local File Check
-                // 2. Import Check
                 if let Some(target_id) = self.resolve_single_call(caller_file_id, &func_name) {
                     resolved_targets.push(target_id);
                 } else {
-                    // 3. Global Fallback (Loose Mode)
+                    // Global Fallback
                     if let Some(candidates) = self.index.symbol_map.get(&func_name) {
                         resolved_targets.extend(candidates.iter().cloned());
                     }
                 }
             }
             
-            // Deduplicate
             resolved_targets.sort();
             resolved_targets.dedup();
             
             if !resolved_targets.is_empty() {
                 self.index.resolved_calls.insert(caller_id, resolved_targets);
+            }
+        }
+    }
+
+    fn resolve_bare_imports(&mut self) {
+        // We do not clear file_dependencies here because it is also used by resolve_implicit_connections
+        let file_ids: Vec<u32> = self.index.file_imports.keys().cloned().collect();
+        for file_id in file_ids {
+            let imports = self.index.file_imports.get(&file_id).unwrap().clone();
+            for import in imports {
+                // If name is empty, it's a side-effect import (e.g., import "./setup")
+                if import.name.is_empty() {
+                    if let Some(target_file_id) = self.resolve_import_path(file_id, &import.source) {
+                        self.index.file_dependencies.entry(file_id)
+                            .or_default()
+                            .push(target_file_id);
+                    }
+                }
             }
         }
     }
@@ -269,13 +279,11 @@ impl Indexer {
             }
         }
 
-        // 2. Check Imports
+        // 2. Check Named Imports
         if let Some(imports) = self.index.file_imports.get(&file_id) {
             for import in imports {
                 if import.name == func_name {
-                    // Try to find the file `import.source` points to
                     if let Some(target_file_id) = self.resolve_import_path(file_id, &import.source) {
-                        // Look for func_name inside target_file_id
                         if let Some(candidates) = self.index.symbol_map.get(func_name) {
                             for &id in candidates {
                                 if let Some(sym) = self.index.symbols.get(&id) {
@@ -297,27 +305,24 @@ impl Indexer {
         let from_path = Path::new(&from_file_node.path);
         let parent_dir = from_path.parent()?;
 
-        let extensions = ["ts", "js", "tsx", "jsx", "rs", "py", "html", "sh"];
-        
-        // 1. Check strict relative path
+        let extensions = ["ts", "js", "tsx", "jsx", "rs", "py", "java", "sh"];
         let candidate_base = parent_dir.join(import_source);
         
-        // Helper to check path existence in index
         let check_path = |p: PathBuf| -> Option<u32> {
-             // In a real file system we might canonicalize, but here we check our index keys
              let s = p.to_string_lossy().to_string();
+             // Since we use absolute/canonical paths in index, we try to canonicalize candidate
+             if let Ok(abs) = fs::canonicalize(&p) {
+                 return self.index.files.get(&abs.to_string_lossy().to_string()).map(|n| n.id);
+             }
              self.index.files.get(&s).map(|n| n.id)
         };
 
-        // Try exact
         if let Some(id) = check_path(candidate_base.clone()) { return Some(id); }
 
-        // Try file.ext
         for ext in extensions {
              if let Some(id) = check_path(candidate_base.with_extension(ext)) { return Some(id); }
         }
         
-        // Try file/index.ext
         let index_base = candidate_base.join("index");
         for ext in extensions {
              if let Some(id) = check_path(index_base.with_extension(ext)) { return Some(id); }
@@ -330,18 +335,14 @@ impl Indexer {
         self.index.file_dependencies.clear();
         self.index.inheritance.clear();
 
-        // --- A. Build Inheritance Graph (Parent ID <- Child ID) ---
-        // raw_implementations maps ChildID -> [ParentName1, ParentName2]
-        
+        // --- A. Build Inheritance Graph ---
         let raw_impls: Vec<(u32, Vec<String>)> = self.index.raw_implementations.iter()
             .map(|(k, v)| (*k, v.clone())).collect();
 
         for (child_id, parent_names) in raw_impls {
             for parent_name in parent_names {
-                // Resolve ParentName to SymbolIDs
                 if let Some(parent_ids) = self.index.symbol_map.get(&parent_name) {
                     for &parent_id in parent_ids {
-                        // Store: Parent -> Children
                         self.index.inheritance.entry(parent_id)
                             .or_default()
                             .push(child_id);
@@ -350,17 +351,13 @@ impl Indexer {
             }
         }
 
-        // --- B. Build Literal Bridge (File A depends on File B) ---
-        // We look for literals that match file paths or shared high-entropy strings
-        
+        // --- B. Build Literal Bridge ---
         let mut global_string_map: HashMap<String, Vec<u32>> = HashMap::new();
         let entries: Vec<(u32, Vec<String>)> = self.index.raw_literals.iter()
             .map(|(k, v)| (*k, v.clone())).collect();
 
         for (src_id, literals) in entries {
             for lit in literals {
-                
-                // 1. Path Resolution (Polyglot Calls)
                 if let Some(target_id) = self.resolve_import_path(src_id, &lit) {
                     if src_id != target_id {
                         self.index.file_dependencies.entry(src_id)
@@ -369,43 +366,31 @@ impl Indexer {
                     }
                 }
 
-                // 2. High-Entropy String Matching (Events / Routes)
-                // Filter for "interesting" strings
                 let is_path = lit.contains('/') || lit.contains('.');
                 let is_constant = lit.len() > 5 && lit.chars().all(|c| c.is_uppercase() || c == '_');
                 
                 if is_path || is_constant {
-                    global_string_map.entry(lit.clone())
-                        .or_default()
-                        .push(src_id);
+                    global_string_map.entry(lit.clone()).or_default().push(src_id);
                 }
             }
         }
 
-        // Connect files that share the same high-entropy string
         for (_, file_ids) in global_string_map {
-            if file_ids.len() < 2 { continue; }
-            if file_ids.len() > 50 { continue; } // Too noisy
-
+            if file_ids.len() < 2 || file_ids.len() > 50 { continue; }
             for &f1 in &file_ids {
                 for &f2 in &file_ids {
                     if f1 != f2 {
-                        self.index.file_dependencies.entry(f1)
-                            .or_default()
-                            .push(f2);
+                        self.index.file_dependencies.entry(f1).or_default().push(f2);
                     }
                 }
             }
         }
         
-        // Cleanup / Deduplicate
         for deps in self.index.file_dependencies.values_mut() {
-            deps.sort();
-            deps.dedup();
+            deps.sort(); deps.dedup();
         }
         for children in self.index.inheritance.values_mut() {
-            children.sort();
-            children.dedup();
+            children.sort(); children.dedup();
         }
     }
 }

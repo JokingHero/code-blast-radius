@@ -1,6 +1,7 @@
 use tree_sitter::Language;
+use crate::languages; 
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SupportedLanguage {
     Rust,
     TypeScript,
@@ -13,6 +14,8 @@ pub enum SupportedLanguage {
     R,
 }
 
+/// Central mapping from the enum to the actual Tree-Sitter grammar object.
+/// This is used by the Analyzer to initialize the parser.
 pub fn get_language(lang: SupportedLanguage) -> Language {
     match lang {
         SupportedLanguage::Rust => tree_sitter_rust::LANGUAGE.into(),
@@ -27,6 +30,7 @@ pub fn get_language(lang: SupportedLanguage) -> Language {
     }
 }
 
+/// The structure used by the Indexer to know how to parse a specific file type.
 pub struct LanguageConfig {
     pub lang_enum: SupportedLanguage,
     pub file_extensions: &'static [&'static str],
@@ -38,209 +42,18 @@ pub struct LanguageConfig {
     pub query_implements: &'static str,
 }
 
-// --- Configurations ---
-
-pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::Rust,
-    file_extensions: &["rs"],
-    query_defs: r#"(function_item name: (identifier) @function.name) @function.definition"#,
-    query_calls: r#"(call_expression function: [(identifier) @call.name (field_expression field: (field_identifier) @call.name)])"#,
-    query_docs: r#"((line_comment)+ @function.docs . (function_item) @function.definition)"#,
-    query_imports: "",
-    query_literals: r#"(string_literal) @string"#,
-    query_implements: r#"
-        (impl_item
-            trait: (type_identifier) @impl.parent
-            type: (type_identifier) @impl.child
-        )
-    "#,
-};
-
-pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::TypeScript,
-    file_extensions: &["ts", "tsx"],
-    query_defs: r#"
-        [
-          (function_declaration name: (identifier) @function.name) @function.definition
-          (method_definition name: (property_identifier) @function.name) @function.definition
-          (class_declaration name: (type_identifier) @function.name) @function.definition
-          (interface_declaration name: (type_identifier) @function.name) @function.definition
-          ((variable_declarator name: (identifier) @function.name value: [(arrow_function) (function_expression)]) @function.definition)
-        ]
-    "#,
-    query_calls: r#"(call_expression function: [(identifier) @call.name (member_expression property: (property_identifier) @call.name)])"#,
-    query_docs: r#"
-      (
-        (comment)+ @function.docs
-        .
-        [ (function_declaration) (method_definition) (export_statement (variable_declaration)) (class_declaration) (interface_declaration) ] @function.definition
-      )
-    "#,
-    query_imports: r#"
-        (import_statement
-            (import_clause
-                (named_imports
-                    (import_specifier
-                        name: (identifier) @import.name
-                    )
-                )
-            )
-            source: (string) @import.source
-        )
-    "#,
-    query_literals: r#"[ (string) (template_string) ] @string"#,
-    // 1. Class: uses `extends_clause` (field: value) and `implements_clause` (no field).
-    // 2. Interface: uses `extends_type_clause` (field: type).
-    query_implements: r#"
-        [
-          (class_declaration
-            name: (type_identifier) @impl.child
-            (class_heritage 
-                (extends_clause value: (identifier) @impl.parent)?
-                (implements_clause (type_identifier) @impl.parent)?
-            )
-          )
-          (interface_declaration
-            name: (type_identifier) @impl.child
-            (extends_type_clause type: (type_identifier) @impl.parent)
-          )
-        ]
-    "#,
-};
-
-pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::JavaScript,
-    file_extensions: &["js", "jsx", "mjs", "cjs"],
-    query_defs: r#"
-        [
-          (function_declaration name: (identifier) @function.name) @function.definition
-          (method_definition name: (property_identifier) @function.name) @function.definition
-          (class_declaration name: (identifier) @function.name) @function.definition
-          ((variable_declarator name: (identifier) @function.name value: [(arrow_function) (function_expression)]) @function.definition)
-        ]
-    "#,
-    query_calls: TYPESCRIPT_CONFIG.query_calls,
-    query_docs: r#"
-      (
-        (comment)+ @function.docs
-        .
-        [ (function_declaration) (method_definition) (export_statement (variable_declaration)) (class_declaration) ] @function.definition
-      )
-    "#,
-    query_imports: TYPESCRIPT_CONFIG.query_imports,
-    query_literals: r#"[ (string) (template_string) ] @string"#,
-    query_implements: r#"
-        (class_declaration
-            name: (identifier) @impl.child
-            (class_heritage (identifier) @impl.parent)
-        )
-    "#,
-};
-
-pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::Python,
-    file_extensions: &["py"],
-    query_defs: r#"(function_definition name: (identifier) @function.name) @function.definition"#,
-    query_calls: r#"(call function: [(identifier) @call.name (attribute attribute: (identifier) @call.name)])"#,
-    query_docs: r#"(function_definition body: (block . (expression_statement (string) @function.docs))) @function.definition"#,
-    query_imports: "", 
-    query_literals: r#"(string) @string"#,
-    query_implements: r#"
-        (class_definition
-            name: (identifier) @impl.child
-            superclasses: (argument_list (identifier) @impl.parent)
-        )
-    "#,
-};
-
-pub const JAVA_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::Java,
-    file_extensions: &["java"],
-    query_defs: r#"(method_declaration name: (identifier) @function.name) @function.definition"#,
-    query_calls: r#"(method_invocation name: (identifier) @call.name)"#,
-    query_docs: r#"((block_comment) @function.docs . (method_declaration) @function.definition)"#,
-    query_imports: "",
-    query_literals: r#"(string_literal) @string"#,
-    query_implements: r#"
-        (class_declaration
-            name: (identifier) @impl.child
-            superclass: (superclass (type_identifier) @impl.parent)?
-        )
-    "#,
-};
-
-pub const BASH_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::Bash,
-    file_extensions: &["sh", "bash"],
-    query_defs: r#"(function_definition name: (word) @function.name) @function.definition"#,
-    query_calls: r#"(command name: (command_name (word) @call.name))"#,
-    query_docs: r#"((comment)+ @function.docs . (function_definition) @function.definition)"#,
-    query_imports: "",
-    query_literals: r#"(word) @string"#,
-    query_implements: "",
-};
-
-pub const JULIA_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::Julia,
-    file_extensions: &["jl"],
-    query_defs: r#"(function_definition name: (identifier) @function.name) @function.definition"#,
-    query_calls: r#"(call_expression function: (identifier) @call.name)"#,
-    query_docs: r#"((block_comment) @function.docs . (function_definition) @function.definition)"#,
-    query_imports: "",
-    query_literals: r#"(string_literal) @string"#,
-    query_implements: "",
-};
-
-pub const R_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::R,
-    file_extensions: &["R", "r"],
-    query_defs: r#"(function_definition name: (identifier) @function.name) @function.definition"#,
-    query_calls: r#"(call_expression function: (identifier) @call.name)"#,
-    query_docs: r#"((comment)+ @function.docs . (function_definition) @function.definition)"#,
-    query_imports: "",
-    query_literals: r#"(string) @string"#,
-    query_implements: "",
-};
-
-pub const HTML_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::Html,
-    file_extensions: &["html", "htm"],
-    query_defs: r#"
-      (script_element
-        (raw_text) @script_content
-        (#match? @script_content "function\\s+([a-zA-Z0-9_]+)")
-        (function_declaration name: (identifier) @function.name) @function.definition
-      )
-    "#,
-    query_calls: r#"
-      (script_element
-        (call_expression
-          function: (identifier) @call.name
-        )
-      )
-    "#,
-    query_docs: r#"
-      (script_element
-        (comment) @function.docs
-        .
-        (function_declaration) @function.definition
-      )
-    "#,
-    query_imports: "",
-    query_literals: r#"(attribute_value) @string"#,
-    query_implements: "",
-};
-
+/// Collects all configurations from the sub-modules in the `languages/` folder.
+/// This is used by the Indexer to build its extension-to-config map.
 pub fn get_language_configs() -> Vec<&'static LanguageConfig> {
     vec![
-        &RUST_CONFIG,
-        &TYPESCRIPT_CONFIG,
-        &JAVASCRIPT_CONFIG,
-        &PYTHON_CONFIG,
-        &JAVA_CONFIG,
-        &BASH_CONFIG,
-        &JULIA_CONFIG,
-        &R_CONFIG,
-        &HTML_CONFIG,
+        &languages::rust::RUST_CONFIG,
+        &languages::typescript::TYPESCRIPT_CONFIG,
+        &languages::javascript::JAVASCRIPT_CONFIG,
+        &languages::python::PYTHON_CONFIG,
+        &languages::java::JAVA_CONFIG,
+        &languages::bash::BASH_CONFIG,
+        &languages::julia::JULIA_CONFIG,
+        &languages::r::R_CONFIG,
+        &languages::html::HTML_CONFIG,
     ]
 }

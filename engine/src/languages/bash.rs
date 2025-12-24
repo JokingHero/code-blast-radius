@@ -1,0 +1,12 @@
+use crate::language::{LanguageConfig, SupportedLanguage};
+
+pub const BASH_CONFIG: LanguageConfig = LanguageConfig {
+    lang_enum: SupportedLanguage::Bash,
+    file_extensions: &["sh", "bash"],
+    query_defs: r#"(function_definition name: (word) @function.name) @function.definition"#,
+    query_calls: r#"(command name: (command_name (word) @call.name))"#,
+    query_docs: r#"((comment)+ @function.docs . (function_definition) @function.definition)"#,
+    query_imports: "",
+    query_literals: r#"(word) @string"#,
+    query_implements: "",
+};

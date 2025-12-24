@@ -5,6 +5,7 @@ use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator};
 use crate::language::{get_language, LanguageConfig};
 use crate::schema::{ImportNode, WorkspaceIndex, SymbolId};
 
+
 #[derive(Debug, Clone)]
 pub struct FunctionInfo {
     pub name: String,
@@ -18,10 +19,16 @@ pub struct FunctionInfo {
 pub struct FileAnalysis {
     pub functions: Vec<FunctionInfo>,
     pub imports: Vec<ImportNode>,
-    // NEW: Captures string literals (e.g., "./script.py", "/api/v1/user")
     pub literals: Vec<String>,
-    // NEW: Captures inheritance (Child Name -> Parent Name)
     pub implementations: Vec<(String, String)>, 
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SliceDirection {
+    /// "Who calls me?" - Trace upwards to find callers.
+    Upstream,
+    /// "What do I call?" - Trace downwards to find dependencies.
+    Downstream,
 }
 
 pub fn analyze_source(
@@ -68,7 +75,9 @@ pub fn analyze_source(
                 }
             }
 
-            if !current_source.is_empty() && !current_name.is_empty() {
+            // Note: In some languages (TS side-effects), name might be empty, 
+            // but we still want the source for file-level dependencies.
+            if !current_source.is_empty() {
                 imports.push(ImportNode {
                     name: current_name,
                     source: current_source,
@@ -78,8 +87,7 @@ pub fn analyze_source(
         }
     }
 
-    // --- 2. Extract Literals (NEW) ---
-    // Used for connecting files via paths or route strings
+    // --- 2. Extract Literals ---
     let mut literals = Vec::new();
     if !config.query_literals.is_empty() {
         let lit_query = Query::new(&language, config.query_literals).expect("Invalid literals query");
@@ -89,10 +97,7 @@ pub fn analyze_source(
         while let Some(match_) = matches.next() {
             for capture in match_.captures {
                 let text = capture.node.utf8_text(code_bytes).unwrap_or("").to_string();
-                // Clean up quotes ( "file.js" -> file.js )
                 let clean = text.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_string();
-                
-                // Filter out empty strings or very short noise
                 if !clean.is_empty() && clean.len() > 1 {
                     literals.push(clean);
                 }
@@ -100,8 +105,7 @@ pub fn analyze_source(
         }
     }
 
-    // --- 3. Extract Implementations (NEW) ---
-    // Used for Dependency Injection and Inheritance links
+    // --- 3. Extract Implementations ---
     let mut implementations = Vec::new();
     if !config.query_implements.is_empty() {
         let impl_query = Query::new(&language, config.query_implements).expect("Invalid implements query");
@@ -116,7 +120,6 @@ pub fn analyze_source(
                 let name = impl_query.capture_names()[capture.index as usize];
                 let text = capture.node.utf8_text(code_bytes).unwrap_or("").to_string();
                 
-                // FIXED: Use else if to prevent double-move error
                 if name == "impl.child" { 
                     child = text; 
                 } else if name == "impl.parent" { 
@@ -187,7 +190,11 @@ pub fn analyze_source(
     Ok(FileAnalysis { functions, imports, literals, implementations })
 }
 
-pub fn find_call_chain_ids(index: &WorkspaceIndex, target_name: &str) -> Option<Vec<SymbolId>> {
+pub fn find_call_chain_ids(
+    index: &WorkspaceIndex, 
+    target_name: &str,
+    direction: SliceDirection
+) -> Option<Vec<SymbolId>> {
     let targets = index.symbol_map.get(target_name)?;
     if targets.is_empty() { return None; }
 
@@ -202,50 +209,85 @@ pub fn find_call_chain_ids(index: &WorkspaceIndex, target_name: &str) -> Option<
 
     while let Some(current_id) = queue.pop_front() {
         
-        // 1. Explicit Calls (Who calls me?)
-        for (caller_id, callees) in &index.resolved_calls {
-            if callees.contains(&current_id) {
-                if !visited.contains(caller_id) {
-                    visited.insert(*caller_id);
-                    predecessors.insert(current_id, *caller_id); 
-                    queue.push_back(*caller_id);
+        match direction {
+            SliceDirection::Upstream => {
+                // 1. Explicit Calls (Who calls me?)
+                for (caller_id, callees) in &index.resolved_calls {
+                    if callees.contains(&current_id) {
+                        if !visited.contains(caller_id) {
+                            visited.insert(*caller_id);
+                            predecessors.insert(*caller_id, current_id); 
+                            queue.push_back(*caller_id);
+                        }
+                    }
+                }
+
+                // 2. Inheritance Links (Sideways Expansion)
+                // If I am a Parent, check my Children to see who calls them.
+                if let Some(children) = index.inheritance.get(&current_id) {
+                    for &child_id in children {
+                        if !visited.contains(&child_id) {
+                            visited.insert(child_id);
+                            predecessors.insert(child_id, current_id); 
+                            queue.push_back(child_id);
+                        }
+                    }
+                }
+            },
+            SliceDirection::Downstream => {
+                // 1. Explicit Calls (What do I call?)
+                if let Some(callees) = index.resolved_calls.get(&current_id) {
+                    for &callee_id in callees {
+                        if !visited.contains(&callee_id) {
+                            visited.insert(callee_id);
+                            predecessors.insert(callee_id, current_id);
+                            queue.push_back(callee_id);
+                        }
+                    }
+                }
+
+                // 2. Implementation Links (Inverted Sideways Expansion)
+                // If I call an abstract/interface method, I am effectively calling implementations.
+                if let Some(children) = index.inheritance.get(&current_id) {
+                    for &child_id in children {
+                        if !visited.contains(&child_id) {
+                            visited.insert(child_id);
+                            predecessors.insert(child_id, current_id);
+                            queue.push_back(child_id);
+                        }
+                    }
                 }
             }
         }
+    }
 
-        // 2. Inheritance Links (NEW)
-        // If I am a Parent, check my Children.
-        // E.g., if finding usage of "Shape", we also check usages of "Circle"
-        if let Some(children) = index.inheritance.get(&current_id) {
-            for &child_id in children {
-                // We add children to the context. This is "Sideways Expansion".
-                if !visited.contains(&child_id) {
-                    visited.insert(child_id);
-                    // Map Child -> Parent so we can trace back
-                    predecessors.insert(child_id, current_id); 
-                    queue.push_back(child_id);
-                }
-            }
+    // --- Path Reconstruction ---
+    // We want to find a symbol from the original targets that was actually reached/visited
+    // and trace the path discovered by BFS.
+    // In a multi-branch search, "visited" contains the full context.
+    // However, to maintain your "Chain" logic, we find the longest path from a leaf back to a root.
+    // For simplicity and to match your previous code, we'll return all unique visited IDs.
+    // A future improvement could be sorting these by topological depth.
+    let mut final_list: Vec<SymbolId> = visited.into_iter().collect();
+    
+    // Sort logic: We want the original target to likely be at the end (for upstream) or start (for downstream)
+    final_list.sort_by_key(|id| {
+        let mut depth = 0;
+        let mut curr = *id;
+        while let Some(&p) = predecessors.get(&curr) {
+            depth += 1;
+            curr = p;
         }
+        depth
+    });
+
+    if direction == SliceDirection::Upstream {
+        // Targets at the end
+    } else {
+        final_list.reverse(); // Target at the start
     }
 
-    let mut current = targets[0]; 
-    for &t in targets {
-        if predecessors.contains_key(&t) {
-            current = t;
-            break;
-        }
-    }
-
-    // Trace path back to a root
-    let mut chain = vec![current];
-    while let Some(&parent) = predecessors.get(&current) {
-        chain.push(parent);
-        current = parent;
-    }
-
-    chain.reverse(); 
-    Some(chain)
+    Some(final_list)
 }
 
 pub fn generate_context_from_ids(
@@ -253,23 +295,34 @@ pub fn generate_context_from_ids(
     chain: &[SymbolId],
     include_docs: bool,
 ) -> String {
+    if chain.is_empty() { return String::from("// No context found."); }
+
     let mut context = String::new();
-    let target_id = chain.last().unwrap();
+    
+    // We use the first/last symbol as the logical "Target" for the header
+    let target_id = chain.first().unwrap(); 
     let target_name = index.symbols.get(target_id).map(|s| s.name.as_str()).unwrap_or("Unknown");
 
-    context.push_str(&format!("// Context for function: `{}`\n", target_name));
+    context.push_str(&format!("// Context for search: `{}`\n", target_name));
     
     let names: Vec<String> = chain.iter()
         .filter_map(|id| index.symbols.get(id).map(|s| s.name.clone()))
         .collect();
-    context.push_str(&format!("// Call Chain: {}\n\n", names.join(" -> ")));
+    context.push_str(&format!("// Resolved Symbols: {}\n\n", names.join(", ")));
+
+    // Track which files we've already printed a header for in this output
+    let mut seen_files = HashSet::new();
 
     for &sym_id in chain {
         if let Some(sym) = index.symbols.get(&sym_id) {
             if let Some(file_node) = index.files.values().find(|f| f.id == sym.file_id) {
-                context.push_str("// ==========================================================\n");
-                context.push_str(&format!("// File: {}\n", file_node.path));
-                context.push_str("// ==========================================================\n");
+                
+                if !seen_files.contains(&file_node.id) {
+                    context.push_str("// ==========================================================\n");
+                    context.push_str(&format!("// File: {}\n", file_node.path));
+                    context.push_str("// ==========================================================\n");
+                    seen_files.insert(file_node.id);
+                }
 
                 if include_docs {
                     if let Some(docs) = &sym.doc_comment {
@@ -278,6 +331,7 @@ pub fn generate_context_from_ids(
                     }
                 }
 
+                // IMPORTANT: Read from the actual file path stored in the index
                 if let Ok(content) = std::fs::read_to_string(&file_node.path) {
                     if sym.range_end <= content.len() {
                         let bytes = content.as_bytes();
@@ -285,14 +339,82 @@ pub fn generate_context_from_ids(
                         let text = String::from_utf8_lossy(slice);
                         context.push_str(&text);
                     } else {
-                        context.push_str("// Error: Source range out of bounds");
+                        context.push_str("// Error: Source range out of bounds (file changed?)");
                     }
                 } else {
-                    context.push_str("// Error: Could not read file");
+                    context.push_str(&format!("// Error: Could not read file at {}", file_node.path));
                 }
                 context.push_str("\n\n");
             }
         }
     }
     context
+}
+
+pub fn find_related_symbols(
+    index: &WorkspaceIndex, 
+    target_name: &str,
+) -> Option<Vec<SymbolId>> {
+    let targets = index.symbol_map.get(target_name)?;
+    if targets.is_empty() { return None; }
+
+    let mut queue: VecDeque<SymbolId> = VecDeque::new();
+    let mut visited: HashSet<SymbolId> = HashSet::new();
+
+    for &id in targets {
+        queue.push_back(id);
+        visited.insert(id);
+    }
+
+    while let Some(current_id) = queue.pop_front() {
+        // 1. DOWNSTREAM: What does this symbol call?
+        if let Some(callees) = index.resolved_calls.get(&current_id) {
+            for &callee_id in callees {
+                if !visited.contains(&callee_id) {
+                    visited.insert(callee_id);
+                    queue.push_back(callee_id);
+                }
+            }
+        }
+
+        // 2. UPSTREAM: Who calls this symbol?
+        for (caller_id, callees) in &index.resolved_calls {
+            if callees.contains(&current_id) {
+                if !visited.contains(caller_id) {
+                    visited.insert(*caller_id);
+                    queue.push_back(*caller_id);
+                }
+            }
+        }
+
+        // 3. INHERITANCE: Siblings, Parents, and Children
+        if let Some(children) = index.inheritance.get(&current_id) {
+            for &child_id in children {
+                if !visited.contains(&child_id) {
+                    visited.insert(child_id);
+                    queue.push_back(child_id);
+                }
+            }
+        }
+        
+        for (parent_id, children) in &index.inheritance {
+            if children.contains(&current_id) {
+                if !visited.contains(parent_id) {
+                    visited.insert(*parent_id);
+                    queue.push_back(*parent_id);
+                }
+            }
+        }
+    }
+
+    let mut final_list: Vec<SymbolId> = visited.into_iter().collect();
+    
+    // Deterministic sort for consistent LLM output
+    final_list.sort_by(|a, b| {
+        let sym_a = index.symbols.get(a).unwrap();
+        let sym_b = index.symbols.get(b).unwrap();
+        sym_a.file_id.cmp(&sym_b.file_id).then(sym_a.range_start.cmp(&sym_b.range_start))
+    });
+
+    Some(final_list)
 }
