@@ -6,23 +6,51 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
     query_defs: r#"
         [
           (function_declaration name: (identifier) @function.name) @function.definition
-          (method_definition name: (property_identifier) @function.name) @function.definition
+          ;; Capture methods in classes
+          (method_definition name: [(property_identifier) (identifier)] @function.name) @function.definition
+          ;; Capture methods in interfaces
+          (method_signature name: [(property_identifier) (identifier)] @function.name) @function.definition
+          ;; Capture containers
           (class_declaration name: (type_identifier) @function.name) @function.definition
-          (interface_declaration name: (type_identifier) @function.name) @function.definition
+          (interface_declaration name: [(type_identifier) (identifier)] @function.name) @function.definition
+          ;; Capture variable-assigned functions
           ((variable_declarator name: (identifier) @function.name value: [(arrow_function) (function_expression)]) @function.definition)
         ]
     "#,
-    query_calls: r#"(call_expression function: [(identifier) @call.name (member_expression property: (property_identifier) @call.name)])"#,
+    query_calls: r#"
+        [
+          ;; Method calls: obj.method()
+          (call_expression 
+            function: (member_expression 
+              object: [(identifier) (this)] @call.receiver
+              property: [(property_identifier) (identifier)] @call.name))
+          
+          ;; Plain calls: method()
+          (call_expression 
+            function: (identifier) @call.name)
+
+          ;; Fallback for complex property access
+          (call_expression
+            function: (member_expression
+              property: [(property_identifier) (identifier)] @call.name))
+        ]
+    "#,
     query_docs: r#"
       (
         (comment)+ @function.docs
         .
-        [ (function_declaration) (method_definition) (export_statement (variable_declaration)) (class_declaration) (interface_declaration) ] @function.definition
+        [ 
+          (function_declaration) 
+          (method_definition) 
+          (method_signature)
+          (export_statement (variable_declaration)) 
+          (class_declaration) 
+          (interface_declaration) 
+        ] @function.definition
       )
     "#,
     query_imports: r#"
         [
-          ;; 1. Your original working named imports query
           (import_statement
               (import_clause
                   (named_imports
@@ -33,7 +61,6 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
               )
               source: (string) @import.source
           )
-          ;; 2. Side-effect imports: import "./file"
           (import_statement source: (string) @import.source)
         ]
     "#,
@@ -48,8 +75,8 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             )
           )
           (interface_declaration
-            name: (type_identifier) @impl.child
-            (extends_type_clause type: (type_identifier) @impl.parent)
+            name: [(type_identifier) (identifier)] @impl.child
+            (extends_type_clause type: [(type_identifier) (identifier)] @impl.parent)
           )
         ]
     "#,

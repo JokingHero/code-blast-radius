@@ -5,7 +5,6 @@ use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator};
 use crate::language::{get_language, LanguageConfig};
 use crate::schema::{ImportNode, WorkspaceIndex, SymbolId};
 
-
 #[derive(Debug, Clone)]
 pub struct FunctionInfo {
     pub name: String,
@@ -14,6 +13,7 @@ pub struct FunctionInfo {
     pub source_code: String,
     pub documentation: Option<String>,
     pub calls: Vec<String>, 
+    pub fingerprints: HashMap<String, Vec<String>>,
 }
 
 pub struct FileAnalysis {
@@ -23,12 +23,19 @@ pub struct FileAnalysis {
     pub implementations: Vec<(String, String)>, 
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SliceDirection {
-    /// "Who calls me?" - Trace upwards to find callers.
     Upstream,
-    /// "What do I call?" - Trace downwards to find dependencies.
     Downstream,
+    Both,
+}
+
+/// Internal helper for find_related_symbols to prevent zig-zag pollution
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum TraversalMode {
+    Downstream, // Looking at what we use
+    Upstream,   // Looking at who uses us
+    Both,       // Initial state
 }
 
 pub fn analyze_source(
@@ -75,8 +82,6 @@ pub fn analyze_source(
                 }
             }
 
-            // Note: In some languages (TS side-effects), name might be empty, 
-            // but we still want the source for file-level dependencies.
             if !current_source.is_empty() {
                 imports.push(ImportNode {
                     name: current_name,
@@ -120,11 +125,8 @@ pub fn analyze_source(
                 let name = impl_query.capture_names()[capture.index as usize];
                 let text = capture.node.utf8_text(code_bytes).unwrap_or("").to_string();
                 
-                if name == "impl.child" { 
-                    child = text; 
-                } else if name == "impl.parent" { 
-                    parent = text; 
-                }
+                if name == "impl.child" { child = text; } 
+                else if name == "impl.parent" { parent = text; }
             }
             
             if !child.is_empty() && !parent.is_empty() {
@@ -133,7 +135,7 @@ pub fn analyze_source(
         }
     }
 
-    // --- 4. Extract Functions & Calls ---
+    // --- 4. Extract Functions, Calls & Fingerprints ---
     let defs_query = Query::new(&language, config.query_defs).expect("Invalid definitions query");
     let docs_query = Query::new(&language, config.query_docs).expect("Invalid docs query");
     let calls_query = Query::new(&language, config.query_calls).expect("Invalid calls query");
@@ -148,17 +150,34 @@ pub fn analyze_source(
 
         let name = name_node.utf8_text(code_bytes).unwrap().to_string();
         let func_source = def_node.utf8_text(code_bytes).unwrap().to_string();
-
         let range_start = def_node.start_byte();
         let range_end = def_node.end_byte();
 
         let mut calls = Vec::new();
+        let mut fingerprints: HashMap<String, Vec<String>> = HashMap::new();
         let mut calls_cursor = QueryCursor::new();
         let mut call_matches = calls_cursor.matches(&calls_query, def_node, code_bytes);
+
         while let Some(call_match) = call_matches.next() {
-            let call_name_node = call_match.captures.iter().find(|c| calls_query.capture_names()[c.index as usize] == "call.name").unwrap().node;
-            if let Ok(call_name_str) = call_name_node.utf8_text(code_bytes) {
-                calls.push(call_name_str.to_string());
+            let mut method_name = None;
+            let mut receiver_name = None;
+
+            for capture in call_match.captures {
+                let capture_name = calls_query.capture_names()[capture.index as usize];
+                let text = capture.node.utf8_text(code_bytes).unwrap_or("").to_string();
+
+                if capture_name == "call.name" {
+                    method_name = Some(text);
+                } else if capture_name == "call.receiver" {
+                    receiver_name = Some(text);
+                }
+            }
+
+            if let Some(m) = method_name {
+                calls.push(m.clone());
+                if let Some(r) = receiver_name {
+                    fingerprints.entry(r).or_default().push(m);
+                }
             }
         }
 
@@ -184,6 +203,7 @@ pub fn analyze_source(
             source_code: func_source,
             documentation,
             calls,
+            fingerprints,
         });
     }
 
@@ -208,69 +228,43 @@ pub fn find_call_chain_ids(
     }
 
     while let Some(current_id) = queue.pop_front() {
-        
-        match direction {
-            SliceDirection::Upstream => {
-                // 1. Explicit Calls (Who calls me?)
-                for (caller_id, callees) in &index.resolved_calls {
-                    if callees.contains(&current_id) {
-                        if !visited.contains(caller_id) {
-                            visited.insert(*caller_id);
-                            predecessors.insert(*caller_id, current_id); 
-                            queue.push_back(*caller_id);
-                        }
-                    }
+        // --- 1. UPSTREAM Logic ---
+        if direction == SliceDirection::Upstream || direction == SliceDirection::Both {
+            for (caller_id, callees) in &index.resolved_calls {
+                if callees.contains(&current_id) && !visited.contains(caller_id) {
+                    visited.insert(*caller_id);
+                    predecessors.insert(*caller_id, current_id); 
+                    queue.push_back(*caller_id);
                 }
+            }
+        }
 
-                // 2. Inheritance Links (Sideways Expansion)
-                // If I am a Parent, check my Children to see who calls them.
-                if let Some(children) = index.inheritance.get(&current_id) {
-                    for &child_id in children {
-                        if !visited.contains(&child_id) {
-                            visited.insert(child_id);
-                            predecessors.insert(child_id, current_id); 
-                            queue.push_back(child_id);
-                        }
+        // --- 2. DOWNSTREAM Logic ---
+        if direction == SliceDirection::Downstream || direction == SliceDirection::Both {
+            if let Some(callees) = index.resolved_calls.get(&current_id) {
+                for &callee_id in callees {
+                    if !visited.contains(&callee_id) {
+                        visited.insert(callee_id);
+                        predecessors.insert(callee_id, current_id);
+                        queue.push_back(callee_id);
                     }
                 }
-            },
-            SliceDirection::Downstream => {
-                // 1. Explicit Calls (What do I call?)
-                if let Some(callees) = index.resolved_calls.get(&current_id) {
-                    for &callee_id in callees {
-                        if !visited.contains(&callee_id) {
-                            visited.insert(callee_id);
-                            predecessors.insert(callee_id, current_id);
-                            queue.push_back(callee_id);
-                        }
-                    }
-                }
+            }
+        }
 
-                // 2. Implementation Links (Inverted Sideways Expansion)
-                // If I call an abstract/interface method, I am effectively calling implementations.
-                if let Some(children) = index.inheritance.get(&current_id) {
-                    for &child_id in children {
-                        if !visited.contains(&child_id) {
-                            visited.insert(child_id);
-                            predecessors.insert(child_id, current_id);
-                            queue.push_back(child_id);
-                        }
-                    }
+        // --- 3. STRUCTURAL Logic ---
+        if let Some(children) = index.inheritance.get(&current_id) {
+            for &child_id in children {
+                if !visited.contains(&child_id) {
+                    visited.insert(child_id);
+                    predecessors.insert(child_id, current_id); 
+                    queue.push_back(child_id);
                 }
             }
         }
     }
 
-    // --- Path Reconstruction ---
-    // We want to find a symbol from the original targets that was actually reached/visited
-    // and trace the path discovered by BFS.
-    // In a multi-branch search, "visited" contains the full context.
-    // However, to maintain your "Chain" logic, we find the longest path from a leaf back to a root.
-    // For simplicity and to match your previous code, we'll return all unique visited IDs.
-    // A future improvement could be sorting these by topological depth.
     let mut final_list: Vec<SymbolId> = visited.into_iter().collect();
-    
-    // Sort logic: We want the original target to likely be at the end (for upstream) or start (for downstream)
     final_list.sort_by_key(|id| {
         let mut depth = 0;
         let mut curr = *id;
@@ -281,10 +275,8 @@ pub fn find_call_chain_ids(
         depth
     });
 
-    if direction == SliceDirection::Upstream {
-        // Targets at the end
-    } else {
-        final_list.reverse(); // Target at the start
+    if direction == SliceDirection::Downstream {
+        final_list.reverse();
     }
 
     Some(final_list)
@@ -298,8 +290,6 @@ pub fn generate_context_from_ids(
     if chain.is_empty() { return String::from("// No context found."); }
 
     let mut context = String::new();
-    
-    // We use the first/last symbol as the logical "Target" for the header
     let target_id = chain.first().unwrap(); 
     let target_name = index.symbols.get(target_id).map(|s| s.name.as_str()).unwrap_or("Unknown");
 
@@ -310,13 +300,11 @@ pub fn generate_context_from_ids(
         .collect();
     context.push_str(&format!("// Resolved Symbols: {}\n\n", names.join(", ")));
 
-    // Track which files we've already printed a header for in this output
     let mut seen_files = HashSet::new();
 
     for &sym_id in chain {
         if let Some(sym) = index.symbols.get(&sym_id) {
             if let Some(file_node) = index.files.values().find(|f| f.id == sym.file_id) {
-                
                 if !seen_files.contains(&file_node.id) {
                     context.push_str("// ==========================================================\n");
                     context.push_str(&format!("// File: {}\n", file_node.path));
@@ -331,7 +319,6 @@ pub fn generate_context_from_ids(
                     }
                 }
 
-                // IMPORTANT: Read from the actual file path stored in the index
                 if let Ok(content) = std::fs::read_to_string(&file_node.path) {
                     if sym.range_end <= content.len() {
                         let bytes = content.as_bytes();
@@ -358,58 +345,66 @@ pub fn find_related_symbols(
     let targets = index.symbol_map.get(target_name)?;
     if targets.is_empty() { return None; }
 
-    let mut queue: VecDeque<SymbolId> = VecDeque::new();
-    let mut visited: HashSet<SymbolId> = HashSet::new();
+    let mut queue: VecDeque<(SymbolId, TraversalMode)> = VecDeque::new();
+    let mut visited: HashSet<(SymbolId, TraversalMode)> = HashSet::new();
+    let mut result_set: HashSet<SymbolId> = HashSet::new();
 
     for &id in targets {
-        queue.push_back(id);
-        visited.insert(id);
+        queue.push_back((id, TraversalMode::Both));
+        visited.insert((id, TraversalMode::Both));
+        result_set.insert(id);
     }
 
-    while let Some(current_id) = queue.pop_front() {
-        // 1. DOWNSTREAM: What does this symbol call?
-        if let Some(callees) = index.resolved_calls.get(&current_id) {
-            for &callee_id in callees {
-                if !visited.contains(&callee_id) {
-                    visited.insert(callee_id);
-                    queue.push_back(callee_id);
+    while let Some((current_id, mode)) = queue.pop_front() {
+        // 1. DOWNSTREAM Traversal (Dependencies)
+        if mode == TraversalMode::Both || mode == TraversalMode::Downstream {
+            if let Some(callees) = index.resolved_calls.get(&current_id) {
+                for &callee_id in callees {
+                    if !visited.contains(&(callee_id, TraversalMode::Downstream)) {
+                        visited.insert((callee_id, TraversalMode::Downstream));
+                        result_set.insert(callee_id);
+                        queue.push_back((callee_id, TraversalMode::Downstream));
+                    }
                 }
             }
         }
 
-        // 2. UPSTREAM: Who calls this symbol?
-        for (caller_id, callees) in &index.resolved_calls {
-            if callees.contains(&current_id) {
-                if !visited.contains(caller_id) {
-                    visited.insert(*caller_id);
-                    queue.push_back(*caller_id);
+        // 2. UPSTREAM Traversal (Callers)
+        if mode == TraversalMode::Both || mode == TraversalMode::Upstream {
+            for (caller_id, callees) in &index.resolved_calls {
+                if callees.contains(&current_id) {
+                    if !visited.contains(&(*caller_id, TraversalMode::Upstream)) {
+                        visited.insert((*caller_id, TraversalMode::Upstream));
+                        result_set.insert(*caller_id);
+                        queue.push_back((*caller_id, TraversalMode::Upstream));
+                    }
                 }
             }
         }
 
-        // 3. INHERITANCE: Siblings, Parents, and Children
+        // 3. STRUCTURAL Traversal (Inheritance/Containers)
         if let Some(children) = index.inheritance.get(&current_id) {
             for &child_id in children {
-                if !visited.contains(&child_id) {
-                    visited.insert(child_id);
-                    queue.push_back(child_id);
+                if !visited.contains(&(child_id, mode)) {
+                    visited.insert((child_id, mode));
+                    result_set.insert(child_id);
+                    queue.push_back((child_id, mode));
                 }
             }
         }
         
         for (parent_id, children) in &index.inheritance {
             if children.contains(&current_id) {
-                if !visited.contains(parent_id) {
-                    visited.insert(*parent_id);
-                    queue.push_back(*parent_id);
+                if !visited.contains(&(*parent_id, mode)) {
+                    visited.insert((*parent_id, mode));
+                    result_set.insert(*parent_id);
+                    queue.push_back((*parent_id, mode));
                 }
             }
         }
     }
 
-    let mut final_list: Vec<SymbolId> = visited.into_iter().collect();
-    
-    // Deterministic sort for consistent LLM output
+    let mut final_list: Vec<SymbolId> = result_set.into_iter().collect();
     final_list.sort_by(|a, b| {
         let sym_a = index.symbols.get(a).unwrap();
         let sym_b = index.symbols.get(b).unwrap();
