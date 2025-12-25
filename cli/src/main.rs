@@ -10,10 +10,15 @@ struct Cli {
     #[arg(short, long)]
     path: PathBuf,
 
+    /// Name of function to get context for
     #[arg(short, long)]
-    function_name: String,
+    function_name: Option<String>, // Made optional
 
-    #[arg(long, default_value_t = true)] // Default to true for better LLM context
+    /// File path to perform impact analysis on
+    #[arg(long)]
+    impact: Option<PathBuf>,
+
+    #[arg(long, default_value_t = true)]
     include_docs: bool,
 }
 
@@ -32,17 +37,35 @@ fn main() {
     indexer.resolve_references();
     let _ = indexer.save(&index_path);
     
-    println!("Extracting full semantic context for `{}`...", cli.function_name);
-    
-    // Use the new bidirectional "related symbols" function
-    if let Some(symbol_ids) = find_related_symbols(&indexer.index, &cli.function_name) {
-        println!("Found {} related symbols across the workspace.", symbol_ids.len());
+    // --- Impact Analysis Mode ---
+    if let Some(target_file) = cli.impact {
+        println!("Analyzing impact for file: {:?}", target_file);
+        let impacted = indexer.get_impacted_files(&target_file);
         
-        let context = generate_context_from_ids(&indexer.index, &symbol_ids, cli.include_docs);
-        println!("\n--- SEMANTIC CONTEXT ---\n");
-        println!("{}", context);
+        if impacted.is_empty() {
+            println!("No direct downstream impact found (no other files import this file).");
+        } else {
+            println!("\n--- IMPACTED FILES (Dependents) ---");
+            for f in impacted {
+                println!(" - {}", f);
+            }
+        }
+        return; // Exit after impact analysis
+    }
+
+    // --- Context Generation Mode ---
+    if let Some(func_name) = cli.function_name {
+        println!("Extracting full semantic context for `{}`...", func_name);
+        if let Some(symbol_ids) = find_related_symbols(&indexer.index, &func_name) {
+            let context = generate_context_from_ids(&indexer.index, &symbol_ids, cli.include_docs);
+            println!("\n--- SEMANTIC CONTEXT ---\n");
+            println!("{}", context);
+        } else {
+            eprintln!("Error: Could not find symbol `{}`.", func_name);
+            process::exit(1);
+        }
     } else {
-        eprintln!("Error: Could not find symbol `{}`.", cli.function_name);
+        eprintln!("Error: Please provide either --function-name or --impact.");
         process::exit(1);
     }
 }

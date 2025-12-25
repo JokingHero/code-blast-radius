@@ -15,7 +15,6 @@ pub struct Indexer {
     pub index: WorkspaceIndex,
     configs: HashMap<String, &'static LanguageConfig>, 
     /// Transient cache used during resolution to avoid redundant barrel walks.
-    /// Key: (FileId where symbol is requested, Symbol Name)
     resolution_cache: HashMap<(FileId, String), Option<SymbolId>>,
 }
 
@@ -32,6 +31,14 @@ impl Indexer {
             configs: config_map,
             resolution_cache: HashMap::new(),
         }
+    }
+
+    /// Internal helper to ensure all paths are absolute and clean for the index keys.
+    fn to_index_path(path: &Path) -> String {
+        fs::canonicalize(path)
+            .unwrap_or_else(|_| path.to_path_buf())
+            .to_string_lossy()
+            .to_string()
     }
 
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
@@ -102,7 +109,7 @@ impl Indexer {
                 if let Ok(content) = fs::read_to_string(path) {
                     let hash = blake3::hash(content.as_bytes());
                     let hash_bytes: [u8; 32] = hash.into();
-                    let path_key = path.to_string_lossy().to_string();
+                    let path_key = Self::to_index_path(path);
                     
                     seen_paths.insert(path_key.clone());
 
@@ -118,10 +125,7 @@ impl Indexer {
         }
 
         let to_remove: Vec<String> = self.index.files.keys()
-            .filter(|path_key| {
-                let p = Path::new(path_key);
-                p.starts_with(&root_abs) && !seen_paths.contains(*path_key)
-            })
+            .filter(|path_key| !seen_paths.contains(*path_key))
             .cloned()
             .collect();
 
@@ -206,13 +210,14 @@ impl Indexer {
     pub fn resolve_references(&mut self) {
         self.index.resolved_calls.clear();
         self.index.inheritance.clear();
+        self.index.file_dependencies.clear();
         self.resolution_cache.clear();
 
         self.resolve_type_sniffing();
         self.resolve_fingerprints();
         self.resolve_implicit_connections();
         self.resolve_function_calls_with_fallback();
-        self.resolve_bare_imports();
+        self.resolve_file_dependencies(); 
     }
 
     fn resolve_symbol_across_barrels(
@@ -221,36 +226,28 @@ impl Indexer {
         symbol_name: &str, 
         visited: &mut HashSet<FileId>
     ) -> Option<SymbolId> {
-        // 1. Cycle Detection
         if visited.contains(&target_file_id) { return None; }
         visited.insert(target_file_id);
 
-        // 2. Cache Lookup
         if let Some(&cached_res) = self.resolution_cache.get(&(target_file_id, symbol_name.to_string())) {
             return cached_res;
         }
 
         let mut result = None;
-
-        // 3. Local Definition Check
         if let Some(ids) = self.index.symbol_map.get(symbol_name) {
             if let Some(&id) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == target_file_id) {
                 result = Some(id);
             }
         }
 
-        // 4. Re-export Walk
         if result.is_none() {
             if let Some(exports) = self.index.file_exports.get(&target_file_id).cloned() {
-                // Named exports first
                 for exp in exports.iter().filter(|e| e.name.as_deref() == Some(symbol_name)) {
                     if let Some(next_file_id) = self.resolve_import_path(target_file_id, &exp.source) {
                         result = self.resolve_symbol_across_barrels(next_file_id, symbol_name, visited);
                         if result.is_some() { break; }
                     }
                 }
-
-                // Wildcard exports second
                 if result.is_none() {
                     for exp in exports.iter().filter(|e| e.name.is_none()) {
                         if let Some(next_file_id) = self.resolve_import_path(target_file_id, &exp.source) {
@@ -262,14 +259,11 @@ impl Indexer {
             }
         }
 
-        // 5. Update Cache
         self.resolution_cache.insert((target_file_id, symbol_name.to_string()), result);
         result
     }
 
     fn resolve_function_calls_with_fallback(&mut self) {
-        // Clone entries to decouple the immutable borrow of self.index for the loop
-        // from the mutable borrow of self for resolve_single_call
         let entries: Vec<(SymbolId, Vec<String>)> = self.index.raw_calls.iter()
             .map(|(k, v)| (*k, v.clone())).collect();
 
@@ -362,19 +356,6 @@ impl Indexer {
         }
     }
 
-    fn resolve_bare_imports(&mut self) {
-        let ids: Vec<FileId> = self.index.file_imports.keys().cloned().collect();
-        for fid in ids {
-            for imp in self.index.file_imports[&fid].clone() {
-                if imp.name.is_empty() {
-                    if let Some(tid) = self.resolve_import_path(fid, &imp.source) {
-                        self.index.file_dependencies.entry(fid).or_default().push(tid);
-                    }
-                }
-            }
-        }
-    }
-
     fn resolve_single_call(&mut self, file_id: FileId, name: &str) -> Option<SymbolId> {
         if let Some(ids) = self.index.symbol_map.get(name) {
             if let Some(&id) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == file_id) { return Some(id); }
@@ -400,7 +381,7 @@ impl Indexer {
         let exts = ["ts", "js", "tsx", "rs", "py"];
         
         let base = parent.join(source);
-        let check = |p: PathBuf| self.index.files.get(&p.to_string_lossy().to_string()).map(|n| n.id);
+        let check = |p: PathBuf| self.index.files.get(&Self::to_index_path(&p)).map(|n| n.id);
         
         if let Some(id) = check(base.clone()) { return Some(id); }
         for e in exts { 
@@ -408,6 +389,41 @@ impl Indexer {
             if let Some(id) = check(base.join(format!("index.{}", e))) { return Some(id); }
         }
         None
+    }
+
+    fn resolve_file_dependencies(&mut self) {
+        let fids: Vec<FileId> = self.index.file_imports.keys().cloned().collect();
+        for fid in fids {
+            let mut deps = HashSet::new();
+            if let Some(imports) = self.index.file_imports.get(&fid) {
+                for imp in imports {
+                    if let Some(target_fid) = self.resolve_import_path(fid, &imp.source) {
+                        deps.insert(target_fid);
+                    }
+                }
+            }
+            if !deps.is_empty() {
+                self.index.file_dependencies.insert(fid, deps.into_iter().collect());
+            }
+        }
+    }
+
+    pub fn get_impacted_files(&self, target_path: &Path) -> Vec<String> {
+        let target_key = Self::to_index_path(target_path);
+        let target_id = match self.index.files.get(&target_key) {
+            Some(node) => node.id,
+            None => return vec![],
+        };
+
+        let mut impacted_paths = Vec::new();
+        for (&source_file_id, dependencies) in &self.index.file_dependencies {
+            if dependencies.contains(&target_id) {
+                if let Some(source_node) = self.index.files.values().find(|f| f.id == source_file_id) {
+                    impacted_paths.push(source_node.path.clone());
+                }
+            }
+        }
+        impacted_paths
     }
 
     fn resolve_implicit_connections(&mut self) {
