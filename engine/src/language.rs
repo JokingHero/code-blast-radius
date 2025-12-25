@@ -38,6 +38,7 @@ pub struct LanguageConfig {
     pub query_calls: &'static str,
     pub query_docs: &'static str,
     pub query_imports: &'static str,
+    pub query_exports: &'static str,
     pub query_literals: &'static str,
     pub query_implements: &'static str,
 }

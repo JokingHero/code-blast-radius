@@ -20,6 +20,7 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
       )
     "#,
     query_imports: TYPESCRIPT_CONFIG.query_imports,
+    query_exports: "",
     query_literals: r#"[ (string) (template_string) ] @string"#,
     query_implements: r#"
         (class_declaration

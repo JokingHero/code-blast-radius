@@ -25,6 +25,7 @@ pub const HTML_CONFIG: LanguageConfig = LanguageConfig {
       )
     "#,
     query_imports: "",
+    query_exports: "",
     query_literals: r#"(attribute_value) @string"#,
     query_implements: "",
 };

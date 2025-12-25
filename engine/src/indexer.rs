@@ -51,7 +51,6 @@ impl Indexer {
         Ok(s)
     }
 
-    /// Completely removes a file and all associated metadata from the index.
     fn remove_file(&mut self, path_key: &str) {
         if let Some(node) = self.index.files.remove(path_key) {
             self.clear_file_symbols(node.id);
@@ -59,7 +58,6 @@ impl Indexer {
         }
     }
 
-    /// Cleans up all symbol-related metadata for a specific FileId.
     fn clear_file_symbols(&mut self, file_id: FileId) {
         let ids_to_remove: Vec<SymbolId> = self.index.symbols.values()
             .filter(|s| s.file_id == file_id)
@@ -79,9 +77,10 @@ impl Indexer {
             self.index.fingerprints.remove(&sym_id);
             self.index.container_methods.remove(&sym_id);
             self.index.local_variable_types.remove(&sym_id);
-            self.index.inheritance.remove(&sym_id); // Clean up inheritance references
+            self.index.inheritance.remove(&sym_id);
         }
         self.index.file_imports.remove(&file_id);
+        self.index.file_exports.remove(&file_id); // Clean up exports
         self.index.raw_literals.remove(&file_id);
     }
 
@@ -89,7 +88,6 @@ impl Indexer {
         let root_abs = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         let mut seen_paths = HashSet::new();
 
-        // 1. Discovery and Update Phase
         for entry in WalkDir::new(&root_abs).into_iter().filter_map(|e| e.ok()).filter(|e| e.path().is_file()) {
             let path = entry.path();
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
@@ -112,8 +110,6 @@ impl Indexer {
             }
         }
 
-        // 2. Ghost Data Purge Phase
-        // Find files that are in the index under this root, but no longer exist on disk
         let to_remove: Vec<String> = self.index.files.keys()
             .filter(|path_key| {
                 let p = Path::new(path_key);
@@ -136,12 +132,12 @@ impl Indexer {
 
         if let Ok(analysis) = analyze_source(path_obj, content, config) {
             if !analysis.imports.is_empty() { self.index.file_imports.insert(file_id, analysis.imports); }
+            if !analysis.exports.is_empty() { self.index.file_exports.insert(file_id, analysis.exports); } // Store Exports
             if !analysis.literals.is_empty() { self.index.raw_literals.insert(file_id, analysis.literals); }
 
             let mut file_symbol_ids = Vec::new();
             for func in analysis.functions {
                 let symbol_id = self.index.symbols.keys().max().map_or(0, |k| k + 1);
-                
                 let is_container = func.source_code.contains("class ") || func.source_code.contains("interface ");
 
                 self.index.symbols.insert(symbol_id, SymbolNode {
@@ -162,7 +158,7 @@ impl Indexer {
                 if !vars.is_empty() { self.index.local_variable_types.insert(symbol_id, vars); }
             }
 
-            // --- Structural Mapping ---
+            // Structural Mapping
             let container_ids: Vec<SymbolId> = file_symbol_ids.iter()
                 .filter(|&&id| self.index.symbols.get(&id).map_or(false, |s| s.kind == "container"))
                 .cloned()
@@ -177,12 +173,10 @@ impl Indexer {
                 let mut members = HashSet::new();
                 for &s_id in &file_symbol_ids {
                     if s_id == c_id { continue; }
-                    
                     let is_member = {
                         let s = &self.index.symbols[&s_id];
                         s.range_start >= cs && s.range_end <= ce
                     };
-
                     if is_member {
                         members.insert(self.index.symbols[&s_id].name.clone());
                         if let Some(node) = self.index.symbols.get_mut(&s_id) {
@@ -204,19 +198,59 @@ impl Indexer {
     }
     
     pub fn resolve_references(&mut self) {
-        // 1. Clear previous resolutions
         self.index.resolved_calls.clear();
         self.index.inheritance.clear();
 
-        // 2. Resolve Specific Links (High Confidence)
         self.resolve_type_sniffing();
         self.resolve_fingerprints();
         self.resolve_implicit_connections();
-
-        // 3. Resolve Bare Calls & Global Fallbacks (Low Confidence)
         self.resolve_function_calls_with_fallback();
-        
         self.resolve_bare_imports();
+    }
+
+    /// Recursively walks through barrel files (exports) to find the original definition of a symbol.
+    fn resolve_symbol_across_barrels(
+        &self, 
+        target_file_id: FileId, 
+        symbol_name: &str, 
+        visited: &mut HashSet<FileId>
+    ) -> Option<SymbolId> {
+        if visited.contains(&target_file_id) { return None; }
+        visited.insert(target_file_id);
+
+        // 1. Direct Check: Is the symbol defined in this file?
+        if let Some(ids) = self.index.symbol_map.get(symbol_name) {
+            if let Some(&id) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == target_file_id) {
+                return Some(id);
+            }
+        }
+
+        // 2. Export Check: Look for forwarding statements
+        if let Some(exports) = self.index.file_exports.get(&target_file_id) {
+            // Priority 2a: Named Re-exports -> export { foo } from './bar'
+            for exp in exports {
+                if let Some(ref exp_name) = exp.name {
+                    if exp_name == symbol_name {
+                        if let Some(next_file_id) = self.resolve_import_path(target_file_id, &exp.source) {
+                            return self.resolve_symbol_across_barrels(next_file_id, symbol_name, visited);
+                        }
+                    }
+                }
+            }
+
+            // Priority 2b: Wildcard Re-exports -> export * from './bar'
+            for exp in exports {
+                if exp.name.is_none() {
+                    if let Some(next_file_id) = self.resolve_import_path(target_file_id, &exp.source) {
+                        if let Some(found_id) = self.resolve_symbol_across_barrels(next_file_id, symbol_name, visited) {
+                            return Some(found_id);
+                        }
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     fn resolve_function_calls_with_fallback(&mut self) {
@@ -227,27 +261,20 @@ impl Indexer {
             let caller_file_id = self.index.symbols[&caller_id].file_id;
             
             for name in called_names {
-                // Check if this specific name has already been resolved for this caller
-                // (e.g. by Fingerprinting or Type Sniffing)
                 let already_resolved = if let Some(resolved) = self.index.resolved_calls.get(&caller_id) {
                     resolved.iter().any(|&rid| self.index.symbols[&rid].name == name)
                 } else { false };
 
                 if !already_resolved {
-                    // 1. Try Local/Imported Resolution
                     if let Some(tid) = self.resolve_single_call(caller_file_id, &name) {
                         self.index.resolved_calls.entry(caller_id).or_default().push(tid);
                     } 
-                    // 2. Global Fallback (Only if we haven't found a better match yet)
                     else if let Some(candidates) = self.index.symbol_map.get(&name) {
                         let mut guesses = candidates.clone();
-                        let entry = self.index.resolved_calls.entry(caller_id).or_default();
-                        entry.append(&mut guesses);
+                        self.index.resolved_calls.entry(caller_id).or_default().append(&mut guesses);
                     }
                 }
             }
-            
-            // Cleanup
             if let Some(resolved) = self.index.resolved_calls.get_mut(&caller_id) {
                 resolved.sort();
                 resolved.dedup();
@@ -296,11 +323,8 @@ impl Indexer {
         for (&cid, fprints) in &self.index.fingerprints {
             for (_, meths) in fprints {
                 for (&cont_id, cont_meths) in &self.index.container_methods {
-                    // If the class has all the methods called on this variable
                     if meths.iter().all(|m| cont_meths.contains(m)) {
                         links.push((cid, cont_id));
-                        
-                        // Also link directly to the specific method implementations in this class
                         for m in meths {
                             if let Some(m_ids) = self.index.symbol_map.get(m) {
                                 for &mid in m_ids {
@@ -336,14 +360,19 @@ impl Indexer {
     }
 
     fn resolve_single_call(&self, file_id: FileId, name: &str) -> Option<SymbolId> {
+        // 1. Check local file symbols first
         if let Some(ids) = self.index.symbol_map.get(name) {
             if let Some(&id) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == file_id) { return Some(id); }
         }
+
+        // 2. Check imports with Barrel Resolution
         if let Some(imps) = self.index.file_imports.get(&file_id) {
             for imp in imps {
                 if imp.name == name {
                     if let Some(tfid) = self.resolve_import_path(file_id, &imp.source) {
-                        return self.index.symbol_map.get(name).and_then(|ids| ids.iter().find(|&&id| self.index.symbols[&id].file_id == tfid).cloned());
+                        let mut visited = HashSet::new();
+                        // Use the recursive walker to follow re-exports (barrels)
+                        return self.resolve_symbol_across_barrels(tfid, name, &mut visited);
                     }
                 }
             }
@@ -352,13 +381,21 @@ impl Indexer {
     }
 
     fn resolve_import_path(&self, from_id: FileId, source: &str) -> Option<FileId> {
-        let from_path = Path::new(&self.index.files.values().find(|f| f.id == from_id)?.path);
+        let from_path_str = &self.index.files.values().find(|f| f.id == from_id)?.path;
+        let from_path = Path::new(from_path_str);
         let parent = from_path.parent()?;
         let exts = ["ts", "js", "tsx", "rs", "py"];
+        
+        // Handle directory imports (./utils -> ./utils/index.ts)
         let base = parent.join(source);
         let check = |p: PathBuf| self.index.files.get(&p.to_string_lossy().to_string()).map(|n| n.id);
+        
         if let Some(id) = check(base.clone()) { return Some(id); }
-        for e in exts { if let Some(id) = check(base.with_extension(e)) { return Some(id); } }
+        for e in exts { 
+            if let Some(id) = check(base.with_extension(e)) { return Some(id); } 
+            // Check for index files in subdirectories
+            if let Some(id) = check(base.join(format!("index.{}", e))) { return Some(id); }
+        }
         None
     }
 

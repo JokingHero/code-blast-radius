@@ -12,6 +12,13 @@ pub struct ImportNode {
     pub alias: Option<String>,
 }
 
+#[derive(Archive, Deserialize, Serialize, Debug, Clone)]
+#[archive(check_bytes)]
+pub struct ExportNode {
+    pub name: Option<String>, // Some("myFunc") for named, None for `*`
+    pub source: String,       // "./math"
+}
+
 #[derive(Archive, Deserialize, Serialize, Debug)]
 #[archive(check_bytes)]
 pub struct FileNode {
@@ -42,6 +49,7 @@ pub struct WorkspaceIndex {
     pub symbols: HashMap<SymbolId, SymbolNode>,
     pub symbol_map: HashMap<String, Vec<SymbolId>>,
     pub file_imports: HashMap<FileId, Vec<ImportNode>>,
+    pub file_exports: HashMap<FileId, Vec<ExportNode>>, 
     // Mapping of Container (Class/Interface) -> Set of method names it owns
     pub container_methods: HashMap<SymbolId, HashSet<String>>,
     // Mapping of Function -> (Variable Name -> Set of Methods called on it)

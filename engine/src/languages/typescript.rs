@@ -84,6 +84,25 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
           (import_statement source: (string) @import.source)
         ]
     "#,
+    query_exports: r#"
+        [
+            ;; export { a, b } from './file'
+            (export_statement
+              (export_clause
+                (export_specifier
+                  name: (identifier) @export.name
+                )
+              )
+              source: (string) @export.source
+            )
+
+            ;; export * from './file'
+            (export_statement
+              (wildcard_import)
+              source: (string) @export.source
+            )
+        ]
+    "#,
     query_literals: r#"[ (string) (template_string) ] @string"#,
     query_implements: r#"
         [

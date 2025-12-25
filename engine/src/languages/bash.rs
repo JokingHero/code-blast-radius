@@ -7,6 +7,7 @@ pub const BASH_CONFIG: LanguageConfig = LanguageConfig {
     query_calls: r#"(command name: (command_name (word) @call.name))"#,
     query_docs: r#"((comment)+ @function.docs . (function_definition) @function.definition)"#,
     query_imports: "",
+    query_exports: "",
     query_literals: r#"(word) @string"#,
     query_implements: "",
 };

@@ -7,6 +7,7 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
     query_calls: r#"(call_expression function: [(identifier) @call.name (field_expression field: (field_identifier) @call.name)])"#,
     query_docs: r#"((line_comment)+ @function.docs . (function_item) @function.definition)"#,
     query_imports: "",
+    query_exports: "",
     query_literals: r#"(string_literal) @string"#,
     query_implements: r#"
         (impl_item

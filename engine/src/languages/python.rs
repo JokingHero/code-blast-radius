@@ -7,6 +7,7 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
     query_calls: r#"(call function: [(identifier) @call.name (attribute attribute: (identifier) @call.name)])"#,
     query_docs: r#"(function_definition body: (block . (expression_statement (string) @function.docs))) @function.definition"#,
     query_imports: "", 
+    query_exports: "",
     query_literals: r#"(string) @string"#,
     query_implements: r#"
         (class_definition

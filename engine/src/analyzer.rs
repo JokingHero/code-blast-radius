@@ -3,7 +3,7 @@ use std::path::Path;
 use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator};
 
 use crate::language::{get_language, LanguageConfig};
-use crate::schema::{ImportNode, WorkspaceIndex, SymbolId};
+use crate::schema::{ImportNode, ExportNode, WorkspaceIndex, SymbolId};
 
 #[derive(Debug, Clone)]
 pub struct FunctionInfo {
@@ -22,9 +22,10 @@ pub struct FunctionInfo {
 pub struct FileAnalysis {
     pub functions: Vec<FunctionInfo>,
     pub imports: Vec<ImportNode>,
+    pub exports: Vec<ExportNode>, // Added for Barrel support
     pub literals: Vec<String>,
     pub implementations: Vec<(String, String)>, 
-    pub global_vars: HashMap<String, String>, // Added this
+    pub global_vars: HashMap<String, String>, 
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -54,13 +55,14 @@ pub fn analyze_source(
     
     if source_code.trim().is_empty() {
         return Ok(FileAnalysis { 
-            functions: vec![], imports: vec![], literals: vec![], 
-            implementations: vec![], global_vars: HashMap::new() 
+            functions: vec![], imports: vec![], exports: vec![], 
+            literals: vec![], implementations: vec![], global_vars: HashMap::new() 
         });
     }
 
     let tree = parser.parse(source_code, None).ok_or("Failed to parse code")?;
     let mut imports = Vec::new();
+    let mut exports = Vec::new(); // Initialize exports
     let mut literals = Vec::new();
     let mut implementations = Vec::new();
     let mut functions = Vec::new();
@@ -85,7 +87,32 @@ pub fn analyze_source(
         }
     }
 
-    // 2. Literals
+    // 2. Exports (Barrel File Support)
+    if !config.query_exports.is_empty() {
+        if let Ok(q) = Query::new(&language, config.query_exports) {
+            let mut cursor = QueryCursor::new();
+            let mut matches = cursor.matches(&q, tree.root_node(), code_bytes);
+            while let Some(m) = matches.next() {
+                let mut src = String::new();
+                let mut name = None;
+                for cap in m.captures {
+                    let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
+                    let capture_name = q.capture_names()[cap.index as usize];
+                    if capture_name == "export.source" { 
+                        src = text.replace(['"', '\''], ""); 
+                    }
+                    else if capture_name == "export.name" { 
+                        name = Some(text); 
+                    }
+                }
+                if !src.is_empty() { 
+                    exports.push(ExportNode { name, source: src }); 
+                }
+            }
+        }
+    }
+
+    // 3. Literals
     if !config.query_literals.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_literals) {
             let mut cursor = QueryCursor::new();
@@ -99,7 +126,7 @@ pub fn analyze_source(
         }
     }
 
-    // 3. Implementations (Inheritance)
+    // 4. Implementations (Inheritance)
     if !config.query_implements.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_implements) {
             let mut cursor = QueryCursor::new();
@@ -118,7 +145,7 @@ pub fn analyze_source(
         }
     }
 
-    // 4. Definitions & Metadata Extraction
+    // 5. Definitions & Metadata Extraction
     let defs_query = Query::new(&language, config.query_defs).expect("Invalid defs query");
     let calls_query = Query::new(&language, config.query_calls).expect("Invalid calls query");
     let docs_query = Query::new(&language, config.query_docs).expect("Invalid docs query");
@@ -174,7 +201,6 @@ pub fn analyze_source(
         }
 
         if let Some(node) = def_node {
-            // This is a primary symbol (Function/Class)
             functions.push(FunctionInfo {
                 name,
                 range_start: node.start_byte(),
@@ -188,30 +214,20 @@ pub fn analyze_source(
                 local_assigns: HashMap::new(),
             });
         } else if let Some(vn) = v_name {
-            // This is a local variable hint for bridging
             variable_hints.push((match_.captures[0].node.byte_range(), vn, v_type, v_assign));
         }
     }
 
-    // 5. Enrichment (Assign variables, calls, and docs to functions)
+    // 6. Enrichment
     for func in &mut functions {
-        // Assign local variable hints to the function that contains them
         for (v_range, v_name, v_type, v_assign) in &variable_hints {
-            // Check if the variable declaration is physically inside the function's body
             if v_range.start >= func.range_start && v_range.end <= func.range_end {
-                if let Some(t) = v_type { 
-                    func.local_types.insert(v_name.clone(), t.clone()); 
-                }
-                if let Some(a) = v_assign { 
-                    func.local_assigns.insert(v_name.clone(), a.clone()); 
-                }
+                if let Some(t) = v_type { func.local_types.insert(v_name.clone(), t.clone()); }
+                if let Some(a) = v_assign { func.local_assigns.insert(v_name.clone(), a.clone()); }
             }
         }
 
-        // Retrieve the specific node for this function to extract its internal calls and documentation
         if let Some(node) = tree.root_node().descendant_for_byte_range(func.range_start, func.range_end) {
-            
-            // --- Extract Calls & Fingerprints ---
             let mut c_cursor = QueryCursor::new();
             let mut c_matches = c_cursor.matches(&calls_query, node, code_bytes);
             while let Some(cm) = c_matches.next() {
@@ -231,7 +247,6 @@ pub fn analyze_source(
                 }
             }
 
-            // --- Extract Docs (checking if the doc match belongs to this function) ---
             let mut d_cursor = QueryCursor::new();
             let mut d_matches = d_cursor.matches(&docs_query, tree.root_node(), code_bytes);
             while let Some(dm) = d_matches.next() {
@@ -250,7 +265,9 @@ pub fn analyze_source(
         }
     }
 
-    Ok(FileAnalysis { functions, imports, literals, implementations, global_vars })
+    Ok(FileAnalysis { 
+        functions, imports, exports, literals, implementations, global_vars 
+    })
 }
 
 pub fn find_call_chain_ids(
@@ -271,7 +288,6 @@ pub fn find_call_chain_ids(
     }
 
     while let Some(current_id) = queue.pop_front() {
-        // --- 1. UPSTREAM Logic ---
         if direction == SliceDirection::Upstream || direction == SliceDirection::Both {
             for (caller_id, callees) in &index.resolved_calls {
                 if callees.contains(&current_id) && !visited.contains(caller_id) {
@@ -282,7 +298,6 @@ pub fn find_call_chain_ids(
             }
         }
 
-        // --- 2. DOWNSTREAM Logic ---
         if direction == SliceDirection::Downstream || direction == SliceDirection::Both {
             if let Some(callees) = index.resolved_calls.get(&current_id) {
                 for &callee_id in callees {
@@ -295,7 +310,6 @@ pub fn find_call_chain_ids(
             }
         }
 
-        // --- 3. STRUCTURAL Logic ---
         if let Some(children) = index.inheritance.get(&current_id) {
             for &child_id in children {
                 if !visited.contains(&child_id) {
@@ -318,10 +332,7 @@ pub fn find_call_chain_ids(
         depth
     });
 
-    if direction == SliceDirection::Downstream {
-        final_list.reverse();
-    }
-
+    if direction == SliceDirection::Downstream { final_list.reverse(); }
     Some(final_list)
 }
 
@@ -364,15 +375,11 @@ pub fn generate_context_from_ids(
 
                 if let Ok(content) = std::fs::read_to_string(&file_node.path) {
                     if sym.range_end <= content.len() {
-                        let bytes = content.as_bytes();
-                        let slice = &bytes[sym.range_start..sym.range_end];
-                        let text = String::from_utf8_lossy(slice);
+                        let text = String::from_utf8_lossy(&content.as_bytes()[sym.range_start..sym.range_end]);
                         context.push_str(&text);
                     } else {
-                        context.push_str("// Error: Source range out of bounds (file changed?)");
+                        context.push_str("// Error: Source range out of bounds");
                     }
-                } else {
-                    context.push_str(&format!("// Error: Could not read file at {}", file_node.path));
                 }
                 context.push_str("\n\n");
             }
@@ -399,7 +406,7 @@ pub fn find_related_symbols(
     }
 
     while let Some((current_id, mode)) = queue.pop_front() {
-        // --- 1. DOWNSTREAM (Dependencies) ---
+        // 1. DOWNSTREAM
         if mode == TraversalMode::Both || mode == TraversalMode::Downstream {
             if let Some(callees) = index.resolved_calls.get(&current_id) {
                 for &callee_id in callees {
@@ -412,7 +419,7 @@ pub fn find_related_symbols(
             }
         }
 
-        // --- 2. UPSTREAM (Callers) ---
+        // 2. UPSTREAM
         if mode == TraversalMode::Both || mode == TraversalMode::Upstream {
             for (caller_id, callees) in &index.resolved_calls {
                 if callees.contains(&current_id) {
@@ -425,7 +432,7 @@ pub fn find_related_symbols(
             }
         }
 
-        // --- 3. STRUCTURAL (Inheritance/Implements) ---
+        // 3. STRUCTURAL
         if let Some(children) = index.inheritance.get(&current_id) {
             for &child_id in children {
                 if !visited.contains(&(child_id, mode)) {
@@ -446,24 +453,19 @@ pub fn find_related_symbols(
             }
         }
 
-        // --- 4. CONTAINMENT (Method <-> Class) ---
-        // This is crucial for LLM Context: A method needs its class, and a class needs its methods.
+        // 4. CONTAINMENT
         if let Some(sym) = index.symbols.get(&current_id) {
-            // Move Up: Method -> Class
             if let Some(p_id) = sym.parent_id {
-                if !visited.contains(&(p_id, mode)) { // Use 'mode', not 'Both'
+                if !visited.contains(&(p_id, mode)) {
                     visited.insert((p_id, mode));
                     result_set.insert(p_id);
                     queue.push_back((p_id, mode));
                 }
             }
-            
-            // Move Down: Class -> Methods
-            // Only perform this if the current symbol is actually a container
             if sym.kind == "container" {
                 for (&s_id, s_node) in &index.symbols {
                     if s_node.parent_id == Some(current_id) {
-                        if !visited.contains(&(s_id, mode)) { // Use 'mode', not 'Both'
+                        if !visited.contains(&(s_id, mode)) {
                             visited.insert((s_id, mode));
                             result_set.insert(s_id);
                             queue.push_back((s_id, mode));
