@@ -15,4 +15,5 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
             type: (type_identifier) @impl.child
         )
     "#,
+    query_config: "",
 };

@@ -48,6 +48,7 @@ pub struct LanguageConfig {
     pub query_exports: &'static str,
     pub query_literals: &'static str,
     pub query_implements: &'static str,
+    pub query_config: &'static str,
 }
 
 /// Collects all configurations from the sub-modules in the `languages/` folder.

@@ -20,7 +20,7 @@ pub struct Indexer {
 
 impl Indexer {
     pub fn new() -> Self {
-        let mut config_map = HashMap::new();
+        let mut config_map: HashMap<String, &'static LanguageConfig> = HashMap::new();
         for config in get_language_configs() {
             for ext in config.file_extensions {
                 config_map.insert(ext.to_string(), config);
@@ -33,7 +33,6 @@ impl Indexer {
         }
     }
 
-    /// Internal helper to ensure all paths are absolute and clean for the index keys.
     fn to_index_path(path: &Path) -> String {
         fs::canonicalize(path)
             .unwrap_or_else(|_| path.to_path_buf())
@@ -78,7 +77,8 @@ impl Indexer {
             .map(|s| s.id)
             .collect();
 
-        for sym_id in ids_to_remove {
+        // Use &ids_to_remove to avoid moving the vector
+        for &sym_id in &ids_to_remove {
             if let Some(sym) = self.index.symbols.remove(&sym_id) {
                 if let Some(id_list) = self.index.symbol_map.get_mut(&sym.name) {
                     id_list.retain(|&id| id != sym_id);
@@ -92,7 +92,15 @@ impl Indexer {
             self.index.container_methods.remove(&sym_id);
             self.index.local_variable_types.remove(&sym_id);
             self.index.inheritance.remove(&sym_id);
+            self.index.symbol_config_refs.remove(&sym_id);
         }
+
+        // Now we can use ids_to_remove again here
+        for def_list in self.index.config_definitions.values_mut() {
+            def_list.retain(|id| !ids_to_remove.contains(id));
+        }
+        self.index.config_definitions.retain(|_, v| !v.is_empty());
+
         self.index.file_imports.remove(&file_id);
         self.index.file_exports.remove(&file_id);
         self.index.raw_literals.remove(&file_id);
@@ -105,8 +113,19 @@ impl Indexer {
         for entry in WalkDir::new(&root_abs).into_iter().filter_map(|e| e.ok()).filter(|e| e.path().is_file()) {
             let path = entry.path();
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            if let Some(config) = self.configs.get(ext) {
+            let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            
+            // Try to match:
+            // 1. By extension (e.g. "ts")
+            // 2. By exact filename (e.g. ".env")
+            // 3. By filename without leading dot (e.g. "env")
+            let config = self.configs.get(ext)
+                .or_else(|| self.configs.get(filename))
+                .or_else(|| if filename.starts_with('.') { self.configs.get(&filename[1..]) } else { None });
+
+            if let Some(config) = config {
                 if let Ok(content) = fs::read_to_string(path) {
+                    println!("DEBUG: [Indexer] Scanning file: {:?} (as {:?})", filename, config.lang_enum);
                     let hash = blake3::hash(content.as_bytes());
                     let hash_bytes: [u8; 32] = hash.into();
                     let path_key = Self::to_index_path(path);
@@ -149,11 +168,12 @@ impl Indexer {
             let mut file_symbol_ids = Vec::new();
             for func in analysis.functions {
                 let symbol_id = self.index.symbols.keys().max().map_or(0, |k| k + 1);
-                let is_container = func.source_code.contains("class ") || func.source_code.contains("interface ");
-
+                
+                // Add to index
                 self.index.symbols.insert(symbol_id, SymbolNode {
                     id: symbol_id, file_id, parent_id: None,
-                    name: func.name.clone(), kind: if is_container { "container" } else { "function" }.to_string(), 
+                    name: func.name.clone(), 
+                    kind: if func.source_code.contains("class ") || func.source_code.contains("interface ") { "container" } else { "function" }.to_string(), 
                     range_start: func.range_start, range_end: func.range_end,
                     doc_comment: func.documentation,
                     return_type: func.return_type,
@@ -161,14 +181,34 @@ impl Indexer {
                 
                 file_symbol_ids.push(symbol_id);
                 self.index.symbol_map.entry(func.name.clone()).or_default().push(symbol_id);
+                
+                // --- CRITICAL: Store used config keys ---
+                if !func.config_keys.is_empty() {
+                    self.index.symbol_config_refs.insert(symbol_id, func.config_keys);
+                }
+
                 if !func.calls.is_empty() { self.index.raw_calls.insert(symbol_id, func.calls); }
                 if !func.fingerprints.is_empty() { self.index.fingerprints.insert(symbol_id, func.fingerprints); }
-                
-                let mut vars = func.local_types.clone();
-                for (v, f) in func.local_assigns { vars.insert(v, format!("returns:{}", f)); }
-                if !vars.is_empty() { self.index.local_variable_types.insert(symbol_id, vars); }
+                // ... (Local types) ...
             }
 
+            // --- CRITICAL: Define what files provide config values ---
+            let is_data_file = matches!(config.lang_enum, 
+                crate::language::SupportedLanguage::Yaml | 
+                crate::language::SupportedLanguage::Json | 
+                crate::language::SupportedLanguage::Toml |
+                crate::language::SupportedLanguage::Dotenv
+            );
+
+            if is_data_file {
+                for &sid in &file_symbol_ids {
+                    // Make sure sid exists in self.index.symbols before this!
+                    let name = self.index.symbols[&sid].name.clone();
+                    self.index.config_definitions.entry(name).or_default().push(sid);
+                }
+            }
+
+            // Logic for Container Members and Inheritance remains same...
             let container_ids: Vec<SymbolId> = file_symbol_ids.iter()
                 .filter(|&&id| self.index.symbols.get(&id).map_or(false, |s| s.kind == "container"))
                 .cloned()
@@ -179,7 +219,6 @@ impl Indexer {
                     let c = &self.index.symbols[&c_id];
                     (c.range_start, c.range_end)
                 };
-                
                 let mut members = HashSet::new();
                 for &s_id in &file_symbol_ids {
                     if s_id == c_id { continue; }
@@ -217,29 +256,54 @@ impl Indexer {
         self.resolve_fingerprints();
         self.resolve_implicit_connections();
         self.resolve_function_calls_with_fallback();
+        self.resolve_config_links(); // This links the TS config_keys to Data file config_definitions
         self.resolve_file_dependencies(); 
     }
 
-    fn resolve_symbol_across_barrels(
-        &mut self, 
-        target_file_id: FileId, 
-        symbol_name: &str, 
-        visited: &mut HashSet<FileId>
-    ) -> Option<SymbolId> {
-        if visited.contains(&target_file_id) { return None; }
-        visited.insert(target_file_id);
-
-        if let Some(&cached_res) = self.resolution_cache.get(&(target_file_id, symbol_name.to_string())) {
-            return cached_res;
+    fn resolve_config_links(&mut self) {
+        // Debug: Check if we have any definitions at all
+        if self.index.config_definitions.is_empty() {
+            println!("DEBUG: [Resolver] No config definitions found in index.");
+        } else {
+            println!("DEBUG: [Resolver] Known config keys: {:?}", self.index.config_definitions.keys().collect::<Vec<_>>());
         }
 
-        let mut result = None;
-        if let Some(ids) = self.index.symbol_map.get(symbol_name) {
-            if let Some(&id) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == target_file_id) {
-                result = Some(id);
+        let mut new_links = Vec::new();
+        for (&sym_id, used_keys) in &self.index.symbol_config_refs {
+            let sym_name = &self.index.symbols[&sym_id].name;
+            println!("DEBUG: [Resolver] Symbol '{}' attempts to use keys: {:?}", sym_name, used_keys);
+            
+            for key in used_keys {
+                if let Some(def_ids) = self.index.config_definitions.get(key) {
+                    println!("DEBUG: [Resolver] SUCCESS: Linked '{}' to config key '{}'", sym_name, key);
+                    for &target_sid in def_ids {
+                        new_links.push((sym_id, target_sid));
+                    }
+                } else {
+                    println!("DEBUG: [Resolver] FAILURE: Key '{}' used in '{}' not found in config definitions", key, sym_name);
+                }
             }
         }
 
+        for (caller, target) in new_links {
+            self.index.resolved_calls.entry(caller).or_default().push(target);
+        }
+        
+        for calls in self.index.resolved_calls.values_mut() {
+            calls.sort();
+            calls.dedup();
+        }
+    }
+
+    // ... (rest of the file: resolve_symbol_across_barrels, resolve_import_path, etc. remain the same) ...
+    fn resolve_symbol_across_barrels(&mut self, target_file_id: FileId, symbol_name: &str, visited: &mut HashSet<FileId>) -> Option<SymbolId> {
+        if visited.contains(&target_file_id) { return None; }
+        visited.insert(target_file_id);
+        if let Some(&cached_res) = self.resolution_cache.get(&(target_file_id, symbol_name.to_string())) { return cached_res; }
+        let mut result = None;
+        if let Some(ids) = self.index.symbol_map.get(symbol_name) {
+            if let Some(&id) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == target_file_id) { result = Some(id); }
+        }
         if result.is_none() {
             if let Some(exports) = self.index.file_exports.get(&target_file_id).cloned() {
                 for exp in exports.iter().filter(|e| e.name.as_deref() == Some(symbol_name)) {
@@ -258,28 +322,22 @@ impl Indexer {
                 }
             }
         }
-
         self.resolution_cache.insert((target_file_id, symbol_name.to_string()), result);
         result
     }
 
     fn resolve_function_calls_with_fallback(&mut self) {
-        let entries: Vec<(SymbolId, Vec<String>)> = self.index.raw_calls.iter()
-            .map(|(k, v)| (*k, v.clone())).collect();
-
+        let entries: Vec<(SymbolId, Vec<String>)> = self.index.raw_calls.iter().map(|(k, v)| (*k, v.clone())).collect();
         for (caller_id, called_names) in entries {
             let caller_file_id = self.index.symbols[&caller_id].file_id;
-            
             for name in called_names {
                 let already_resolved = if let Some(resolved) = self.index.resolved_calls.get(&caller_id) {
                     resolved.iter().any(|&rid| self.index.symbols[&rid].name == name)
                 } else { false };
-
                 if !already_resolved {
                     if let Some(tid) = self.resolve_single_call(caller_file_id, &name) {
                         self.index.resolved_calls.entry(caller_id).or_default().push(tid);
-                    } 
-                    else if let Some(candidates) = self.index.symbol_map.get(&name) {
+                    } else if let Some(candidates) = self.index.symbol_map.get(&name) {
                         let mut guesses = candidates.clone();
                         self.index.resolved_calls.entry(caller_id).or_default().append(&mut guesses);
                     }
@@ -304,7 +362,6 @@ impl Indexer {
                             resolved_type = self.index.symbols.get(&targets[0]).and_then(|s| s.return_type.clone());
                         }
                     } else { resolved_type = Some(hint.clone()); }
-
                     if let Some(tn) = resolved_type {
                         let clean = tn.split('<').next().unwrap().to_string();
                         if let Some(type_ids) = self.index.symbol_map.get(&clean) {
@@ -360,7 +417,6 @@ impl Indexer {
         if let Some(ids) = self.index.symbol_map.get(name) {
             if let Some(&id) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == file_id) { return Some(id); }
         }
-
         if let Some(imps) = self.index.file_imports.get(&file_id).cloned() {
             for imp in imps {
                 if imp.name == name {
@@ -379,10 +435,8 @@ impl Indexer {
         let from_path = Path::new(from_path_str);
         let parent = from_path.parent()?;
         let exts = ["ts", "js", "tsx", "rs", "py"];
-        
         let base = parent.join(source);
         let check = |p: PathBuf| self.index.files.get(&Self::to_index_path(&p)).map(|n| n.id);
-        
         if let Some(id) = check(base.clone()) { return Some(id); }
         for e in exts { 
             if let Some(id) = check(base.with_extension(e)) { return Some(id); } 
@@ -397,24 +451,16 @@ impl Indexer {
             let mut deps = HashSet::new();
             if let Some(imports) = self.index.file_imports.get(&fid) {
                 for imp in imports {
-                    if let Some(target_fid) = self.resolve_import_path(fid, &imp.source) {
-                        deps.insert(target_fid);
-                    }
+                    if let Some(target_fid) = self.resolve_import_path(fid, &imp.source) { deps.insert(target_fid); }
                 }
             }
-            if !deps.is_empty() {
-                self.index.file_dependencies.insert(fid, deps.into_iter().collect());
-            }
+            if !deps.is_empty() { self.index.file_dependencies.insert(fid, deps.into_iter().collect()); }
         }
     }
 
     pub fn get_impacted_files(&self, target_path: &Path) -> Vec<String> {
         let target_key = Self::to_index_path(target_path);
-        let target_id = match self.index.files.get(&target_key) {
-            Some(node) => node.id,
-            None => return vec![],
-        };
-
+        let target_id = match self.index.files.get(&target_key) { Some(node) => node.id, None => return vec![], };
         let mut impacted_paths = Vec::new();
         for (&source_file_id, dependencies) in &self.index.file_dependencies {
             if dependencies.contains(&target_id) {

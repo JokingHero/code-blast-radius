@@ -15,4 +15,5 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
             superclasses: (argument_list (identifier) @impl.parent)
         )
     "#,
+    query_config: "",
 };

@@ -7,17 +7,17 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
         [
           (function_declaration 
             name: (identifier) @function.name 
-            return_type: (type_annotation)? @function.return_type  ;;
+            return_type: (type_annotation)? @function.return_type 
           ) @function.definition
 
           (method_definition 
             name: [(property_identifier) (identifier)] @function.name 
-            return_type: (type_annotation)? @function.return_type  ;;
+            return_type: (type_annotation)? @function.return_type 
           ) @function.definition
 
           (method_signature 
             name: [(property_identifier) (identifier)] @function.name 
-            return_type: (type_annotation)? @function.return_type  ;;
+            return_type: (type_annotation)? @function.return_type 
           ) @function.definition
 
           (class_declaration name: (type_identifier) @function.name) @function.definition
@@ -25,12 +25,10 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
 
           ((variable_declarator 
             name: (identifier) @function.name 
-            type: (type_annotation)? @variable.type               ;;
+            type: (type_annotation)? @variable.type 
             value: [(arrow_function) (function_expression)]
           ) @function.definition)
 
-          ;; Variable Hints (Metadata only - No @function.definition)
-          ;; so we know 'const user: User'
           (variable_declarator
             name: (identifier) @variable.name
             type: (type_annotation)? @variable.type
@@ -39,17 +37,14 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
     "#,
     query_calls: r#"
         [
-          ;; Method calls: obj.method()
           (call_expression 
             function: (member_expression 
               object: [(identifier) (this)] @call.receiver
               property: [(property_identifier) (identifier)] @call.name))
           
-          ;; Plain calls: method()
           (call_expression 
             function: (identifier) @call.name)
 
-          ;; Fallback for complex property access
           (call_expression
             function: (member_expression
               property: [(property_identifier) (identifier)] @call.name))
@@ -86,7 +81,6 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
     "#,
     query_exports: r#"
         [
-            ;; export { a, b } from './file'
             (export_statement
               (export_clause
                 (export_specifier
@@ -95,8 +89,6 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
               )
               source: (string) @export.source
             )
-
-            ;; export * from './file'
             (export_statement
               (wildcard_import)
               source: (string) @export.source
@@ -117,6 +109,29 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             name: [(type_identifier) (identifier)] @impl.child
             (extends_type_clause type: [(type_identifier) (identifier)] @impl.parent)
           )
+        ]
+    "#,
+    query_config: r#"
+        [
+          ;; process.env.KEY
+          (member_expression
+            object: (member_expression
+              object: (identifier) @obj (#eq? @obj "process")
+              property: (property_identifier) @prop (#eq? @prop "env"))
+            property: (property_identifier) @config.key)
+
+          ;; process.env["KEY"]
+          (subscript_expression
+            object: (member_expression
+              object: (identifier) @obj (#eq? @obj "process")
+              property: (property_identifier) @prop (#eq? @prop "env"))
+            index: (string) @config.key)
+
+          ;; config.get("KEY")
+          (call_expression
+            function: (member_expression
+              property: (property_identifier) @method (#eq? @method "get"))
+            arguments: (arguments (string) @config.key))
         ]
     "#,
 };

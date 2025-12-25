@@ -10,4 +10,5 @@ pub const BASH_CONFIG: LanguageConfig = LanguageConfig {
     query_exports: "",
     query_literals: r#"(word) @string"#,
     query_implements: "",
+    query_config: "",
 };

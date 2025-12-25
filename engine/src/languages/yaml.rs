@@ -29,4 +29,5 @@ pub const YAML_CONFIG: LanguageConfig = LanguageConfig {
         ] @string
     "#,
     query_implements: "",
+    query_config: "",
 };

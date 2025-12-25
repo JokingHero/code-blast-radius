@@ -11,4 +11,5 @@ pub const JSON_CONFIG: LanguageConfig = LanguageConfig {
     query_exports: "",
     query_literals: r#"(string_content) @string"#,
     query_implements: "",
+    query_config: "",
 };

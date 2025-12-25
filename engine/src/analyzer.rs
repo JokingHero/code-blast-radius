@@ -17,6 +17,7 @@ pub struct FunctionInfo {
     pub return_type: Option<String>, 
     pub local_types: HashMap<String, String>, // var_name -> TypeName
     pub local_assigns: HashMap<String, String>, // var_name -> FuncName
+    pub config_keys: Vec<String>,
 }
 
 pub struct FileAnalysis {
@@ -62,11 +63,10 @@ pub fn analyze_source(
 
     let tree = parser.parse(source_code, None).ok_or("Failed to parse code")?;
     let mut imports = Vec::new();
-    let mut exports = Vec::new(); // Initialize exports
+    let mut exports = Vec::new();
     let mut literals = Vec::new();
     let mut implementations = Vec::new();
     let mut functions = Vec::new();
-    let global_vars = HashMap::new();
 
     // 1. Imports
     if !config.query_imports.is_empty() {
@@ -98,16 +98,10 @@ pub fn analyze_source(
                 for cap in m.captures {
                     let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
                     let capture_name = q.capture_names()[cap.index as usize];
-                    if capture_name == "export.source" { 
-                        src = text.replace(['"', '\''], ""); 
-                    }
-                    else if capture_name == "export.name" { 
-                        name = Some(text); 
-                    }
+                    if capture_name == "export.source" { src = text.replace(['"', '\''], ""); }
+                    else if capture_name == "export.name" { name = Some(text); }
                 }
-                if !src.is_empty() { 
-                    exports.push(ExportNode { name, source: src }); 
-                }
+                if !src.is_empty() { exports.push(ExportNode { name, source: src }); }
             }
         }
     }
@@ -145,13 +139,23 @@ pub fn analyze_source(
         }
     }
 
-    // 5. Definitions & Metadata Extraction
-    let defs_query = Query::new(&language, config.query_defs).expect("Invalid defs query");
-    let calls_query = Query::new(&language, config.query_calls).expect("Invalid calls query");
-    let docs_query = Query::new(&language, config.query_docs).expect("Invalid docs query");
+    // 5. Build Queries for Metadata Extraction
+    let defs_query = Query::new(&language, config.query_defs)
+        .map_err(|e| format!("Invalid defs query for {:?}: {}", config.lang_enum, e))?;
+    let calls_query = Query::new(&language, config.query_calls)
+        .map_err(|e| format!("Invalid calls query for {:?}: {}", config.lang_enum, e))?;
+    let docs_query = Query::new(&language, config.query_docs)
+        .map_err(|e| format!("Invalid docs query for {:?}: {}", config.lang_enum, e))?;
     
+    let config_query = if !config.query_config.is_empty() {
+        Some(Query::new(&language, config.query_config)
+            .map_err(|e| format!("Invalid config query for {:?}: {}", config.lang_enum, e))?)
+    } else {
+        None
+    };
+    
+    // 6. Extract Definitions (Functions, Classes, Variables)
     let mut variable_hints = Vec::new(); // (range, name, type, assignment)
-
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(&defs_query, tree.root_node(), code_bytes);
 
@@ -159,7 +163,6 @@ pub fn analyze_source(
         let mut def_node = None;
         let mut name = "anonymous".to_string();
         let mut return_type = None;
-        
         let mut v_name = None;
         let mut v_type = None;
         let mut v_assign = None;
@@ -176,17 +179,13 @@ pub fn analyze_source(
                 }
                 "variable.name" => {
                     v_name = Some(text.to_string());
-                    // Sniff for Assignment: const user = db.getUser()
                     if let Some(parent) = capture.node.parent() {
                         if let Some(val) = parent.child_by_field_name("value") {
                             if val.kind() == "call_expression" {
                                 if let Some(f) = val.child_by_field_name("function") {
                                     let fn_name = if f.kind() == "member_expression" {
-                                        f.child_by_field_name("property")
-                                         .and_then(|p| p.utf8_text(code_bytes).ok())
-                                         .unwrap_or("")
+                                        f.child_by_field_name("property").and_then(|p| p.utf8_text(code_bytes).ok()).unwrap_or("")
                                     } else { f.utf8_text(code_bytes).unwrap_or("") };
-                                    
                                     if !fn_name.is_empty() { v_assign = Some(fn_name.to_string()); }
                                 }
                             }
@@ -212,14 +211,37 @@ pub fn analyze_source(
                 return_type,
                 local_types: HashMap::new(),
                 local_assigns: HashMap::new(),
+                config_keys: Vec::new(),
             });
         } else if let Some(vn) = v_name {
             variable_hints.push((match_.captures[0].node.byte_range(), vn, v_type, v_assign));
         }
     }
 
-    // 6. Enrichment
+    // 7. Pre-calculate File-wide Config Matches
+    // This is more stable than running the query inside the function loop
+    let mut all_config_matches = Vec::new();
+    if let Some(ref q) = config_query {
+        let mut cf_cursor = QueryCursor::new();
+        let mut cf_matches = cf_cursor.matches(q, tree.root_node(), code_bytes);
+        while let Some(cfm) = cf_matches.next() {
+            for cap in cfm.captures {
+                if q.capture_names()[cap.index as usize] == "config.key" {
+                    let text = cap.node.utf8_text(code_bytes)
+                        .unwrap_or("")
+                        .trim_matches(|c| c == '"' || c == '\'' || c == '`')
+                        .to_string();
+                    if !text.is_empty() {
+                        all_config_matches.push((cap.node.byte_range(), text));
+                    }
+                }
+            }
+        }
+    }
+
+    // 8. Enrichment (Calls, Fingerprints, Config, Docs)
     for func in &mut functions {
+        // Variable Assignments within this function
         for (v_range, v_name, v_type, v_assign) in &variable_hints {
             if v_range.start >= func.range_start && v_range.end <= func.range_end {
                 if let Some(t) = v_type { func.local_types.insert(v_name.clone(), t.clone()); }
@@ -227,7 +249,17 @@ pub fn analyze_source(
             }
         }
 
+        // Config Keys within this function
+        for (range, key) in &all_config_matches {
+            if range.start >= func.range_start && range.end <= func.range_end {
+                func.config_keys.push(key.clone());
+            }
+        }
+        func.config_keys.sort();
+        func.config_keys.dedup();
+
         if let Some(node) = tree.root_node().descendant_for_byte_range(func.range_start, func.range_end) {
+            // Function Calls & Fingerprints
             let mut c_cursor = QueryCursor::new();
             let mut c_matches = c_cursor.matches(&calls_query, node, code_bytes);
             while let Some(cm) = c_matches.next() {
@@ -247,26 +279,29 @@ pub fn analyze_source(
                 }
             }
 
+            // Doc Comments (Matched by start byte of the function)
             let mut d_cursor = QueryCursor::new();
             let mut d_matches = d_cursor.matches(&docs_query, tree.root_node(), code_bytes);
             while let Some(dm) = d_matches.next() {
                 let d_def = dm.captures.iter()
                     .find(|c| docs_query.capture_names()[c.index as usize] == "function.definition")
-                    .unwrap().node;
+                    .map(|c| c.node);
                 
-                if d_def.start_byte() == func.range_start {
-                    func.documentation = Some(dm.captures.iter()
-                        .filter(|c| docs_query.capture_names()[c.index as usize] == "function.docs")
-                        .map(|c| c.node.utf8_text(code_bytes).unwrap_or("").to_string())
-                        .collect::<Vec<_>>().join("\n"));
-                    break;
+                if let Some(d_node) = d_def {
+                    if d_node.start_byte() == func.range_start {
+                        func.documentation = Some(dm.captures.iter()
+                            .filter(|c| docs_query.capture_names()[c.index as usize] == "function.docs")
+                            .map(|c| c.node.utf8_text(code_bytes).unwrap_or("").to_string())
+                            .collect::<Vec<_>>().join("\n"));
+                        break;
+                    }
                 }
             }
         }
     }
 
     Ok(FileAnalysis { 
-        functions, imports, exports, literals, implementations, global_vars 
+        functions, imports, exports, literals, implementations, global_vars: HashMap::new() 
     })
 }
 

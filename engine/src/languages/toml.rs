@@ -16,4 +16,5 @@ pub const TOML_CONFIG: LanguageConfig = LanguageConfig {
     query_exports: "",
     query_literals: r#"(string) @string"#,
     query_implements: "",
+    query_config: "",
 };

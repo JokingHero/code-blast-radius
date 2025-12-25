@@ -19,6 +19,14 @@ pub struct ExportNode {
     pub source: String,       // "./math"
 }
 
+#[derive(Archive, Deserialize, Serialize, Debug, Clone)]
+#[archive(check_bytes)]
+pub struct ConfigUsage {
+    pub key: String,       // "OPENAI_KEY"
+    pub range_start: usize,
+    pub range_end: usize,
+}
+
 #[derive(Archive, Deserialize, Serialize, Debug)]
 #[archive(check_bytes)]
 pub struct FileNode {
@@ -73,4 +81,10 @@ pub struct WorkspaceIndex {
     pub raw_literals: HashMap<FileId, Vec<String>>,
     // Temporary storage for implementations (SymbolId -> Vec<ParentName>)
     pub raw_implementations: HashMap<SymbolId, Vec<String>>, 
+
+    // Mapping of SymbolId -> List of Config Keys it uses
+    pub symbol_config_refs: HashMap<SymbolId, Vec<String>>,
+    
+    // Mapping of Config Key -> List of Locations where it's defined (e.g., .env, config.json)
+    pub config_definitions: HashMap<String, Vec<SymbolId>>, 
 }

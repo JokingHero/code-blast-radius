@@ -15,4 +15,5 @@ pub const JAVA_CONFIG: LanguageConfig = LanguageConfig {
             superclass: (superclass (type_identifier) @impl.parent)?
         )
     "#,
+    query_config: "",
 };

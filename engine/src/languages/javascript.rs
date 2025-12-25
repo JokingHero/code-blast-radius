@@ -28,4 +28,5 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             (class_heritage (identifier) @impl.parent)
         )
     "#,
+    query_config: "",
 };
