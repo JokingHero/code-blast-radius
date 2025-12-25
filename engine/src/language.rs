@@ -12,6 +12,10 @@ pub enum SupportedLanguage {
     Html,
     Julia,
     R,
+    Json,
+    Yaml,
+    Toml,
+    Dotenv,
 }
 
 /// Central mapping from the enum to the actual Tree-Sitter grammar object.
@@ -23,10 +27,13 @@ pub fn get_language(lang: SupportedLanguage) -> Language {
         SupportedLanguage::Python => tree_sitter_python::LANGUAGE.into(),
         SupportedLanguage::Java => tree_sitter_java::LANGUAGE.into(),
         SupportedLanguage::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
-        SupportedLanguage::Bash => tree_sitter_bash::LANGUAGE.into(),
+        SupportedLanguage::Bash | SupportedLanguage::Dotenv => tree_sitter_bash::LANGUAGE.into(),
         SupportedLanguage::Html => tree_sitter_html::LANGUAGE.into(),
         SupportedLanguage::Julia => tree_sitter_julia::LANGUAGE.into(),
         SupportedLanguage::R => tree_sitter_r::LANGUAGE.into(),
+        SupportedLanguage::Json => tree_sitter_json::LANGUAGE.into(),
+        SupportedLanguage::Yaml => tree_sitter_yaml::LANGUAGE.into(),
+        SupportedLanguage::Toml => tree_sitter_toml_ng::LANGUAGE.into(),
     }
 }
 
@@ -56,5 +63,9 @@ pub fn get_language_configs() -> Vec<&'static LanguageConfig> {
         &languages::julia::JULIA_CONFIG,
         &languages::r::R_CONFIG,
         &languages::html::HTML_CONFIG,
+        &languages::json::JSON_CONFIG,
+        &languages::yaml::YAML_CONFIG,
+        &languages::toml::TOML_CONFIG,
+        &languages::dotenv::DOTENV_CONFIG,
     ]
 }

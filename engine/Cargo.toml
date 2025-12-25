@@ -18,16 +18,25 @@ memmap2 = "0.9" # For loading the index fast
 
 # Parsing
 clap = { version = "4.5.51", features = ["derive"] }
+# Core Runtime
 tree-sitter = "0.25.10"
-tree-sitter-bash = "0.25.0"
-tree-sitter-html = "0.23.2"
-tree-sitter-java = "0.23.5"
-tree-sitter-javascript = "0.25.0"
-tree-sitter-julia = "0.23.1"
-tree-sitter-r = "1.2.0"
-tree-sitter-rust = "0.24.0"
-tree-sitter-python = "0.25.0"
-tree-sitter-typescript = "0.23.2"
+tree-sitter-language = "0.1.3" # This is the bridge crate
+
+# Modern maintained grammar versions
+tree-sitter-rust = "0.24"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.25"
+tree-sitter-python = "0.25"
+tree-sitter-bash = "0.25"
+tree-sitter-java = "0.23"
+tree-sitter-html = "0.23"
+tree-sitter-julia = "0.23"
+tree-sitter-r = "1.2"
+tree-sitter-json = "0.24"
+
+# Use these specific modern replacements
+tree-sitter-yaml = "0.7.2"      # Maintained by amaanq/tree-sitter-grammars
+tree-sitter-toml-ng = "0.7.0"   # The Next-Gen TOML parser
 
 [build-dependencies]
 cc = "1.0"

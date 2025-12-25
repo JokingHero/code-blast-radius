@@ -7,3 +7,7 @@ pub mod bash;
 pub mod julia;
 pub mod r;
 pub mod html;
+pub mod json;
+pub mod yaml;
+pub mod toml;
+pub mod dotenv;
