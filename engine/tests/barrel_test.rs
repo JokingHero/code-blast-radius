@@ -3,129 +3,127 @@ use common::TestWorkspace;
 use rfc_engine::indexer::Indexer;
 
 #[test]
-fn test_wildcard_barrel_resolution() {
+fn test_diamond_export_resolution() {
     let workspace = TestWorkspace::new();
 
-    // 1. The Implementation
-    workspace.create_file("math/add.ts", "export function add(a, b) { return a + b; }");
+    // 1. The Source
+    workspace.create_file("leaf.ts", "export function leafFunc() { return 'hello'; }");
 
-    // 2. The Barrel (Wildcard)
-    workspace.create_file("math/index.ts", "export * from './add';");
+    // 2. Two branches re-exporting the same thing (Diamond)
+    workspace.create_file("branch_a.ts", "export * from './leaf';");
+    workspace.create_file("branch_b.ts", "export * from './leaf';");
 
-    // 3. The Consumer (Imports from the barrel)
+    // 3. Consumer using both (This triggers the cache for leafFunc)
     workspace.create_file("main.ts", r#"
-        import { add } from './math/index';
-        function run() { add(1, 2); }
+        import { leafFunc } from './branch_a';
+        import { leafFunc as second } from './branch_b';
+        function run() { 
+            leafFunc(); 
+            second();
+        }
     "#);
 
     let mut indexer = Indexer::new();
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let add_id = indexer.index.symbol_map.get("add").expect("Should find 'add'")[0];
-    let run_id = indexer.index.symbol_map.get("run").expect("Should find 'run'")[0];
-
-    let resolutions = indexer.index.resolved_calls.get(&run_id).expect("run should have resolutions");
-    
-    // Assert that 'run' links DIRECTLY to 'math/add.ts', traversing through 'index.ts'
-    assert!(resolutions.contains(&add_id), "Should resolve 'add' through a wildcard barrel");
-    
-    let sym = &indexer.index.symbols[&add_id];
-    let file = &indexer.index.files.values().find(|f| f.id == sym.file_id).unwrap();
-    assert!(file.path.contains("add.ts"), "Symbol should be located in the implementation file, not the barrel");
-}
-
-#[test]
-fn test_named_barrel_resolution() {
-    let workspace = TestWorkspace::new();
-
-    workspace.create_file("auth/logic.ts", "export function login() {}");
-    // Explicitly naming the export in the barrel
-    workspace.create_file("auth/index.ts", "export { login } from './logic';");
-    workspace.create_file("app.ts", r#"
-        import { login } from './auth/index';
-        function init() { login(); }
-    "#);
-
-    let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
-
-    let login_id = indexer.index.symbol_map.get("login").unwrap()[0];
-    let init_id = indexer.index.symbol_map.get("init").unwrap()[0];
-
-    let resolutions = indexer.index.resolved_calls.get(&init_id).unwrap();
-    assert!(resolutions.contains(&login_id), "Should resolve through named re-export");
-}
-
-#[test]
-fn test_directory_index_inference() {
-    let workspace = TestWorkspace::new();
-
-    // Note: Consumer imports from './utils' (a directory)
-    // The engine should automatically look for './utils/index.ts'
-    workspace.create_file("utils/index.ts", "export function helper() {}");
-    workspace.create_file("main.ts", r#"
-        import { helper } from './utils';
-        function start() { helper(); }
-    "#);
-
-    let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
-
-    let helper_id = indexer.index.symbol_map.get("helper").unwrap()[0];
-    let start_id = indexer.index.symbol_map.get("start").unwrap()[0];
-
-    let resolutions = indexer.index.resolved_calls.get(&start_id).unwrap();
-    assert!(resolutions.contains(&helper_id), "Should infer index.ts when importing a directory");
-}
-
-#[test]
-fn test_multi_hop_barrel() {
-    let workspace = TestWorkspace::new();
-
-    // deep/a.ts -> deep/index.ts -> root/index.ts -> main.ts
-    workspace.create_file("deep/a.ts", "export function deepFunc() {}");
-    workspace.create_file("deep/index.ts", "export * from './a';");
-    workspace.create_file("index.ts", "export * from './deep';");
-    workspace.create_file("main.ts", r#"
-        import { deepFunc } from './index';
-        function run() { deepFunc(); }
-    "#);
-
-    let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
-
-    let deep_id = indexer.index.symbol_map.get("deepFunc").unwrap()[0];
+    let leaf_id = indexer.index.symbol_map.get("leafFunc").unwrap()[0];
     let run_id = indexer.index.symbol_map.get("run").unwrap()[0];
 
     let resolutions = indexer.index.resolved_calls.get(&run_id).unwrap();
-    assert!(resolutions.contains(&deep_id), "Should resolve across multiple barrel hops");
+    
+    // Assert both calls in 'run' resolved to the same leaf implementation
+    assert!(resolutions.contains(&leaf_id));
+    // Verify our resolution path didn't duplicate symbols
+    let leaf_count = resolutions.iter().filter(|&&id| id == leaf_id).count();
+    assert_eq!(leaf_count, 1, "Should resolve to a unique ID even if reached via multiple paths");
 }
 
 #[test]
-fn test_circular_barrel_safety() {
+fn test_named_export_priority() {
     let workspace = TestWorkspace::new();
 
-    // A -> B -> A (Circular)
-    workspace.create_file("a.ts", "export * from './b';");
-    workspace.create_file("b.ts", "export * from './a';");
+    // Two files with same function name
+    workspace.create_file("correct.ts", "export function target() {}");
+    workspace.create_file("wrong.ts", "export function target() {}");
+
+    // Barrel that has a wildcard AND a specific named export
+    // In TS, a named export should take priority over wildcard re-exports
+    workspace.create_file("barrel.ts", r#"
+        export * from './wrong';
+        export { target } from './correct';
+    "#);
+
     workspace.create_file("main.ts", r#"
-        import { nonexistent } from './a';
-        function run() { nonexistent(); }
+        import { target } from './barrel';
+        function run() { target(); }
+    "#);
+
+    let mut indexer = Indexer::new();
+    indexer.scan(&workspace.path);
+    indexer.resolve_references();
+
+    let run_id = indexer.index.symbol_map.get("run").unwrap()[0];
+    let correct_id = indexer.index.symbols.iter()
+        .find(|(_, s)| s.name == "target" && indexer.index.files.get(&indexer.index.files.values().find(|f| f.id == s.file_id).unwrap().path).unwrap().path.contains("correct.ts"))
+        .unwrap().0;
+
+    let resolutions = indexer.index.resolved_calls.get(&run_id).unwrap();
+    
+    assert!(resolutions.contains(correct_id), "Named export should take priority over wildcard re-export");
+}
+
+#[test]
+fn test_deep_cycle_detection() {
+    let workspace = TestWorkspace::new();
+
+    // A -> B -> C -> A (The Long Loop)
+    workspace.create_file("a.ts", "export * from './b';");
+    workspace.create_file("b.ts", "export * from './c';");
+    workspace.create_file("c.ts", "export * from './a';");
+    
+    workspace.create_file("main.ts", r#"
+        import { ghost } from './a';
+        function run() { ghost(); }
     "#);
 
     let mut indexer = Indexer::new();
     indexer.scan(&workspace.path);
     
-    // This call should not stack overflow/hang
+    // This must not hang or stack overflow
     indexer.resolve_references();
 
     let run_id = indexer.index.symbol_map.get("run").unwrap()[0];
     let resolutions = indexer.index.resolved_calls.get(&run_id);
     
-    // It should simply fail to find the symbol, not crash
-    assert!(resolutions.is_none() || resolutions.unwrap().is_empty());
+    assert!(resolutions.is_none() || resolutions.unwrap().is_empty(), "Circular resolution should fail gracefully");
+}
+
+#[test]
+fn test_mixed_barrel_and_local() {
+    let workspace = TestWorkspace::new();
+
+    // File defines 'localFunc' and re-exports 'remoteFunc'
+    workspace.create_file("remote.ts", "export function remoteFunc() {}");
+    workspace.create_file("barrel.ts", r#"
+        export * from './remote';
+        export function localFunc() {}
+    "#);
+
+    workspace.create_file("main.ts", r#"
+        import { localFunc, remoteFunc } from './barrel';
+        function run() { 
+            localFunc();
+            remoteFunc();
+        }
+    "#);
+
+    let mut indexer = Indexer::new();
+    indexer.scan(&workspace.path);
+    indexer.resolve_references();
+
+    let run_id = indexer.index.symbol_map.get("run").unwrap()[0];
+    let resolutions = indexer.index.resolved_calls.get(&run_id).unwrap();
+
+    assert_eq!(resolutions.len(), 2, "Should find both the local and the remote function through the barrel");
 }

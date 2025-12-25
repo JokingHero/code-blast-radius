@@ -14,6 +14,9 @@ use rkyv::{to_bytes, check_archived_root};
 pub struct Indexer {
     pub index: WorkspaceIndex,
     configs: HashMap<String, &'static LanguageConfig>, 
+    /// Transient cache used during resolution to avoid redundant barrel walks.
+    /// Key: (FileId where symbol is requested, Symbol Name)
+    resolution_cache: HashMap<(FileId, String), Option<SymbolId>>,
 }
 
 impl Indexer {
@@ -24,7 +27,11 @@ impl Indexer {
                 config_map.insert(ext.to_string(), config);
             }
         }
-        Self { index: WorkspaceIndex::default(), configs: config_map }
+        Self { 
+            index: WorkspaceIndex::default(), 
+            configs: config_map,
+            resolution_cache: HashMap::new(),
+        }
     }
 
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
@@ -80,7 +87,7 @@ impl Indexer {
             self.index.inheritance.remove(&sym_id);
         }
         self.index.file_imports.remove(&file_id);
-        self.index.file_exports.remove(&file_id); // Clean up exports
+        self.index.file_exports.remove(&file_id);
         self.index.raw_literals.remove(&file_id);
     }
 
@@ -132,7 +139,7 @@ impl Indexer {
 
         if let Ok(analysis) = analyze_source(path_obj, content, config) {
             if !analysis.imports.is_empty() { self.index.file_imports.insert(file_id, analysis.imports); }
-            if !analysis.exports.is_empty() { self.index.file_exports.insert(file_id, analysis.exports); } // Store Exports
+            if !analysis.exports.is_empty() { self.index.file_exports.insert(file_id, analysis.exports); }
             if !analysis.literals.is_empty() { self.index.raw_literals.insert(file_id, analysis.literals); }
 
             let mut file_symbol_ids = Vec::new();
@@ -158,7 +165,6 @@ impl Indexer {
                 if !vars.is_empty() { self.index.local_variable_types.insert(symbol_id, vars); }
             }
 
-            // Structural Mapping
             let container_ids: Vec<SymbolId> = file_symbol_ids.iter()
                 .filter(|&&id| self.index.symbols.get(&id).map_or(false, |s| s.kind == "container"))
                 .cloned()
@@ -200,6 +206,7 @@ impl Indexer {
     pub fn resolve_references(&mut self) {
         self.index.resolved_calls.clear();
         self.index.inheritance.clear();
+        self.resolution_cache.clear();
 
         self.resolve_type_sniffing();
         self.resolve_fingerprints();
@@ -208,52 +215,61 @@ impl Indexer {
         self.resolve_bare_imports();
     }
 
-    /// Recursively walks through barrel files (exports) to find the original definition of a symbol.
     fn resolve_symbol_across_barrels(
-        &self, 
+        &mut self, 
         target_file_id: FileId, 
         symbol_name: &str, 
         visited: &mut HashSet<FileId>
     ) -> Option<SymbolId> {
+        // 1. Cycle Detection
         if visited.contains(&target_file_id) { return None; }
         visited.insert(target_file_id);
 
-        // 1. Direct Check: Is the symbol defined in this file?
+        // 2. Cache Lookup
+        if let Some(&cached_res) = self.resolution_cache.get(&(target_file_id, symbol_name.to_string())) {
+            return cached_res;
+        }
+
+        let mut result = None;
+
+        // 3. Local Definition Check
         if let Some(ids) = self.index.symbol_map.get(symbol_name) {
             if let Some(&id) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == target_file_id) {
-                return Some(id);
+                result = Some(id);
             }
         }
 
-        // 2. Export Check: Look for forwarding statements
-        if let Some(exports) = self.index.file_exports.get(&target_file_id) {
-            // Priority 2a: Named Re-exports -> export { foo } from './bar'
-            for exp in exports {
-                if let Some(ref exp_name) = exp.name {
-                    if exp_name == symbol_name {
-                        if let Some(next_file_id) = self.resolve_import_path(target_file_id, &exp.source) {
-                            return self.resolve_symbol_across_barrels(next_file_id, symbol_name, visited);
-                        }
-                    }
-                }
-            }
-
-            // Priority 2b: Wildcard Re-exports -> export * from './bar'
-            for exp in exports {
-                if exp.name.is_none() {
+        // 4. Re-export Walk
+        if result.is_none() {
+            if let Some(exports) = self.index.file_exports.get(&target_file_id).cloned() {
+                // Named exports first
+                for exp in exports.iter().filter(|e| e.name.as_deref() == Some(symbol_name)) {
                     if let Some(next_file_id) = self.resolve_import_path(target_file_id, &exp.source) {
-                        if let Some(found_id) = self.resolve_symbol_across_barrels(next_file_id, symbol_name, visited) {
-                            return Some(found_id);
+                        result = self.resolve_symbol_across_barrels(next_file_id, symbol_name, visited);
+                        if result.is_some() { break; }
+                    }
+                }
+
+                // Wildcard exports second
+                if result.is_none() {
+                    for exp in exports.iter().filter(|e| e.name.is_none()) {
+                        if let Some(next_file_id) = self.resolve_import_path(target_file_id, &exp.source) {
+                            result = self.resolve_symbol_across_barrels(next_file_id, symbol_name, visited);
+                            if result.is_some() { break; }
                         }
                     }
                 }
             }
         }
 
-        None
+        // 5. Update Cache
+        self.resolution_cache.insert((target_file_id, symbol_name.to_string()), result);
+        result
     }
 
     fn resolve_function_calls_with_fallback(&mut self) {
+        // Clone entries to decouple the immutable borrow of self.index for the loop
+        // from the mutable borrow of self for resolve_single_call
         let entries: Vec<(SymbolId, Vec<String>)> = self.index.raw_calls.iter()
             .map(|(k, v)| (*k, v.clone())).collect();
 
@@ -359,19 +375,16 @@ impl Indexer {
         }
     }
 
-    fn resolve_single_call(&self, file_id: FileId, name: &str) -> Option<SymbolId> {
-        // 1. Check local file symbols first
+    fn resolve_single_call(&mut self, file_id: FileId, name: &str) -> Option<SymbolId> {
         if let Some(ids) = self.index.symbol_map.get(name) {
             if let Some(&id) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == file_id) { return Some(id); }
         }
 
-        // 2. Check imports with Barrel Resolution
-        if let Some(imps) = self.index.file_imports.get(&file_id) {
+        if let Some(imps) = self.index.file_imports.get(&file_id).cloned() {
             for imp in imps {
                 if imp.name == name {
                     if let Some(tfid) = self.resolve_import_path(file_id, &imp.source) {
                         let mut visited = HashSet::new();
-                        // Use the recursive walker to follow re-exports (barrels)
                         return self.resolve_symbol_across_barrels(tfid, name, &mut visited);
                     }
                 }
@@ -386,14 +399,12 @@ impl Indexer {
         let parent = from_path.parent()?;
         let exts = ["ts", "js", "tsx", "rs", "py"];
         
-        // Handle directory imports (./utils -> ./utils/index.ts)
         let base = parent.join(source);
         let check = |p: PathBuf| self.index.files.get(&p.to_string_lossy().to_string()).map(|n| n.id);
         
         if let Some(id) = check(base.clone()) { return Some(id); }
         for e in exts { 
             if let Some(id) = check(base.with_extension(e)) { return Some(id); } 
-            // Check for index files in subdirectories
             if let Some(id) = check(base.join(format!("index.{}", e))) { return Some(id); }
         }
         None
