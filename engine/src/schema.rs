@@ -52,6 +52,8 @@ pub struct SymbolNode {
 #[derive(Archive, Deserialize, Serialize, Debug, Default)]
 #[archive(check_bytes)]
 pub struct WorkspaceIndex {
+    pub next_file_id: u32,
+    pub next_symbol_id: u32,
     pub roots: Vec<String>, // Track which folders are indexed
     pub files: HashMap<String, FileNode>,
     pub symbols: HashMap<SymbolId, SymbolNode>,

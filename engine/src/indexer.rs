@@ -33,11 +33,20 @@ impl Indexer {
         }
     }
 
+    /// Fixed: Normalizes paths and strips Windows UNC prefixes (\\?\) to ensure 
+    /// consistency between indexed keys and CLI input.
     fn to_index_path(path: &Path) -> String {
-        fs::canonicalize(path)
-            .unwrap_or_else(|_| path.to_path_buf())
-            .to_string_lossy()
-            .to_string()
+        let abs_path = fs::canonicalize(path)
+            .unwrap_or_else(|_| path.to_path_buf());
+        
+        let path_str = abs_path.to_string_lossy().to_string();
+        
+        // Strip Windows UNC prefix if it exists
+        if path_str.starts_with(r"\\?\") {
+            path_str[4..].to_string()
+        } else {
+            path_str
+        }
     }
 
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
@@ -77,7 +86,6 @@ impl Indexer {
             .map(|s| s.id)
             .collect();
 
-        // Use &ids_to_remove to avoid moving the vector
         for &sym_id in &ids_to_remove {
             if let Some(sym) = self.index.symbols.remove(&sym_id) {
                 if let Some(id_list) = self.index.symbol_map.get_mut(&sym.name) {
@@ -95,7 +103,7 @@ impl Indexer {
             self.index.symbol_config_refs.remove(&sym_id);
         }
 
-        // Now we can use ids_to_remove again here
+        // Clean up config definitions mapping
         for def_list in self.index.config_definitions.values_mut() {
             def_list.retain(|id| !ids_to_remove.contains(id));
         }
@@ -115,17 +123,13 @@ impl Indexer {
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
             let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
             
-            // Try to match:
-            // 1. By extension (e.g. "ts")
-            // 2. By exact filename (e.g. ".env")
-            // 3. By filename without leading dot (e.g. "env")
+            // Logic to handle hidden files like .env correctly
             let config = self.configs.get(ext)
                 .or_else(|| self.configs.get(filename))
                 .or_else(|| if filename.starts_with('.') { self.configs.get(&filename[1..]) } else { None });
 
             if let Some(config) = config {
                 if let Ok(content) = fs::read_to_string(path) {
-                    println!("DEBUG: [Indexer] Scanning file: {:?} (as {:?})", filename, config.lang_enum);
                     let hash = blake3::hash(content.as_bytes());
                     let hash_bytes: [u8; 32] = hash.into();
                     let path_key = Self::to_index_path(path);
@@ -154,8 +158,15 @@ impl Indexer {
     }
 
     fn update_file(&mut self, path_key: &str, path_obj: &Path, content: &str, hash: [u8; 32], config: &LanguageConfig) {
-        let existing_id = self.index.files.get(path_key).map(|node| node.id);
-        let file_id = existing_id.unwrap_or_else(|| self.index.files.len() as u32);
+        // Fixed: Use next_file_id to prevent collisions after deletions
+        let file_id = match self.index.files.get(path_key) {
+            Some(node) => node.id,
+            None => {
+                let id = self.index.next_file_id;
+                self.index.next_file_id += 1;
+                id
+            }
+        };
 
         self.clear_file_symbols(file_id);
         self.index.files.insert(path_key.to_string(), FileNode { id: file_id, path: path_key.to_string(), hash });
@@ -167,9 +178,10 @@ impl Indexer {
 
             let mut file_symbol_ids = Vec::new();
             for func in analysis.functions {
-                let symbol_id = self.index.symbols.keys().max().map_or(0, |k| k + 1);
+                // Fixed: Use next_symbol_id to prevent collisions
+                let symbol_id = self.index.next_symbol_id;
+                self.index.next_symbol_id += 1;
                 
-                // Add to index
                 self.index.symbols.insert(symbol_id, SymbolNode {
                     id: symbol_id, file_id, parent_id: None,
                     name: func.name.clone(), 
@@ -180,19 +192,21 @@ impl Indexer {
                 });
                 
                 file_symbol_ids.push(symbol_id);
-                self.index.symbol_map.entry(func.name.clone()).or_default().push(symbol_id);
                 
-                // --- CRITICAL: Store used config keys ---
+                // Fixed: Do not clutter symbol_map with "anonymous" functions
+                if func.name != "anonymous" {
+                    self.index.symbol_map.entry(func.name.clone()).or_default().push(symbol_id);
+                }
+                
                 if !func.config_keys.is_empty() {
                     self.index.symbol_config_refs.insert(symbol_id, func.config_keys);
                 }
 
                 if !func.calls.is_empty() { self.index.raw_calls.insert(symbol_id, func.calls); }
                 if !func.fingerprints.is_empty() { self.index.fingerprints.insert(symbol_id, func.fingerprints); }
-                // ... (Local types) ...
             }
 
-            // --- CRITICAL: Define what files provide config values ---
+            // Fixed: Centralized Config Mapping
             let is_data_file = matches!(config.lang_enum, 
                 crate::language::SupportedLanguage::Yaml | 
                 crate::language::SupportedLanguage::Json | 
@@ -202,13 +216,13 @@ impl Indexer {
 
             if is_data_file {
                 for &sid in &file_symbol_ids {
-                    // Make sure sid exists in self.index.symbols before this!
-                    let name = self.index.symbols[&sid].name.clone();
-                    self.index.config_definitions.entry(name).or_default().push(sid);
+                    let name = &self.index.symbols[&sid].name;
+                    // If it's a data file, every symbol name is a config definition key
+                    self.index.config_definitions.entry(name.clone()).or_default().push(sid);
                 }
             }
 
-            // Logic for Container Members and Inheritance remains same...
+            // Container Members Logic
             let container_ids: Vec<SymbolId> = file_symbol_ids.iter()
                 .filter(|&&id| self.index.symbols.get(&id).map_or(false, |s| s.kind == "container"))
                 .cloned()
@@ -236,6 +250,7 @@ impl Indexer {
                 if !members.is_empty() { self.index.container_methods.insert(c_id, members); }
             }
 
+            // Inheritance Logic
             for (child, parent) in analysis.implementations {
                 if let Some(ids) = self.index.symbol_map.get(&child) {
                     if let Some(&cid) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == file_id) {
@@ -256,50 +271,35 @@ impl Indexer {
         self.resolve_fingerprints();
         self.resolve_implicit_connections();
         self.resolve_function_calls_with_fallback();
-        self.resolve_config_links(); // This links the TS config_keys to Data file config_definitions
+        self.resolve_config_links(); 
         self.resolve_file_dependencies(); 
     }
 
     fn resolve_config_links(&mut self) {
-        // Debug: Check if we have any definitions at all
-        if self.index.config_definitions.is_empty() {
-            println!("DEBUG: [Resolver] No config definitions found in index.");
-        } else {
-            println!("DEBUG: [Resolver] Known config keys: {:?}", self.index.config_definitions.keys().collect::<Vec<_>>());
-        }
-
         let mut new_links = Vec::new();
         for (&sym_id, used_keys) in &self.index.symbol_config_refs {
-            let sym_name = &self.index.symbols[&sym_id].name;
-            println!("DEBUG: [Resolver] Symbol '{}' attempts to use keys: {:?}", sym_name, used_keys);
-            
             for key in used_keys {
                 if let Some(def_ids) = self.index.config_definitions.get(key) {
-                    println!("DEBUG: [Resolver] SUCCESS: Linked '{}' to config key '{}'", sym_name, key);
                     for &target_sid in def_ids {
                         new_links.push((sym_id, target_sid));
                     }
-                } else {
-                    println!("DEBUG: [Resolver] FAILURE: Key '{}' used in '{}' not found in config definitions", key, sym_name);
                 }
             }
         }
-
         for (caller, target) in new_links {
             self.index.resolved_calls.entry(caller).or_default().push(target);
         }
-        
         for calls in self.index.resolved_calls.values_mut() {
             calls.sort();
             calls.dedup();
         }
     }
 
-    // ... (rest of the file: resolve_symbol_across_barrels, resolve_import_path, etc. remain the same) ...
     fn resolve_symbol_across_barrels(&mut self, target_file_id: FileId, symbol_name: &str, visited: &mut HashSet<FileId>) -> Option<SymbolId> {
         if visited.contains(&target_file_id) { return None; }
         visited.insert(target_file_id);
         if let Some(&cached_res) = self.resolution_cache.get(&(target_file_id, symbol_name.to_string())) { return cached_res; }
+        
         let mut result = None;
         if let Some(ids) = self.index.symbol_map.get(symbol_name) {
             if let Some(&id) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == target_file_id) { result = Some(id); }

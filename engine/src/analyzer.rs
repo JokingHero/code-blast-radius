@@ -8,6 +8,7 @@ use crate::schema::{ImportNode, ExportNode, WorkspaceIndex, SymbolId};
 #[derive(Debug, Clone)]
 pub struct FunctionInfo {
     pub name: String,
+    pub is_anonymous: bool, // Added to distinguish symbols
     pub range_start: usize,
     pub range_end: usize,
     pub source_code: String,
@@ -15,15 +16,15 @@ pub struct FunctionInfo {
     pub calls: Vec<String>, 
     pub fingerprints: HashMap<String, Vec<String>>,
     pub return_type: Option<String>, 
-    pub local_types: HashMap<String, String>, // var_name -> TypeName
-    pub local_assigns: HashMap<String, String>, // var_name -> FuncName
+    pub local_types: HashMap<String, String>, 
+    pub local_assigns: HashMap<String, String>, 
     pub config_keys: Vec<String>,
 }
 
 pub struct FileAnalysis {
     pub functions: Vec<FunctionInfo>,
     pub imports: Vec<ImportNode>,
-    pub exports: Vec<ExportNode>, // Added for Barrel support
+    pub exports: Vec<ExportNode>,
     pub literals: Vec<String>,
     pub implementations: Vec<(String, String)>, 
     pub global_vars: HashMap<String, String>, 
@@ -87,7 +88,7 @@ pub fn analyze_source(
         }
     }
 
-    // 2. Exports (Barrel File Support)
+    // 2. Exports
     if !config.query_exports.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_exports) {
             let mut cursor = QueryCursor::new();
@@ -120,7 +121,7 @@ pub fn analyze_source(
         }
     }
 
-    // 4. Implementations (Inheritance)
+    // 4. Implementations
     if !config.query_implements.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_implements) {
             let mut cursor = QueryCursor::new();
@@ -139,7 +140,7 @@ pub fn analyze_source(
         }
     }
 
-    // 5. Build Queries for Metadata Extraction
+    // 5. Build Queries
     let defs_query = Query::new(&language, config.query_defs)
         .map_err(|e| format!("Invalid defs query for {:?}: {}", config.lang_enum, e))?;
     let calls_query = Query::new(&language, config.query_calls)
@@ -154,14 +155,14 @@ pub fn analyze_source(
         None
     };
     
-    // 6. Extract Definitions (Functions, Classes, Variables)
-    let mut variable_hints = Vec::new(); // (range, name, type, assignment)
+    // 6. Extract Definitions
+    let mut variable_hints = Vec::new(); 
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(&defs_query, tree.root_node(), code_bytes);
 
     while let Some(match_) = matches.next() {
         let mut def_node = None;
-        let mut name = "anonymous".to_string();
+        let mut name_opt: Option<String> = None; // Track if we found a name
         let mut return_type = None;
         let mut v_name = None;
         let mut v_type = None;
@@ -173,7 +174,7 @@ pub fn analyze_source(
             
             match cap_name {
                 "function.definition" => def_node = Some(capture.node),
-                "function.name" => name = text.to_string(),
+                "function.name" => name_opt = Some(text.to_string()),
                 "function.return_type" => {
                     return_type = Some(text.trim_start_matches(|c| c == ':' || c == '=' || c == '>').trim().to_string());
                 }
@@ -201,7 +202,8 @@ pub fn analyze_source(
 
         if let Some(node) = def_node {
             functions.push(FunctionInfo {
-                name,
+                name: name_opt.clone().unwrap_or_else(|| "anonymous".to_string()),
+                is_anonymous: name_opt.is_none(),
                 range_start: node.start_byte(),
                 range_end: node.end_byte(),
                 source_code: node.utf8_text(code_bytes).unwrap_or("").to_string(),
@@ -218,8 +220,7 @@ pub fn analyze_source(
         }
     }
 
-    // 7. Pre-calculate File-wide Config Matches
-    // This is more stable than running the query inside the function loop
+    // 7. Config Queries
     let mut all_config_matches = Vec::new();
     if let Some(ref q) = config_query {
         let mut cf_cursor = QueryCursor::new();
@@ -239,9 +240,8 @@ pub fn analyze_source(
         }
     }
 
-    // 8. Enrichment (Calls, Fingerprints, Config, Docs)
+    // 8. Enrichment
     for func in &mut functions {
-        // Variable Assignments within this function
         for (v_range, v_name, v_type, v_assign) in &variable_hints {
             if v_range.start >= func.range_start && v_range.end <= func.range_end {
                 if let Some(t) = v_type { func.local_types.insert(v_name.clone(), t.clone()); }
@@ -249,7 +249,6 @@ pub fn analyze_source(
             }
         }
 
-        // Config Keys within this function
         for (range, key) in &all_config_matches {
             if range.start >= func.range_start && range.end <= func.range_end {
                 func.config_keys.push(key.clone());
@@ -259,7 +258,6 @@ pub fn analyze_source(
         func.config_keys.dedup();
 
         if let Some(node) = tree.root_node().descendant_for_byte_range(func.range_start, func.range_end) {
-            // Function Calls & Fingerprints
             let mut c_cursor = QueryCursor::new();
             let mut c_matches = c_cursor.matches(&calls_query, node, code_bytes);
             while let Some(cm) = c_matches.next() {
@@ -279,7 +277,6 @@ pub fn analyze_source(
                 }
             }
 
-            // Doc Comments (Matched by start byte of the function)
             let mut d_cursor = QueryCursor::new();
             let mut d_matches = d_cursor.matches(&docs_query, tree.root_node(), code_bytes);
             while let Some(dm) = d_matches.next() {
