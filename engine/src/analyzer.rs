@@ -372,32 +372,67 @@ pub fn generate_context_from_ids(
     index: &WorkspaceIndex,
     chain: &[SymbolId],
     include_docs: bool,
+    exclude_tests: bool,
 ) -> String {
-    if chain.is_empty() { return String::from("// No context found."); }
+    if chain.is_empty() {
+        return String::from("// No context found.");
+    }
+
+    // 1. Filter the chain first
+    let filtered_chain: Vec<SymbolId> = if exclude_tests {
+        chain
+            .iter()
+            .filter(|&&id| {
+                index.symbols.get(&id).map_or(true, |s| !s.is_test)
+            })
+            .cloned()
+            .collect()
+    } else {
+        chain.to_vec()
+    };
+
+    if filtered_chain.is_empty() {
+        return String::from("// All relevant context was filtered out (test exclusion active).");
+    }
 
     let mut context = String::new();
-    let target_id = chain.first().unwrap(); 
-    let target_name = index.symbols.get(target_id).map(|s| s.name.as_str()).unwrap_or("Unknown");
-
-    context.push_str(&format!("// Context for search: `{}`\n", target_name));
     
-    let names: Vec<String> = chain.iter()
+    // 2. Metadata Header
+    // Use the first symbol in the FILTERED chain as the primary context reference
+    // to avoid leaking names of excluded tests into the header.
+    let primary_id = filtered_chain.first().unwrap();
+    let primary_name = index.symbols.get(primary_id).map(|s| s.name.as_str()).unwrap_or("Unknown");
+
+    context.push_str(&format!("// Context for search: `{}`\n", primary_name));
+    
+    let names: Vec<String> = filtered_chain.iter()
         .filter_map(|id| index.symbols.get(id).map(|s| s.name.clone()))
         .collect();
-    context.push_str(&format!("// Resolved Symbols: {}\n\n", names.join(", ")));
+    context.push_str(&format!("// Resolved Symbols: {}\n", names.join(", ")));
+    
+    if exclude_tests {
+        context.push_str("// Note: Test files and functions have been excluded from this output.\n");
+    }
+    context.push('\n');
 
+    // 3. Extraction logic
     let mut seen_files = HashSet::new();
 
-    for &sym_id in chain {
+    for &sym_id in &filtered_chain {
         if let Some(sym) = index.symbols.get(&sym_id) {
             if let Some(file_node) = index.files.values().find(|f| f.id == sym.file_id) {
+                // Print a clean header when moving to a new file
                 if !seen_files.contains(&file_node.id) {
                     context.push_str("// ==========================================================\n");
                     context.push_str(&format!("// File: {}\n", file_node.path));
+                    if file_node.is_test {
+                        context.push_str("// (Test File)\n");
+                    }
                     context.push_str("// ==========================================================\n");
                     seen_files.insert(file_node.id);
                 }
 
+                // Add Documentation if requested
                 if include_docs {
                     if let Some(docs) = &sym.doc_comment {
                         context.push_str(docs);
@@ -405,18 +440,22 @@ pub fn generate_context_from_ids(
                     }
                 }
 
+                // Extract Source Code
                 if let Ok(content) = std::fs::read_to_string(&file_node.path) {
                     if sym.range_end <= content.len() {
                         let text = String::from_utf8_lossy(&content.as_bytes()[sym.range_start..sym.range_end]);
                         context.push_str(&text);
                     } else {
-                        context.push_str("// Error: Source range out of bounds");
+                        context.push_str("// Error: Source range out of bounds for this file version");
                     }
+                } else {
+                    context.push_str("// Error: Could not read source file from disk");
                 }
                 context.push_str("\n\n");
             }
         }
     }
+    
     context
 }
 

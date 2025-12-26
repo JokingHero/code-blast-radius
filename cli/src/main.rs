@@ -20,6 +20,9 @@ struct Cli {
 
     #[arg(long, default_value_t = true)]
     include_docs: bool,
+
+    #[arg(long, default_value_t = true)]
+    no_tests: bool,
 }
 
 fn main() {
@@ -57,7 +60,7 @@ fn main() {
     if let Some(func_name) = cli.function_name {
         println!("Extracting full semantic context for `{}`...", func_name);
         if let Some(symbol_ids) = find_related_symbols(&indexer.index, &func_name) {
-            let context = generate_context_from_ids(&indexer.index, &symbol_ids, cli.include_docs);
+            let context = generate_context_from_ids(&indexer.index, &symbol_ids, cli.include_docs, cli.no_tests);
             println!("\n--- SEMANTIC CONTEXT ---\n");
             println!("{}", context);
         } else {

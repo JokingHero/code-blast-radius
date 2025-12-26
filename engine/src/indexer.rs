@@ -157,8 +157,73 @@ impl Indexer {
         }
     }
 
+    /// Heuristic to determine if a file is a test based on its path or filename.
+    fn is_test_path(path: &Path) -> bool {
+        let path_str = path.to_string_lossy();
+        let normalized = path_str.replace('\\', "/").to_lowercase();
+        let path_obj = Path::new(&normalized);
+
+        // 1. Expanded folder-based detection (including Fixtures and Mocks)
+        let has_test_folder = path_obj.components().any(|c| {
+            let s = c.as_os_str().to_string_lossy();
+            matches!(
+                s.as_ref(), 
+                "test" | "tests" | "__tests__" | 
+                "spec" | "specs" | 
+                "integration-test" | 
+                "fixtures" | "__fixtures__" | 
+                "mocks" | "__mocks__" | 
+                "stubs"
+            )
+        });
+
+        if has_test_folder {
+            return true;
+        }
+
+        // 2. Check filename patterns
+        let filename = path.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        // TypeScript / JavaScript
+        if filename.ends_with(".test.ts") || filename.ends_with(".test.tsx") || 
+           filename.ends_with(".spec.ts") || filename.ends_with(".spec.tsx") ||
+           filename.ends_with(".fixture.ts") || filename.ends_with(".mock.ts") ||
+           filename.ends_with(".test.js") || filename.ends_with(".test.jsx") ||
+           filename.ends_with(".spec.js") || filename.ends_with(".spec.jsx") {
+            return true;
+        }
+
+        // Rust
+        if filename.ends_with("_test.rs") || filename.ends_with("_spec.rs") || filename == "test.rs" {
+            return true;
+        }
+
+        // Python
+        if filename.starts_with("test_") || filename.ends_with("_test.py") {
+            return true;
+        }
+
+        // Java
+        if filename.ends_with("test.java") || filename.ends_with("tests.java") {
+            return true;
+        }
+
+        // Catch-all for files that contain "mock" or "fixture" in the name
+        // but only if they are likely code files
+        if (filename.contains("mock") || filename.contains("fixture")) && 
+           (filename.ends_with(".ts") || filename.ends_with(".js") || filename.ends_with(".rs") || filename.ends_with(".py")) {
+            return true;
+        }
+
+        false
+    }
+
     fn update_file(&mut self, path_key: &str, path_obj: &Path, content: &str, hash: [u8; 32], config: &LanguageConfig) {
-        // Fixed: Use next_file_id to prevent collisions after deletions
+        let is_test_file = Self::is_test_path(path_obj);
+
         let file_id = match self.index.files.get(path_key) {
             Some(node) => node.id,
             None => {
@@ -169,7 +234,12 @@ impl Indexer {
         };
 
         self.clear_file_symbols(file_id);
-        self.index.files.insert(path_key.to_string(), FileNode { id: file_id, path: path_key.to_string(), hash });
+        self.index.files.insert(path_key.to_string(), FileNode { 
+            id: file_id, 
+            path: path_key.to_string(), 
+            hash,
+            is_test: is_test_file,
+        });
 
         if let Ok(analysis) = analyze_source(path_obj, content, config) {
             if !analysis.imports.is_empty() { self.index.file_imports.insert(file_id, analysis.imports); }
@@ -178,22 +248,48 @@ impl Indexer {
 
             let mut file_symbol_ids = Vec::new();
             for func in analysis.functions {
-                // Fixed: Use next_symbol_id to prevent collisions
                 let symbol_id = self.index.next_symbol_id;
                 self.index.next_symbol_id += 1;
                 
+                let name_lower = func.name.to_lowercase();
+                let code_trim = func.source_code.trim_start();
+
+                // 1. Modern JS/TS Testing DSL detection
+                let is_js_test_block = code_trim.starts_with("it(") || code_trim.starts_with("it.") ||
+                                       code_trim.starts_with("test(") || code_trim.starts_with("test.") ||
+                                       code_trim.starts_with("describe(") || code_trim.starts_with("describe.") ||
+                                       code_trim.starts_with("suite(") || code_trim.starts_with("context(") ||
+                                       code_trim.starts_with("beforeEach(") || code_trim.starts_with("afterEach(");
+
+                // 2. Name-based heuristics
+                let is_test_named = name_lower.starts_with("test_") 
+                    || name_lower.ends_with("_test")
+                    || name_lower == "test"
+                    || name_lower.contains("mock") 
+                    || name_lower.contains("fixture");
+
+                // 3. Language specific decorators
+                let has_test_decorator = func.source_code.contains("#[test]") // Rust
+                    || func.source_code.contains("@Test")   // Java/Python
+                    || func.source_code.contains("@fixture"); // Pytest
+
+                let is_inline_test = is_js_test_block || is_test_named || has_test_decorator;
+
                 self.index.symbols.insert(symbol_id, SymbolNode {
-                    id: symbol_id, file_id, parent_id: None,
+                    id: symbol_id, 
+                    file_id, 
+                    parent_id: None,
                     name: func.name.clone(), 
                     kind: if func.source_code.contains("class ") || func.source_code.contains("interface ") { "container" } else { "function" }.to_string(), 
-                    range_start: func.range_start, range_end: func.range_end,
+                    range_start: func.range_start, 
+                    range_end: func.range_end,
                     doc_comment: func.documentation,
                     return_type: func.return_type,
+                    is_test: is_test_file || is_inline_test,
                 });
                 
                 file_symbol_ids.push(symbol_id);
                 
-                // Fixed: Do not clutter symbol_map with "anonymous" functions
                 if func.name != "anonymous" {
                     self.index.symbol_map.entry(func.name.clone()).or_default().push(symbol_id);
                 }
@@ -206,51 +302,33 @@ impl Indexer {
                 if !func.fingerprints.is_empty() { self.index.fingerprints.insert(symbol_id, func.fingerprints); }
             }
 
-            // Fixed: Centralized Config Mapping
+            // --- Keep the rest of your update_file logic exactly as it was ---
             let is_data_file = matches!(config.lang_enum, 
-                crate::language::SupportedLanguage::Yaml | 
-                crate::language::SupportedLanguage::Json | 
-                crate::language::SupportedLanguage::Toml |
-                crate::language::SupportedLanguage::Dotenv
+                crate::language::SupportedLanguage::Yaml | crate::language::SupportedLanguage::Json | 
+                crate::language::SupportedLanguage::Toml | crate::language::SupportedLanguage::Dotenv
             );
-
             if is_data_file {
                 for &sid in &file_symbol_ids {
                     let name = &self.index.symbols[&sid].name;
-                    // If it's a data file, every symbol name is a config definition key
                     self.index.config_definitions.entry(name.clone()).or_default().push(sid);
                 }
             }
-
-            // Container Members Logic
             let container_ids: Vec<SymbolId> = file_symbol_ids.iter()
                 .filter(|&&id| self.index.symbols.get(&id).map_or(false, |s| s.kind == "container"))
-                .cloned()
-                .collect();
-
+                .cloned().collect();
             for c_id in container_ids {
-                let (cs, ce) = {
-                    let c = &self.index.symbols[&c_id];
-                    (c.range_start, c.range_end)
-                };
+                let (cs, ce) = { let c = &self.index.symbols[&c_id]; (c.range_start, c.range_end) };
                 let mut members = HashSet::new();
                 for &s_id in &file_symbol_ids {
                     if s_id == c_id { continue; }
-                    let is_member = {
-                        let s = &self.index.symbols[&s_id];
-                        s.range_start >= cs && s.range_end <= ce
-                    };
+                    let is_member = { let s = &self.index.symbols[&s_id]; s.range_start >= cs && s.range_end <= ce };
                     if is_member {
                         members.insert(self.index.symbols[&s_id].name.clone());
-                        if let Some(node) = self.index.symbols.get_mut(&s_id) {
-                            node.parent_id = Some(c_id);
-                        }
+                        if let Some(node) = self.index.symbols.get_mut(&s_id) { node.parent_id = Some(c_id); }
                     }
                 }
                 if !members.is_empty() { self.index.container_methods.insert(c_id, members); }
             }
-
-            // Inheritance Logic
             for (child, parent) in analysis.implementations {
                 if let Some(ids) = self.index.symbol_map.get(&child) {
                     if let Some(&cid) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == file_id) {

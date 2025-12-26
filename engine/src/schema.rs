@@ -33,6 +33,7 @@ pub struct FileNode {
     pub id: FileId,
     pub path: String,
     pub hash: [u8; 32],
+    pub is_test: bool,
 }
 
 #[derive(Archive, Deserialize, Serialize, Debug, Clone)]
@@ -47,6 +48,7 @@ pub struct SymbolNode {
     pub range_end: usize,
     pub doc_comment: Option<String>,
     pub return_type: Option<String>,
+    pub is_test: bool,
 }
 
 #[derive(Archive, Deserialize, Serialize, Debug, Default)]
