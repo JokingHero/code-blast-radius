@@ -141,10 +141,21 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             arguments: (arguments (string) @config.key))
         ]
     "#,
+    // Matches: const X = "value"
     query_vals: r#"
         (variable_declarator
             name: (identifier) @val.name
             value: [(string) (template_string)] @val.value
         )
+    "#,
+    // Matches types in annotations, heritage clauses, and generics
+    query_types: r#"
+        [
+            (type_annotation (type_identifier) @type.ref)
+            (extends_clause value: (identifier) @type.ref)
+            (implements_clause (type_identifier) @type.ref)
+            (new_expression constructor: (identifier) @type.ref)
+            (type_arguments (type_identifier) @type.ref)
+        ]
     "#,
 };

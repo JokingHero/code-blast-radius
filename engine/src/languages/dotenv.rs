@@ -19,4 +19,5 @@ pub const DOTENV_CONFIG: LanguageConfig = LanguageConfig {
             value: (word) @val.value
         )
     "#,
+    query_types: "",
 };

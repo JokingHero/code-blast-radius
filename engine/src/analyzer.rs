@@ -8,12 +8,13 @@ use crate::schema::{ImportNode, ExportNode, WorkspaceIndex, SymbolId};
 #[derive(Debug, Clone)]
 pub struct FunctionInfo {
     pub name: String,
-    pub is_anonymous: bool, // Added to distinguish symbols
+    pub is_anonymous: bool, 
     pub range_start: usize,
     pub range_end: usize,
     pub source_code: String,
     pub documentation: Option<String>,
     pub calls: Vec<String>, 
+    pub type_refs: Vec<String>, // NEW: "Nouns" used by this function (arguments, return types, etc.)
     pub fingerprints: HashMap<String, Vec<String>>,
     pub return_type: Option<String>, 
     pub local_types: HashMap<String, String>, 
@@ -66,8 +67,7 @@ pub fn analyze_source(
     let root_node = tree.root_node();
     
     // --- STEP 0: CONSTANT PROPAGATION ---
-    // We scan for constants first (e.g., const API_URL = "/api/v1") so we can 
-    // substitute them in imports or inject them as literals later.
+    // Scan for constants (e.g. const API = "/api") to substitute in imports/literals
     let mut local_constants: HashMap<String, String> = HashMap::new();
     
     if !config.query_vals.is_empty() {
@@ -85,7 +85,6 @@ pub fn analyze_source(
                     if capture_name == "val.name" { 
                         name = text; 
                     } else if capture_name == "val.value" { 
-                        // Strip quotes immediately to store the semantic value
                         val = text.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_string(); 
                     }
                 }
@@ -118,9 +117,6 @@ pub fn analyze_source(
                     let capture_name = q.capture_names()[cap.index as usize];
                     
                     if capture_name == "import.source" { 
-                        // Logic:
-                        // 1. If 'text' matches a known constant (e.g. require(MY_CONST)), use the constant's value.
-                        // 2. Otherwise, treat it as a literal and strip quotes.
                         if let Some(resolved) = local_constants.get(&text) {
                             src = resolved.clone();
                         } else {
@@ -129,8 +125,7 @@ pub fn analyze_source(
                     } else if capture_name == "import.name" { 
                         name = text; 
                     } else if capture_name == "import.alias" {
-                        // Handle namespace import
-                        name = "*".to_string(); // Magic string for namespace
+                        name = "*".to_string(); 
                         alias = Some(text);
                     }
                 }
@@ -153,8 +148,6 @@ pub fn analyze_source(
                     let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
                     let capture_name = q.capture_names()[cap.index as usize];
                     if capture_name == "export.source" { 
-                        // Similar substitution logic for exports could go here, 
-                        // generally exports use literals, but substitution is safe.
                         if let Some(resolved) = local_constants.get(&text) {
                             src = resolved.clone();
                         } else {
@@ -181,14 +174,9 @@ pub fn analyze_source(
             }
         }
     }
-    
-    // INJECTION: Add the values of constants found in Step 0.
-    // This ensures that if a user writes `const API = "/users"`, the indexer
-    // sees "/users" as a literal present in this file for linking purposes.
+    // Inject values from constants to support linking
     for val in local_constants.values() {
-        if val.len() > 1 {
-            literals.push(val.clone());
-        }
+        if val.len() > 1 { literals.push(val.clone()); }
     }
 
     // 4. Implementations
@@ -220,21 +208,23 @@ pub fn analyze_source(
     let config_query = if !config.query_config.is_empty() {
         Some(Query::new(&language, config.query_config)
             .map_err(|e| format!("Invalid config query for {:?}: {}", config.lang_enum, e))?)
-    } else {
-        None
-    };
+    } else { None };
+    let types_query = if !config.query_types.is_empty() {
+        Some(Query::new(&language, config.query_types)
+            .map_err(|e| format!("Invalid types query for {:?}: {}", config.lang_enum, e))?)
+    } else { None };
 
     // --- Create the Module Symbol ---
-    // This represents the file itself and will catch top-level calls/configs
     let module_name = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
     let mut module_info = FunctionInfo {
         name: format!("(module) {}", module_name),
         is_anonymous: false,
         range_start: root_node.start_byte(),
         range_end: root_node.end_byte(),
-        source_code: String::new(), // Optional: Don't duplicate source to save RAM, or copy it if needed
-        documentation: None, // We could parse top-level file comments here if desired
+        source_code: String::new(), 
+        documentation: None, 
         calls: Vec::new(),
+        type_refs: Vec::new(),
         fingerprints: HashMap::new(),
         return_type: None,
         local_types: HashMap::new(),
@@ -267,7 +257,6 @@ pub fn analyze_source(
                 }
                 "variable.name" => {
                     v_name = Some(text.to_string());
-                    // Try to sniff what variable is assigned to: const x = someFunc()
                     if let Some(parent) = capture.node.parent() {
                         if let Some(val) = parent.child_by_field_name("value") {
                             if val.kind() == "call_expression" {
@@ -297,6 +286,7 @@ pub fn analyze_source(
                 source_code: node.utf8_text(code_bytes).unwrap_or("").to_string(),
                 documentation: None,
                 calls: Vec::new(),
+                type_refs: Vec::new(),
                 fingerprints: HashMap::new(),
                 return_type,
                 local_types: HashMap::new(),
@@ -304,13 +294,11 @@ pub fn analyze_source(
                 config_keys: Vec::new(),
             });
         } else if let Some(vn) = v_name {
-            // Collecting variable hints to distribute later
             variable_hints.push((match_.captures[0].node.byte_range(), vn, v_type, v_assign));
         }
     }
 
-    // Helper closure to find the "Smallest Container" for a given range
-    // Returns index in `functions` or None if it belongs to `module_info`
+    // Helper: Smallest Container
     let get_owner_index = |start: usize, end: usize, funcs: &[FunctionInfo]| -> Option<usize> {
         let mut best_idx = None;
         let mut smallest_len = usize::MAX;
@@ -334,7 +322,6 @@ pub fn analyze_source(
             if let Some(t) = v_type { func.local_types.insert(v_name.clone(), t); }
             if let Some(a) = v_assign { func.local_assigns.insert(v_name.clone(), a); }
         } else {
-            // Add to Module
             if let Some(t) = v_type { module_info.local_types.insert(v_name.clone(), t); }
             if let Some(a) = v_assign { module_info.local_assigns.insert(v_name.clone(), a); }
         }
@@ -365,15 +352,7 @@ pub fn analyze_source(
         }
     }
 
-    // Deduplicate config keys
-    for func in &mut functions {
-        func.config_keys.sort();
-        func.config_keys.dedup();
-    }
-    module_info.config_keys.sort();
-    module_info.config_keys.dedup();
-
-    // 9. Extract and Distribute Calls (Global Pass)
+    // 9. Extract and Distribute Calls
     let mut c_cursor = QueryCursor::new();
     let mut c_matches = c_cursor.matches(&calls_query, root_node, code_bytes);
     
@@ -400,7 +379,6 @@ pub fn analyze_source(
                     func.fingerprints.entry(r).or_default().push(m);
                 }
             } else {
-                // Top-Level Call -> Module
                 module_info.calls.push(m.clone());
                 if let Some(r) = r_name {
                     module_info.fingerprints.entry(r).or_default().push(m);
@@ -408,6 +386,38 @@ pub fn analyze_source(
             }
         }
     }
+
+    // 9.5 Extract Type References (The "Nouns")
+    if let Some(ref q) = types_query {
+        let mut t_cursor = QueryCursor::new();
+        let mut t_matches = t_cursor.matches(q, root_node, code_bytes);
+        
+        while let Some(tm) = t_matches.next() {
+            for cap in tm.captures {
+                let type_name = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
+                if !type_name.is_empty() {
+                    let range = cap.node.byte_range();
+                    if let Some(idx) = get_owner_index(range.start, range.end, &functions) {
+                        functions[idx].type_refs.push(type_name);
+                    } else {
+                        module_info.type_refs.push(type_name);
+                    }
+                }
+            }
+        }
+    }
+
+    // Deduplicate config keys and type refs
+    for func in &mut functions {
+        func.config_keys.sort();
+        func.config_keys.dedup();
+        func.type_refs.sort();
+        func.type_refs.dedup();
+    }
+    module_info.config_keys.sort();
+    module_info.config_keys.dedup();
+    module_info.type_refs.sort();
+    module_info.type_refs.dedup();
 
     // 10. Extract Docs (Only for Defined Functions)
     let mut d_cursor = QueryCursor::new();
@@ -418,7 +428,6 @@ pub fn analyze_source(
             .map(|c| c.node);
         
         if let Some(d_node) = d_def {
-            // Find which function matches this definition node
             for func in &mut functions {
                 if func.range_start == d_node.start_byte() {
                     func.documentation = Some(dm.captures.iter()
@@ -535,7 +544,6 @@ pub fn generate_context_from_ids(
     let mut context = String::new();
     
     // 2. Metadata Header
-    // Use the first symbol in the FILTERED chain as the primary context reference
     let primary_id = filtered_chain.first().unwrap();
     let primary_name = index.symbols.get(primary_id).map(|s| s.name.as_str()).unwrap_or("Unknown");
 
@@ -557,7 +565,6 @@ pub fn generate_context_from_ids(
     for &sym_id in &filtered_chain {
         if let Some(sym) = index.symbols.get(&sym_id) {
             
-            // --- NEW: Handle External Symbols (Boundary Context) ---
             if sym.is_external {
                 context.push_str("// ==========================================================\n");
                 context.push_str(&format!("// External Library: {}\n", sym.external_source.as_deref().unwrap_or("Unknown")));
@@ -570,12 +577,10 @@ pub fn generate_context_from_ids(
                 
                 context.push_str("// (Source code not available for external libraries)\n");
                 context.push_str("\n\n");
-                continue; // Skip file reading logic for external symbols
+                continue;
             }
 
-            // --- EXISTING: Handle Local Symbols ---
             if let Some(file_node) = index.files.values().find(|f| f.id == sym.file_id) {
-                // Print a clean header when moving to a new file
                 if !seen_files.contains(&file_node.id) {
                     context.push_str("// ==========================================================\n");
                     context.push_str(&format!("// File: {}\n", file_node.path));
@@ -586,7 +591,6 @@ pub fn generate_context_from_ids(
                     seen_files.insert(file_node.id);
                 }
 
-                // Add Documentation if requested
                 if include_docs {
                     if let Some(docs) = &sym.doc_comment {
                         context.push_str(docs);
@@ -594,7 +598,6 @@ pub fn generate_context_from_ids(
                     }
                 }
 
-                // Extract Source Code
                 if let Ok(content) = std::fs::read_to_string(&file_node.path) {
                     if sym.range_end <= content.len() {
                         let text = String::from_utf8_lossy(&content.as_bytes()[sym.range_start..sym.range_end]);
@@ -631,7 +634,7 @@ pub fn find_related_symbols(
     }
 
     while let Some((current_id, mode)) = queue.pop_front() {
-        // 1. DOWNSTREAM
+        // 1. DOWNSTREAM (Function -> Types it uses, or Function -> Calls)
         if mode == TraversalMode::Both || mode == TraversalMode::Downstream {
             if let Some(callees) = index.resolved_calls.get(&current_id) {
                 for &callee_id in callees {
@@ -642,9 +645,19 @@ pub fn find_related_symbols(
                     }
                 }
             }
+            // Follow Type References
+            if let Some(type_ids) = index.resolved_type_refs.get(&current_id) {
+                for &tid in type_ids {
+                    if !visited.contains(&(tid, TraversalMode::Downstream)) {
+                        visited.insert((tid, TraversalMode::Downstream));
+                        result_set.insert(tid);
+                        queue.push_back((tid, TraversalMode::Downstream));
+                    }
+                }
+            }
         }
 
-        // 2. UPSTREAM
+        // 2. UPSTREAM (Function <- Callers, or Type <- Function using it)
         if mode == TraversalMode::Both || mode == TraversalMode::Upstream {
             for (caller_id, callees) in &index.resolved_calls {
                 if callees.contains(&current_id) {
@@ -652,6 +665,16 @@ pub fn find_related_symbols(
                         visited.insert((*caller_id, TraversalMode::Upstream));
                         result_set.insert(*caller_id);
                         queue.push_back((*caller_id, TraversalMode::Upstream));
+                    }
+                }
+            }
+            // Find functions that use this Type
+            for (func_id, used_types) in &index.resolved_type_refs {
+                if used_types.contains(&current_id) {
+                    if !visited.contains(&(*func_id, TraversalMode::Upstream)) {
+                        visited.insert((*func_id, TraversalMode::Upstream));
+                        result_set.insert(*func_id);
+                        queue.push_back((*func_id, TraversalMode::Upstream));
                     }
                 }
             }

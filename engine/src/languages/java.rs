@@ -16,5 +16,17 @@ pub const JAVA_CONFIG: LanguageConfig = LanguageConfig {
         )
     "#,
     query_config: "",
-    query_vals: "",
+    query_vals: r#"
+        (variable_declarator
+            name: (identifier) @val.name
+            value: (string_literal) @val.value
+        )
+    "#,
+    query_types: r#"
+        [
+            (formal_parameter type: (type_identifier) @type.ref)
+            (method_declaration type: (type_identifier) @type.ref)
+            (field_declaration type: (type_identifier) @type.ref)
+        ]
+    "#,
 };

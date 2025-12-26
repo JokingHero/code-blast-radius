@@ -11,10 +11,12 @@ pub const BASH_CONFIG: LanguageConfig = LanguageConfig {
     query_literals: r#"(word) @string"#,
     query_implements: "",
     query_config: "",
+    // Capture: MY_VAR="value"
     query_vals: r#"
         (variable_assignment
             name: (variable_name) @val.name
             value: (word) @val.value
         )
     "#,
+    query_types: "",
 };

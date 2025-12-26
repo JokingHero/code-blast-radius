@@ -35,4 +35,5 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             value: [(string) (template_string)] @val.value
         )
     "#,
+    query_types: "",
 };

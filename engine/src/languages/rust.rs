@@ -16,6 +16,7 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
         )
     "#,
     query_config: "",
+    // Matches: const X: &str = "val" or let x = "val"
     query_vals: r#"
         [
             (const_item
@@ -26,6 +27,17 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
                 pattern: (identifier) @val.name
                 value: (string_literal) @val.value
             )
+        ]
+    "#,
+    // Matches types in args, return, fields, and generics
+    query_types: r#"
+        [
+            (parameter type: (type_identifier) @type.ref)
+            (function_item return_type: (type_identifier) @type.ref)
+            (field_declaration type: (type_identifier) @type.ref)
+            (let_declaration type: (type_identifier) @type.ref)
+            (struct_expression name: (type_identifier) @type.ref)
+            (type_arguments (type_identifier) @type.ref)
         ]
     "#,
 };

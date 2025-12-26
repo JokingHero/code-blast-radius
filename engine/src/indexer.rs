@@ -102,6 +102,10 @@ impl Indexer {
             self.index.local_variable_types.remove(&sym_id);
             self.index.inheritance.remove(&sym_id);
             self.index.symbol_config_refs.remove(&sym_id);
+
+            // NEW: Clear type references
+            self.index.raw_type_refs.remove(&sym_id);
+            self.index.resolved_type_refs.remove(&sym_id);
         }
 
         // Clean up config definitions mapping
@@ -153,14 +157,9 @@ impl Indexer {
                             
                             seen_paths.insert(path_key.clone());
 
-                            // FIX: Calculate relative path with fallback logic
-                            // If strip_prefix fails, we assume we can't reliably check folder structure
-                            // for "test" folders, so we only check the filename to avoid false positives.
                             let is_test = match path.strip_prefix(&root_abs) {
                                 Ok(rel) => Self::is_test_path(rel),
                                 Err(_) => {
-                                    // Debug print if needed
-                                    // println!("Warning: Could not strip prefix {:?} from {:?}", root_abs, path);
                                     let fname = path.file_name().map(Path::new).unwrap_or(path);
                                     Self::is_test_path(fname)
                                 }
@@ -191,7 +190,6 @@ impl Indexer {
         }
     }
 
-    /// Heuristic to determine if a file is a test based on its path or filename.
     fn is_test_path(path: &Path) -> bool {
         let path_str = path.to_string_lossy();
         let normalized = path_str.replace('\\', "/").to_lowercase();
@@ -265,159 +263,166 @@ impl Indexer {
             is_test: is_path_test,
         });
 
-        if let Ok(analysis) = analyze_source(path_obj, content, config) {
-            if !analysis.imports.is_empty() { self.index.file_imports.insert(file_id, analysis.imports); }
-            if !analysis.exports.is_empty() { self.index.file_exports.insert(file_id, analysis.exports); }
-            if !analysis.literals.is_empty() { self.index.raw_literals.insert(file_id, analysis.literals); }
+        // --- CHANGED: Added Error Logging ---
+        match analyze_source(path_obj, content, config) {
+            Ok(analysis) => {
+                if !analysis.imports.is_empty() { self.index.file_imports.insert(file_id, analysis.imports); }
+                if !analysis.exports.is_empty() { self.index.file_exports.insert(file_id, analysis.exports); }
+                if !analysis.literals.is_empty() { self.index.raw_literals.insert(file_id, analysis.literals); }
 
-            let mut file_symbol_ids = Vec::new();
-            
-            for func in analysis.functions {
-                let symbol_id = self.index.next_symbol_id;
-                self.index.next_symbol_id += 1;
+                let mut file_symbol_ids = Vec::new();
                 
-                let name_lower = func.name.to_lowercase();
-                let code_trim = func.source_code.trim_start();
-                let is_module = func.name.starts_with("(module)");
-
-                // 1. Determine Symbol Kind
-                let kind = if is_module {
-                    "module".to_string()
-                } else if func.source_code.contains("class ") || func.source_code.contains("interface ") {
-                    "container".to_string()
-                } else {
-                    "function".to_string()
-                };
-
-                // 2. Test Detection Logic (Inline)
-                let is_js_test_block = code_trim.starts_with("it(") || code_trim.starts_with("it.") ||
-                                       code_trim.starts_with("test(") || code_trim.starts_with("test.") ||
-                                       code_trim.starts_with("describe(") || code_trim.starts_with("describe.") ||
-                                       code_trim.starts_with("suite(") || code_trim.starts_with("context(") ||
-                                       code_trim.starts_with("beforeEach(") || code_trim.starts_with("afterEach(");
-
-                let is_test_named = name_lower.starts_with("test_") 
-                    || name_lower.ends_with("_test")
-                    || name_lower == "test"
-                    || name_lower.contains("mock") 
-                    || name_lower.contains("fixture");
-
-                let has_test_decorator = func.source_code.contains("#[test]") 
-                    || func.source_code.contains("@Test")   
-                    || func.source_code.contains("@fixture");
-
-                let is_inline_test = !is_module && (is_js_test_block || is_test_named || has_test_decorator);
-
-                self.index.symbols.insert(symbol_id, SymbolNode {
-                    id: symbol_id, 
-                    file_id, 
-                    parent_id: None, 
-                    name: func.name.clone(), 
-                    kind: kind.clone(),
-                    range_start: func.range_start, 
-                    range_end: func.range_end,
-                    doc_comment: func.documentation,
-                    return_type: func.return_type,
-                    is_test: is_path_test || is_inline_test,
-                    is_external: false,
-                    external_source: None,
-                });
-                
-                file_symbol_ids.push(symbol_id);
-                
-                if func.name != "anonymous" {
-                    self.index.symbol_map.entry(func.name.clone()).or_default().push(symbol_id);
-                }
-                
-                if !func.config_keys.is_empty() {
-                    self.index.symbol_config_refs.insert(symbol_id, func.config_keys);
-                }
-
-                if !func.calls.is_empty() { self.index.raw_calls.insert(symbol_id, func.calls); }
-                if !func.fingerprints.is_empty() { self.index.fingerprints.insert(symbol_id, func.fingerprints); }
-                
-                // Add local variable type hints extracted during analysis
-                if !func.local_types.is_empty() {
-                     self.index.local_variable_types.insert(symbol_id, func.local_types);
-                }
-            }
-
-            // --- Configuration Data Linking ---
-            let is_data_file = matches!(config.lang_enum, 
-                crate::language::SupportedLanguage::Yaml | crate::language::SupportedLanguage::Json | 
-                crate::language::SupportedLanguage::Toml | crate::language::SupportedLanguage::Dotenv
-            );
-            if is_data_file {
-                for &sid in &file_symbol_ids {
-                    let name = &self.index.symbols[&sid].name;
-                    self.index.config_definitions.entry(name.clone()).or_default().push(sid);
-                }
-            }
-
-            // --- Container/Member Linking ---
-            // Include "module" in container set to enable namespace calls (e.g. Utils.add)
-            let container_ids: Vec<SymbolId> = file_symbol_ids.iter()
-                .filter(|&&id| {
-                    let s = &self.index.symbols[&id];
-                    s.kind == "container" || s.kind == "module"
-                })
-                .cloned().collect();
-
-            for c_id in container_ids {
-                let (cs, ce, c_kind) = { 
-                    let c = &self.index.symbols[&c_id]; 
-                    (c.range_start, c.range_end, c.kind.clone()) 
-                };
-                
-                let mut members = HashSet::new();
-                for &s_id in &file_symbol_ids {
-                    if s_id == c_id { continue; }
-                    let is_member = { let s = &self.index.symbols[&s_id]; s.range_start >= cs && s.range_end <= ce };
+                for func in analysis.functions {
+                    let symbol_id = self.index.next_symbol_id;
+                    self.index.next_symbol_id += 1;
                     
-                    if is_member {
-                        members.insert(self.index.symbols[&s_id].name.clone());
+                    let name_lower = func.name.to_lowercase();
+                    let code_trim = func.source_code.trim_start();
+                    let is_module = func.name.starts_with("(module)");
+
+                    let kind = if is_module {
+                        "module".to_string()
+                    } else if func.source_code.contains("class ") || func.source_code.contains("interface ") {
+                        "container".to_string()
+                    } else {
+                        "function".to_string()
+                    };
+
+                    // Test Detection Logic...
+                    let is_js_test_block = code_trim.starts_with("it(") || code_trim.starts_with("it.") ||
+                                        code_trim.starts_with("test(") || code_trim.starts_with("test.") ||
+                                        code_trim.starts_with("describe(") || code_trim.starts_with("describe.") ||
+                                        code_trim.starts_with("suite(") || code_trim.starts_with("context(") ||
+                                        code_trim.starts_with("beforeEach(") || code_trim.starts_with("afterEach(");
+
+                    let is_test_named = name_lower.starts_with("test_") 
+                        || name_lower.ends_with("_test")
+                        || name_lower == "test"
+                        || name_lower.contains("mock") 
+                        || name_lower.contains("fixture");
+
+                    let has_test_decorator = func.source_code.contains("#[test]") 
+                        || func.source_code.contains("@Test")   
+                        || func.source_code.contains("@fixture");
+
+                    let is_inline_test = !is_module && (is_js_test_block || is_test_named || has_test_decorator);
+
+                    self.index.symbols.insert(symbol_id, SymbolNode {
+                        id: symbol_id, 
+                        file_id, 
+                        parent_id: None, 
+                        name: func.name.clone(), 
+                        kind: kind.clone(),
+                        range_start: func.range_start, 
+                        range_end: func.range_end,
+                        doc_comment: func.documentation,
+                        return_type: func.return_type,
+                        is_test: is_path_test || is_inline_test,
+                        is_external: false,
+                        external_source: None,
+                    });
+                    
+                    file_symbol_ids.push(symbol_id);
+                    
+                    if func.name != "anonymous" {
+                        self.index.symbol_map.entry(func.name.clone()).or_default().push(symbol_id);
+                    }
+                    
+                    if !func.config_keys.is_empty() {
+                        self.index.symbol_config_refs.insert(symbol_id, func.config_keys);
+                    }
+
+                    if !func.calls.is_empty() { self.index.raw_calls.insert(symbol_id, func.calls); }
+                    if !func.fingerprints.is_empty() { self.index.fingerprints.insert(symbol_id, func.fingerprints); }
+                    
+                    if !func.local_types.is_empty() {
+                        self.index.local_variable_types.insert(symbol_id, func.local_types);
+                    }
+
+                    if !func.type_refs.is_empty() {
+                        self.index.raw_type_refs.insert(symbol_id, func.type_refs);
+                    }
+                }
+
+                // Config Data Linking
+                let is_data_file = matches!(config.lang_enum, 
+                    crate::language::SupportedLanguage::Yaml | crate::language::SupportedLanguage::Json | 
+                    crate::language::SupportedLanguage::Toml | crate::language::SupportedLanguage::Dotenv
+                );
+                if is_data_file {
+                    for &sid in &file_symbol_ids {
+                        let name = &self.index.symbols[&sid].name;
+                        self.index.config_definitions.entry(name.clone()).or_default().push(sid);
+                    }
+                }
+
+                // Container/Member Linking
+                let container_ids: Vec<SymbolId> = file_symbol_ids.iter()
+                    .filter(|&&id| {
+                        let s = &self.index.symbols[&id];
+                        s.kind == "container" || s.kind == "module"
+                    })
+                    .cloned().collect();
+
+                for c_id in container_ids {
+                    let (cs, ce, c_kind) = { 
+                        let c = &self.index.symbols[&c_id]; 
+                        (c.range_start, c.range_end, c.kind.clone()) 
+                    };
+                    
+                    let mut members = HashSet::new();
+                    for &s_id in &file_symbol_ids {
+                        if s_id == c_id { continue; }
+                        let is_member = { let s = &self.index.symbols[&s_id]; s.range_start >= cs && s.range_end <= ce };
                         
-                        if c_kind != "module" {
-                            if let Some(node) = self.index.symbols.get_mut(&s_id) { 
-                                node.parent_id = Some(c_id); 
+                        if is_member {
+                            members.insert(self.index.symbols[&s_id].name.clone());
+                            
+                            if c_kind != "module" {
+                                if let Some(node) = self.index.symbols.get_mut(&s_id) { 
+                                    node.parent_id = Some(c_id); 
+                                }
+                            }
+                        }
+                    }
+                    if !members.is_empty() { self.index.container_methods.insert(c_id, members); }
+                }
+
+                // Link Orphans
+                let module_id = file_symbol_ids.iter().find(|&&id| {
+                    self.index.symbols[&id].kind == "module"
+                }).cloned();
+
+                if let Some(mid) = module_id {
+                    for &id in &file_symbol_ids {
+                        if id == mid { continue; } 
+                        
+                        if let Some(sym) = self.index.symbols.get_mut(&id) {
+                            if sym.parent_id.is_none() {
+                                sym.parent_id = Some(mid);
                             }
                         }
                     }
                 }
-                if !members.is_empty() { self.index.container_methods.insert(c_id, members); }
-            }
 
-            // --- Link Orphans to Module Symbol ---
-            // 1. Find the module symbol ID for this file
-            let module_id = file_symbol_ids.iter().find(|&&id| {
-                self.index.symbols[&id].kind == "module"
-            }).cloned();
-
-            // 2. Assign the module as the parent for any symbol that doesn't have one yet
-            if let Some(mid) = module_id {
-                for &id in &file_symbol_ids {
-                    if id == mid { continue; } 
-                    
-                    if let Some(sym) = self.index.symbols.get_mut(&id) {
-                        if sym.parent_id.is_none() {
-                            sym.parent_id = Some(mid);
+                for (child, parent) in analysis.implementations {
+                    if let Some(ids) = self.index.symbol_map.get(&child) {
+                        if let Some(&cid) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == file_id) {
+                            self.index.raw_implementations.entry(cid).or_default().push(parent);
                         }
                     }
                 }
-            }
-
-            for (child, parent) in analysis.implementations {
-                if let Some(ids) = self.index.symbol_map.get(&child) {
-                    if let Some(&cid) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == file_id) {
-                        self.index.raw_implementations.entry(cid).or_default().push(parent);
-                    }
-                }
+            },
+            Err(e) => {
+                // IMPORTANT: Print the error so we see it in test logs!
+                eprintln!("Error analyzing file {:?}: {}", path_obj, e);
             }
         }
     }
 
     pub fn resolve_references(&mut self) {
         self.index.resolved_calls.clear();
+        self.index.resolved_type_refs.clear(); // Clear old type resolutions
         self.index.inheritance.clear();
         self.index.file_dependencies.clear();
 
@@ -431,6 +436,7 @@ impl Indexer {
         self.resolve_implicit_connections();
         self.resolve_function_calls_with_fallback();
         self.resolve_config_links(); 
+        self.resolve_type_references(); // NEW: Resolve Type Links
         self.resolve_file_dependencies(); 
     }
 
@@ -482,19 +488,14 @@ impl Indexer {
         }
     }
 
-    /// Resolves `import * as Utils` to map the alias `Utils` to the target module's symbol name.
-    /// This allows type sniffing to resolve calls like `Utils.add()`.
     fn resolve_namespace_imports(&mut self) {
-        // Map FileId -> Module Name for fast lookup
         let file_mod_map: HashMap<FileId, String> = self.index.symbols.values()
             .filter(|s| s.kind == "module")
             .map(|s| (s.file_id, s.name.clone()))
             .collect();
 
-        // Iterate over all imports in the workspace
         let file_ids: Vec<FileId> = self.index.file_imports.keys().cloned().collect();
         for fid in file_ids {
-            // Find the module symbol ID for this file (the "scope" where the alias exists)
             let mod_sym_id = self.index.symbols.values()
                 .find(|s| s.file_id == fid && s.kind == "module")
                 .map(|s| s.id);
@@ -503,12 +504,10 @@ impl Indexer {
                 let imports = self.index.file_imports.get(&fid).cloned().unwrap_or_default();
                 
                 for imp in imports {
-                    // Check for namespace import pattern
                     if imp.name == "*" {
                         if let Some(alias) = &imp.alias {
                             if let Some(target_fid) = self.resolve_import_path(fid, &imp.source) {
                                 if let Some(target_mod_name) = file_mod_map.get(&target_fid) {
-                                    // Register: "Utils" -> "(module) my_utils" within the scope of the current file
                                     self.index.local_variable_types
                                         .entry(scope_id).or_default()
                                         .insert(alias.clone(), target_mod_name.clone());
@@ -596,13 +595,38 @@ impl Indexer {
         }
     }
 
+    // NEW: Resolve the "Nouns" (Type references)
+    fn resolve_type_references(&mut self) {
+        let entries: Vec<(SymbolId, Vec<String>)> = self.index.raw_type_refs.iter()
+            .map(|(k, v)| (*k, v.clone())).collect();
+
+        for (caller_id, type_names) in entries {
+            let caller_file_id = self.index.symbols[&caller_id].file_id;
+            
+            for type_name in type_names {
+                // Reuse logic: imports -> local definitions -> external stubs
+                if let Some(target_id) = self.resolve_single_call(caller_file_id, &type_name) {
+                    self.index.resolved_type_refs.entry(caller_id).or_default().push(target_id);
+                } else if let Some(candidates) = self.index.symbol_map.get(&type_name) {
+                    // Fallback: Link to any symbol with this name if we can't trace the exact import
+                    // This creates loose coupling which is better than no coupling for type impact
+                    let mut guesses = candidates.clone();
+                    self.index.resolved_type_refs.entry(caller_id).or_default().append(&mut guesses);
+                }
+            }
+            
+            if let Some(refs) = self.index.resolved_type_refs.get_mut(&caller_id) {
+                refs.sort();
+                refs.dedup();
+            }
+        }
+    }
+
     fn resolve_type_sniffing(&mut self) {
         let mut new_links = Vec::new();
         for (&caller_id, receiver_map) in &self.index.fingerprints {
             for (receiver, methods) in receiver_map {
                 
-                // Lookup variable type hint walking up the scope chain
-                // (Function -> Class -> Module) to find imports defined at module level
                 let mut type_hint = None;
                 let mut curr_scope = Some(caller_id);
                 
@@ -715,14 +739,11 @@ impl Indexer {
         let from_path = Path::new(from_path_str);
         let parent = from_path.parent()?;
         
-        // 1. Try Exact Match First
-        // This handles "data.csv", "config.json", "scripts/runner.sh" exactly as written
         let base = parent.join(source);
         if let Some(id) = self.index.files.get(&Self::to_index_path(&base)).map(|n| n.id) {
             return Some(id);
         }
 
-        // 2. Try Extensions (Existing)
         let exts = ["ts", "js", "tsx", "rs", "py", "json", "sh"];
         let check = |p: PathBuf| self.index.files.get(&Self::to_index_path(&p)).map(|n| n.id);
         
@@ -769,14 +790,11 @@ impl Indexer {
         }
     }
 
-    /// Scans all string literals in the codebase. If a literal looks like a relative path
-    /// to another file that exists in the index, create a file dependency.
     fn resolve_literal_dependencies(&mut self) {
         let mut potential_links: Vec<(FileId, String)> = Vec::new();
 
         for (&file_id, literals) in &self.index.raw_literals {
             for lit in literals {
-                // Heuristic: Only care about literals that look like paths
                 if (lit.contains('/') || lit.contains('.')) 
                     && !lit.contains(' ') 
                     && !lit.contains('\n') 
@@ -795,7 +813,6 @@ impl Indexer {
                         deps.push(target_id);
                     }
 
-                    // Link the "module" symbols together so graph traversal works
                     let src_mod = self.index.symbols.values().find(|s| s.file_id == src_id && s.kind == "module").map(|s| s.id);
                     let tgt_mod = self.index.symbols.values().find(|s| s.file_id == target_id && s.kind == "module").map(|s| s.id);
 

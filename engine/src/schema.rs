@@ -96,4 +96,10 @@ pub struct WorkspaceIndex {
 
     pub external_symbols: HashSet<String>, // Track known external modules used
     pub external_packages: HashSet<String>, // List of detected external libraries (e.g., "react", "serde", "numpy")
+
+    // Mapping of SymbolId -> List of SymbolIds (The types this symbol depends on)
+    // e.g. fn process(u: User) -> "process" depends on "User"
+    pub resolved_type_refs: HashMap<SymbolId, Vec<SymbolId>>, 
+    // Temporary storage for linking phase
+    pub raw_type_refs: HashMap<SymbolId, Vec<String>>,
 }
