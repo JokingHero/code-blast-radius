@@ -76,6 +76,13 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
               )
               source: (string) @import.source
           )
+          ;; Capture Namespace Imports
+          (import_statement
+            (import_clause
+              (namespace_import (identifier) @import.alias)
+            )
+            source: (string) @import.source
+          )
           (import_statement source: (string) @import.source)
         ]
     "#,

@@ -1,4 +1,4 @@
-use crate::schema::{WorkspaceIndex, FileNode, SymbolNode, SymbolId, FileId};
+use crate::schema::{WorkspaceIndex, FileNode, SymbolNode, SymbolId, FileId, ImportNode};
 use crate::analyzer::analyze_source;
 use crate::language::{get_language_configs, LanguageConfig};
 use crate::manifest::scan_manifests;
@@ -34,7 +34,7 @@ impl Indexer {
         }
     }
 
-    /// Fixed: Normalizes paths and strips Windows UNC prefixes (\\?\) to ensure 
+    /// Normalizes paths and strips Windows UNC prefixes (\\?\) to ensure 
     /// consistency between indexed keys and CLI input.
     fn to_index_path(path: &Path) -> String {
         let abs_path = fs::canonicalize(path)
@@ -132,7 +132,6 @@ impl Indexer {
                     let path = entry.path();
                     
                     // 2. Opportunistic Manifest Scanning
-                    // We check if this file is a manifest to update our external knowledge base
                     let new_externals = scan_manifests(path);
                     if !new_externals.is_empty() {
                         self.index.external_packages.extend(new_externals);
@@ -185,7 +184,7 @@ impl Indexer {
         let normalized = path_str.replace('\\', "/").to_lowercase();
         let path_obj = Path::new(&normalized);
 
-        // 1. Expanded folder-based detection (including Fixtures and Mocks)
+        // 1. Expanded folder-based detection
         let has_test_folder = path_obj.components().any(|c| {
             let s = c.as_os_str().to_string_lossy();
             matches!(
@@ -199,9 +198,7 @@ impl Indexer {
             )
         });
 
-        if has_test_folder {
-            return true;
-        }
+        if has_test_folder { return true; }
 
         // 2. Check filename patterns
         let filename = path.file_name()
@@ -209,7 +206,6 @@ impl Indexer {
             .unwrap_or("")
             .to_lowercase();
 
-        // TypeScript / JavaScript
         if filename.ends_with(".test.ts") || filename.ends_with(".test.tsx") || 
            filename.ends_with(".spec.ts") || filename.ends_with(".spec.tsx") ||
            filename.ends_with(".fixture.ts") || filename.ends_with(".mock.ts") ||
@@ -218,23 +214,18 @@ impl Indexer {
             return true;
         }
 
-        // Rust
         if filename.ends_with("_test.rs") || filename.ends_with("_spec.rs") || filename == "test.rs" {
             return true;
         }
 
-        // Python
         if filename.starts_with("test_") || filename.ends_with("_test.py") {
             return true;
         }
 
-        // Java
         if filename.ends_with("test.java") || filename.ends_with("tests.java") {
             return true;
         }
 
-        // Catch-all for files that contain "mock" or "fixture" in the name
-        // but only if they are likely code files
         if (filename.contains("mock") || filename.contains("fixture")) && 
            (filename.ends_with(".ts") || filename.ends_with(".js") || filename.ends_with(".rs") || filename.ends_with(".py")) {
             return true;
@@ -300,17 +291,16 @@ impl Indexer {
                     || name_lower.contains("mock") 
                     || name_lower.contains("fixture");
 
-                let has_test_decorator = func.source_code.contains("#[test]") // Rust
-                    || func.source_code.contains("@Test")   // Java/Python
-                    || func.source_code.contains("@fixture"); // Pytest
+                let has_test_decorator = func.source_code.contains("#[test]") 
+                    || func.source_code.contains("@Test")   
+                    || func.source_code.contains("@fixture");
 
-                // Modules inherit the file's test status, functions check inline logic
                 let is_inline_test = !is_module && (is_js_test_block || is_test_named || has_test_decorator);
 
                 self.index.symbols.insert(symbol_id, SymbolNode {
                     id: symbol_id, 
                     file_id, 
-                    parent_id: None, // Will be updated by container logic below
+                    parent_id: None, 
                     name: func.name.clone(), 
                     kind: kind.clone(),
                     range_start: func.range_start, 
@@ -324,7 +314,6 @@ impl Indexer {
                 
                 file_symbol_ids.push(symbol_id);
                 
-                // We add modules to the map too, so we can technically "search" for a file by name
                 if func.name != "anonymous" {
                     self.index.symbol_map.entry(func.name.clone()).or_default().push(symbol_id);
                 }
@@ -335,6 +324,11 @@ impl Indexer {
 
                 if !func.calls.is_empty() { self.index.raw_calls.insert(symbol_id, func.calls); }
                 if !func.fingerprints.is_empty() { self.index.fingerprints.insert(symbol_id, func.fingerprints); }
+                
+                // Add local variable type hints extracted during analysis
+                if !func.local_types.is_empty() {
+                     self.index.local_variable_types.insert(symbol_id, func.local_types);
+                }
             }
 
             // --- Configuration Data Linking ---
@@ -350,43 +344,54 @@ impl Indexer {
             }
 
             // --- Container/Member Linking ---
-            // Note: We exclude "module" kind from being a parent container for methods 
-            // in this specific block, as it's meant for Classes/Interfaces. 
-            // The file/module relationship is implicitly handled by file_id.
+            // Include "module" in container set to enable namespace calls (e.g. Utils.add)
             let container_ids: Vec<SymbolId> = file_symbol_ids.iter()
                 .filter(|&&id| {
                     let s = &self.index.symbols[&id];
-                    s.kind == "container"
+                    s.kind == "container" || s.kind == "module"
                 })
                 .cloned().collect();
 
             for c_id in container_ids {
-                let (cs, ce) = { let c = &self.index.symbols[&c_id]; (c.range_start, c.range_end) };
+                let (cs, ce, c_kind) = { 
+                    let c = &self.index.symbols[&c_id]; 
+                    (c.range_start, c.range_end, c.kind.clone()) 
+                };
+                
                 let mut members = HashSet::new();
                 for &s_id in &file_symbol_ids {
                     if s_id == c_id { continue; }
                     let is_member = { let s = &self.index.symbols[&s_id]; s.range_start >= cs && s.range_end <= ce };
+                    
                     if is_member {
                         members.insert(self.index.symbols[&s_id].name.clone());
-                        if let Some(node) = self.index.symbols.get_mut(&s_id) { node.parent_id = Some(c_id); }
+                        
+                        // Crucial: Only set parent_id if the container is NOT a module.
+                        // We leave top-level orphans to be adopted by the module in the next step.
+                        // This prevents the Module symbol from overwriting a Class symbol as the parent
+                        // of a method, while still allowing the Module to list the method in container_methods
+                        // for namespace lookups.
+                        if c_kind != "module" {
+                            if let Some(node) = self.index.symbols.get_mut(&s_id) { 
+                                node.parent_id = Some(c_id); 
+                            }
+                        }
                     }
                 }
                 if !members.is_empty() { self.index.container_methods.insert(c_id, members); }
             }
 
-            // --- NEW CODE START: Link Orphans to Module Symbol ---
+            // --- Link Orphans to Module Symbol ---
             // 1. Find the module symbol ID for this file
             let module_id = file_symbol_ids.iter().find(|&&id| {
                 self.index.symbols[&id].kind == "module"
             }).cloned();
 
             // 2. Assign the module as the parent for any symbol that doesn't have one yet
-            //    (i.e., top-level functions, classes, and variables)
             if let Some(mid) = module_id {
                 for &id in &file_symbol_ids {
-                    if id == mid { continue; } // Don't parent the module to itself
+                    if id == mid { continue; } 
                     
-                    // We need to re-borrow mutable to update parent_id
                     if let Some(sym) = self.index.symbols.get_mut(&id) {
                         if sym.parent_id.is_none() {
                             sym.parent_id = Some(mid);
@@ -412,6 +417,7 @@ impl Indexer {
 
         self.resolution_cache.clear();
         self.resolve_external_imports();
+        self.resolve_namespace_imports(); // New pass for "import * as Utils"
         self.resolve_type_sniffing();
         self.resolve_fingerprints();
         self.resolve_implicit_connections();
@@ -423,21 +429,16 @@ impl Indexer {
     fn resolve_external_imports(&mut self) {
         let mut new_symbols = Vec::new();
 
-        // Iterate over all file imports
         for (_file_id, imports) in &self.index.file_imports {
             for imp in imports {
-                // If the source does NOT start with ./ or ../ or /, it is likely external
                 if !imp.source.starts_with("./") && !imp.source.starts_with("../") && !imp.source.starts_with("/") {
                     
                     let pkg_name = imp.source.clone();
                     let sym_name = imp.alias.clone().unwrap_or(imp.name.clone());
 
-                    // Check if we already created a stub for this
                     let stub_id = if let Some(ids) = self.index.symbol_map.get(&sym_name) {
                         ids.iter().find(|&&id| {
                             let s = &self.index.symbols[&id];
-                            // --- FIX IS HERE ---
-                            // We use pkg_name.as_str() to match the Option<&str> type
                             s.is_external && s.external_source.as_deref() == Some(pkg_name.as_str())
                         }).cloned()
                     } else {
@@ -445,11 +446,9 @@ impl Indexer {
                     };
 
                     if stub_id.is_none() {
-                        // Create new Stub
                         let new_id = self.index.next_symbol_id;
                         self.index.next_symbol_id += 1;
                         
-                        // We push to a temp list to avoid borrowing issues with self.index inside the loop
                         new_symbols.push(SymbolNode {
                             id: new_id,
                             file_id: 0, 
@@ -469,10 +468,49 @@ impl Indexer {
             }
         }
 
-        // Apply the new symbols to the index
         for sym in new_symbols {
             self.index.symbol_map.entry(sym.name.clone()).or_default().push(sym.id);
             self.index.symbols.insert(sym.id, sym);
+        }
+    }
+
+    /// Resolves `import * as Utils` to map the alias `Utils` to the target module's symbol name.
+    /// This allows type sniffing to resolve calls like `Utils.add()`.
+    fn resolve_namespace_imports(&mut self) {
+        // Map FileId -> Module Name for fast lookup
+        let file_mod_map: HashMap<FileId, String> = self.index.symbols.values()
+            .filter(|s| s.kind == "module")
+            .map(|s| (s.file_id, s.name.clone()))
+            .collect();
+
+        // Iterate over all imports in the workspace
+        let file_ids: Vec<FileId> = self.index.file_imports.keys().cloned().collect();
+        for fid in file_ids {
+            // Find the module symbol ID for this file (the "scope" where the alias exists)
+            let mod_sym_id = self.index.symbols.values()
+                .find(|s| s.file_id == fid && s.kind == "module")
+                .map(|s| s.id);
+
+            if let Some(scope_id) = mod_sym_id {
+                let imports = self.index.file_imports.get(&fid).cloned().unwrap_or_default();
+                
+                for imp in imports {
+                    // Check for namespace import pattern
+                    // Note: Requires analyzer to mark namespace imports with "*" or provide the alias
+                    if imp.name == "*" {
+                        if let Some(alias) = &imp.alias {
+                            if let Some(target_fid) = self.resolve_import_path(fid, &imp.source) {
+                                if let Some(target_mod_name) = file_mod_map.get(&target_fid) {
+                                    // Register: "Utils" -> "(module) my_utils" within the scope of the current file
+                                    self.index.local_variable_types
+                                        .entry(scope_id).or_default()
+                                        .insert(alias.clone(), target_mod_name.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -555,7 +593,22 @@ impl Indexer {
         let mut new_links = Vec::new();
         for (&caller_id, receiver_map) in &self.index.fingerprints {
             for (receiver, methods) in receiver_map {
-                let type_hint = self.index.local_variable_types.get(&caller_id).and_then(|v| v.get(receiver));
+                
+                // Lookup variable type hint walking up the scope chain
+                // (Function -> Class -> Module) to find imports defined at module level
+                let mut type_hint = None;
+                let mut curr_scope = Some(caller_id);
+                
+                while let Some(sid) = curr_scope {
+                    if let Some(vars) = self.index.local_variable_types.get(&sid) {
+                        if let Some(h) = vars.get(receiver) {
+                            type_hint = Some(h);
+                            break;
+                        }
+                    }
+                    curr_scope = self.index.symbols.get(&sid).and_then(|s| s.parent_id);
+                }
+
                 if let Some(hint) = type_hint {
                     let mut resolved_type = None;
                     if hint.starts_with("returns:") {
@@ -563,6 +616,7 @@ impl Indexer {
                             resolved_type = self.index.symbols.get(&targets[0]).and_then(|s| s.return_type.clone());
                         }
                     } else { resolved_type = Some(hint.clone()); }
+                    
                     if let Some(tn) = resolved_type {
                         let clean = tn.split('<').next().unwrap().to_string();
                         if let Some(type_ids) = self.index.symbol_map.get(&clean) {
@@ -632,7 +686,6 @@ impl Indexer {
                     if let Some(candidates) = self.index.symbol_map.get(&imp.name) {
                         for &cid in candidates {
                             let s = &self.index.symbols[&cid];
-                            // Ensure we compare Option<&str> to Option<&str>
                             if s.is_external && s.external_source.as_deref() == Some(imp.source.as_str()) {
                                 return Some(cid);
                             }
@@ -666,8 +719,6 @@ impl Indexer {
     }
 
     fn resolve_file_dependencies(&mut self) {
-        // 1. Pre-calculate a map of FileId -> SymbolId (for the "module" symbol)
-        // This avoids borrowing issues and makes the loop O(1) for lookups.
         let mut file_to_module_sym: HashMap<FileId, SymbolId> = HashMap::new();
         for sym in self.index.symbols.values() {
             if sym.kind == "module" {
@@ -679,7 +730,6 @@ impl Indexer {
         
         for fid in fids {
             let mut deps = HashSet::new();
-            // Get the module symbol for the current file (the caller)
             let src_module_id = file_to_module_sym.get(&fid).cloned();
 
             if let Some(imports) = self.index.file_imports.get(&fid) {
@@ -687,8 +737,6 @@ impl Indexer {
                     if let Some(target_fid) = self.resolve_import_path(fid, &imp.source) { 
                         deps.insert(target_fid);
                         
-                        // Link Module A -> Module B via resolved_calls
-                        // This allows the graph traversal to follow imports even if no specific functions are called
                         if let (Some(src_id), Some(tgt_id)) = (src_module_id, file_to_module_sym.get(&target_fid)) {
                             self.index.resolved_calls.entry(src_id).or_default().push(*tgt_id);
                         }
@@ -700,7 +748,6 @@ impl Indexer {
             }
         }
 
-        // Clean up duplicates in resolved_calls that might have been created
         for calls in self.index.resolved_calls.values_mut() {
             calls.sort();
             calls.dedup();

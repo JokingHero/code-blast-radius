@@ -79,13 +79,25 @@ pub fn analyze_source(
             while let Some(m) = matches.next() {
                 let mut src = String::new();
                 let mut name = String::new();
+                let mut alias = None;
+                
                 for cap in m.captures {
                     let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
                     let capture_name = q.capture_names()[cap.index as usize];
-                    if capture_name == "import.source" { src = text.replace(['"', '\''], ""); }
-                    else if capture_name == "import.name" { name = text; }
+                    
+                    if capture_name == "import.source" { 
+                        src = text.replace(['"', '\''], ""); 
+                    } else if capture_name == "import.name" { 
+                        name = text; 
+                    } else if capture_name == "import.alias" {
+                        // Handle namespace import
+                        name = "*".to_string(); // Magic string for namespace
+                        alias = Some(text);
+                    }
                 }
-                if !src.is_empty() { imports.push(ImportNode { name, source: src, alias: None }); }
+                if !src.is_empty() { 
+                    imports.push(ImportNode { name, source: src, alias }); 
+                }
             }
         }
     }
