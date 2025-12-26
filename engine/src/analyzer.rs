@@ -399,7 +399,6 @@ pub fn generate_context_from_ids(
     
     // 2. Metadata Header
     // Use the first symbol in the FILTERED chain as the primary context reference
-    // to avoid leaking names of excluded tests into the header.
     let primary_id = filtered_chain.first().unwrap();
     let primary_name = index.symbols.get(primary_id).map(|s| s.name.as_str()).unwrap_or("Unknown");
 
@@ -420,6 +419,24 @@ pub fn generate_context_from_ids(
 
     for &sym_id in &filtered_chain {
         if let Some(sym) = index.symbols.get(&sym_id) {
+            
+            // --- NEW: Handle External Symbols (Boundary Context) ---
+            if sym.is_external {
+                context.push_str("// ==========================================================\n");
+                context.push_str(&format!("// External Library: {}\n", sym.external_source.as_deref().unwrap_or("Unknown")));
+                context.push_str("// ==========================================================\n");
+                context.push_str(&format!("// Symbol: {}\n", sym.name));
+                
+                if let Some(docs) = &sym.doc_comment {
+                    context.push_str(&format!("// {}\n", docs));
+                }
+                
+                context.push_str("// (Source code not available for external libraries)\n");
+                context.push_str("\n\n");
+                continue; // Skip file reading logic for external symbols
+            }
+
+            // --- EXISTING: Handle Local Symbols ---
             if let Some(file_node) = index.files.values().find(|f| f.id == sym.file_id) {
                 // Print a clean header when moving to a new file
                 if !seen_files.contains(&file_node.id) {

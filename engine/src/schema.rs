@@ -49,6 +49,8 @@ pub struct SymbolNode {
     pub doc_comment: Option<String>,
     pub return_type: Option<String>,
     pub is_test: bool,
+    pub is_external: bool,      // Is this from node_modules or a std lib?
+    pub external_source: Option<String>, // e.g., "axios" or "fs"
 }
 
 #[derive(Archive, Deserialize, Serialize, Debug, Default)]
@@ -91,4 +93,7 @@ pub struct WorkspaceIndex {
     
     // Mapping of Config Key -> List of Locations where it's defined (e.g., .env, config.json)
     pub config_definitions: HashMap<String, Vec<SymbolId>>, 
+
+    pub external_symbols: HashSet<String>, // Track known external modules used
+    pub external_packages: HashSet<String>, // List of detected external libraries (e.g., "react", "serde", "numpy")
 }

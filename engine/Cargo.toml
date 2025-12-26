@@ -8,6 +8,8 @@ edition = "2021"
 rkyv = { version = "0.7", features = ["validation"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+ignore = "0.4.25"
+toml = "0.9.10"
 
 # Hashing & System
 blake3 = "1.5" # Very fast hashing for file changes

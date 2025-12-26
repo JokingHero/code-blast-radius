@@ -1,12 +1,13 @@
 use crate::schema::{WorkspaceIndex, FileNode, SymbolNode, SymbolId, FileId};
 use crate::analyzer::analyze_source;
 use crate::language::{get_language_configs, LanguageConfig};
+use crate::manifest::scan_manifests;
 
 use std::path::{Path, PathBuf};
 use std::fs::{self, File};
 use std::io::Write;
 use std::collections::{HashMap, HashSet};
-use walkdir::WalkDir;
+use ignore::WalkBuilder; 
 use blake3;
 use memmap2::MmapOptions;
 use rkyv::{to_bytes, check_archived_root};
@@ -118,35 +119,56 @@ impl Indexer {
         let root_abs = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         let mut seen_paths = HashSet::new();
 
-        for entry in WalkDir::new(&root_abs).into_iter().filter_map(|e| e.ok()).filter(|e| e.path().is_file()) {
-            let path = entry.path();
-            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-            
-            // Logic to handle hidden files like .env correctly
-            let config = self.configs.get(ext)
-                .or_else(|| self.configs.get(filename))
-                .or_else(|| if filename.starts_with('.') { self.configs.get(&filename[1..]) } else { None });
+        // 1. Configure the walker to respect gitignore
+        let walker = WalkBuilder::new(&root_abs)
+            .hidden(false) // Still scan hidden files like .env
+            .git_ignore(true)
+            .build();
 
-            if let Some(config) = config {
-                if let Ok(content) = fs::read_to_string(path) {
-                    let hash = blake3::hash(content.as_bytes());
-                    let hash_bytes: [u8; 32] = hash.into();
-                    let path_key = Self::to_index_path(path);
+        for result in walker {
+            match result {
+                Ok(entry) => {
+                    if !entry.path().is_file() { continue; }
+                    let path = entry.path();
                     
-                    seen_paths.insert(path_key.clone());
-
-                    let needs_update = match self.index.files.get(&path_key) {
-                        Some(node) => node.hash != hash_bytes,
-                        None => true, 
-                    };
-                    if needs_update {
-                        self.update_file(&path_key, path, &content, hash_bytes, config);
+                    // 2. Opportunistic Manifest Scanning
+                    // We check if this file is a manifest to update our external knowledge base
+                    let new_externals = scan_manifests(path);
+                    if !new_externals.is_empty() {
+                        self.index.external_packages.extend(new_externals);
                     }
-                }
+
+                    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                    let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                    
+                    // Logic to handle hidden files like .env correctly
+                    let config = self.configs.get(ext)
+                        .or_else(|| self.configs.get(filename))
+                        .or_else(|| if filename.starts_with('.') { self.configs.get(&filename[1..]) } else { None });
+
+                    if let Some(config) = config {
+                        if let Ok(content) = fs::read_to_string(path) {
+                            let hash = blake3::hash(content.as_bytes());
+                            let hash_bytes: [u8; 32] = hash.into();
+                            let path_key = Self::to_index_path(path);
+                            
+                            seen_paths.insert(path_key.clone());
+
+                            let needs_update = match self.index.files.get(&path_key) {
+                                Some(node) => node.hash != hash_bytes,
+                                None => true, 
+                            };
+                            if needs_update {
+                                self.update_file(&path_key, path, &content, hash_bytes, config);
+                            }
+                        }
+                    }
+                },
+                Err(err) => eprintln!("Error walking directory: {}", err),
             }
         }
 
+        // Cleanup removed files
         let to_remove: Vec<String> = self.index.files.keys()
             .filter(|path_key| !seen_paths.contains(*path_key))
             .cloned()
@@ -286,6 +308,8 @@ impl Indexer {
                     doc_comment: func.documentation,
                     return_type: func.return_type,
                     is_test: is_test_file || is_inline_test,
+                    is_external: false,
+                    external_source: None,
                 });
                 
                 file_symbol_ids.push(symbol_id);
@@ -343,14 +367,71 @@ impl Indexer {
         self.index.resolved_calls.clear();
         self.index.inheritance.clear();
         self.index.file_dependencies.clear();
-        self.resolution_cache.clear();
 
+        self.resolution_cache.clear();
+        self.resolve_external_imports();
         self.resolve_type_sniffing();
         self.resolve_fingerprints();
         self.resolve_implicit_connections();
         self.resolve_function_calls_with_fallback();
         self.resolve_config_links(); 
         self.resolve_file_dependencies(); 
+    }
+
+    fn resolve_external_imports(&mut self) {
+        let mut new_symbols = Vec::new();
+
+        // Iterate over all file imports
+        for (_file_id, imports) in &self.index.file_imports {
+            for imp in imports {
+                // If the source does NOT start with ./ or ../ or /, it is likely external
+                if !imp.source.starts_with("./") && !imp.source.starts_with("../") && !imp.source.starts_with("/") {
+                    
+                    let pkg_name = imp.source.clone();
+                    let sym_name = imp.alias.clone().unwrap_or(imp.name.clone());
+
+                    // Check if we already created a stub for this
+                    let stub_id = if let Some(ids) = self.index.symbol_map.get(&sym_name) {
+                        ids.iter().find(|&&id| {
+                            let s = &self.index.symbols[&id];
+                            // --- FIX IS HERE ---
+                            // We use pkg_name.as_str() to match the Option<&str> type
+                            s.is_external && s.external_source.as_deref() == Some(pkg_name.as_str())
+                        }).cloned()
+                    } else {
+                        None
+                    };
+
+                    if stub_id.is_none() {
+                        // Create new Stub
+                        let new_id = self.index.next_symbol_id;
+                        self.index.next_symbol_id += 1;
+                        
+                        // We push to a temp list to avoid borrowing issues with self.index inside the loop
+                        new_symbols.push(SymbolNode {
+                            id: new_id,
+                            file_id: 0, 
+                            parent_id: None,
+                            name: sym_name.clone(),
+                            kind: "external".to_string(),
+                            range_start: 0,
+                            range_end: 0,
+                            doc_comment: Some(format!("External import from package `{}`", pkg_name)),
+                            return_type: None,
+                            is_test: false,
+                            is_external: true,
+                            external_source: Some(pkg_name.clone()),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Apply the new symbols to the index
+        for sym in new_symbols {
+            self.index.symbol_map.entry(sym.name.clone()).or_default().push(sym.id);
+            self.index.symbols.insert(sym.id, sym);
+        }
     }
 
     fn resolve_config_links(&mut self) {
@@ -492,19 +573,38 @@ impl Indexer {
     }
 
     fn resolve_single_call(&mut self, file_id: FileId, name: &str) -> Option<SymbolId> {
-        if let Some(ids) = self.index.symbol_map.get(name) {
-            if let Some(&id) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == file_id) { return Some(id); }
-        }
+        // 1. Check imports explicitly
         if let Some(imps) = self.index.file_imports.get(&file_id).cloned() {
             for imp in imps {
-                if imp.name == name {
+                if imp.alias.as_ref().unwrap_or(&imp.name) == name {
+                    
+                    // A. Try Local Resolution
                     if let Some(tfid) = self.resolve_import_path(file_id, &imp.source) {
                         let mut visited = HashSet::new();
-                        return self.resolve_symbol_across_barrels(tfid, name, &mut visited);
+                        if let Some(found) = self.resolve_symbol_across_barrels(tfid, &imp.name, &mut visited) {
+                            return Some(found);
+                        }
+                    } 
+                    
+                    // B. Try External Resolution
+                    if let Some(candidates) = self.index.symbol_map.get(&imp.name) {
+                        for &cid in candidates {
+                            let s = &self.index.symbols[&cid];
+                            // Ensure we compare Option<&str> to Option<&str>
+                            if s.is_external && s.external_source.as_deref() == Some(imp.source.as_str()) {
+                                return Some(cid);
+                            }
+                        }
                     }
                 }
             }
         }
+
+        // 2. Check local file definitions
+        if let Some(ids) = self.index.symbol_map.get(name) {
+            if let Some(&id) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == file_id) { return Some(id); }
+        }
+
         None
     }
 
