@@ -1,4 +1,4 @@
-use crate::schema::{WorkspaceIndex, FileNode, SymbolNode, SymbolId, FileId, ImportNode};
+use crate::schema::{WorkspaceIndex, FileNode, SymbolNode, SymbolId, FileId};
 use crate::analyzer::analyze_source;
 use crate::language::{get_language_configs, LanguageConfig};
 use crate::manifest::scan_manifests;
@@ -153,12 +153,25 @@ impl Indexer {
                             
                             seen_paths.insert(path_key.clone());
 
+                            // FIX: Calculate relative path with fallback logic
+                            // If strip_prefix fails, we assume we can't reliably check folder structure
+                            // for "test" folders, so we only check the filename to avoid false positives.
+                            let is_test = match path.strip_prefix(&root_abs) {
+                                Ok(rel) => Self::is_test_path(rel),
+                                Err(_) => {
+                                    // Debug print if needed
+                                    // println!("Warning: Could not strip prefix {:?} from {:?}", root_abs, path);
+                                    let fname = path.file_name().map(Path::new).unwrap_or(path);
+                                    Self::is_test_path(fname)
+                                }
+                            };
+
                             let needs_update = match self.index.files.get(&path_key) {
                                 Some(node) => node.hash != hash_bytes,
                                 None => true, 
                             };
                             if needs_update {
-                                self.update_file(&path_key, path, &content, hash_bytes, config);
+                                self.update_file(&path_key, path, &content, hash_bytes, config, is_test);
                             }
                         }
                     }
@@ -234,9 +247,7 @@ impl Indexer {
         false
     }
 
-    fn update_file(&mut self, path_key: &str, path_obj: &Path, content: &str, hash: [u8; 32], config: &LanguageConfig) {
-        let is_test_file = Self::is_test_path(path_obj);
-
+    fn update_file(&mut self, path_key: &str, path_obj: &Path, content: &str, hash: [u8; 32], config: &LanguageConfig, is_path_test: bool) {
         let file_id = match self.index.files.get(path_key) {
             Some(node) => node.id,
             None => {
@@ -251,7 +262,7 @@ impl Indexer {
             id: file_id, 
             path: path_key.to_string(), 
             hash,
-            is_test: is_test_file,
+            is_test: is_path_test,
         });
 
         if let Ok(analysis) = analyze_source(path_obj, content, config) {
@@ -278,7 +289,7 @@ impl Indexer {
                     "function".to_string()
                 };
 
-                // 2. Test Detection Logic
+                // 2. Test Detection Logic (Inline)
                 let is_js_test_block = code_trim.starts_with("it(") || code_trim.starts_with("it.") ||
                                        code_trim.starts_with("test(") || code_trim.starts_with("test.") ||
                                        code_trim.starts_with("describe(") || code_trim.starts_with("describe.") ||
@@ -307,7 +318,7 @@ impl Indexer {
                     range_end: func.range_end,
                     doc_comment: func.documentation,
                     return_type: func.return_type,
-                    is_test: is_test_file || is_inline_test,
+                    is_test: is_path_test || is_inline_test,
                     is_external: false,
                     external_source: None,
                 });
@@ -366,11 +377,6 @@ impl Indexer {
                     if is_member {
                         members.insert(self.index.symbols[&s_id].name.clone());
                         
-                        // Crucial: Only set parent_id if the container is NOT a module.
-                        // We leave top-level orphans to be adopted by the module in the next step.
-                        // This prevents the Module symbol from overwriting a Class symbol as the parent
-                        // of a method, while still allowing the Module to list the method in container_methods
-                        // for namespace lookups.
                         if c_kind != "module" {
                             if let Some(node) = self.index.symbols.get_mut(&s_id) { 
                                 node.parent_id = Some(c_id); 
@@ -417,7 +423,9 @@ impl Indexer {
 
         self.resolution_cache.clear();
         self.resolve_external_imports();
-        self.resolve_namespace_imports(); // New pass for "import * as Utils"
+        self.resolve_namespace_imports();
+        self.resolve_literal_dependencies();
+        self.resolve_shared_literals();
         self.resolve_type_sniffing();
         self.resolve_fingerprints();
         self.resolve_implicit_connections();
@@ -496,7 +504,6 @@ impl Indexer {
                 
                 for imp in imports {
                     // Check for namespace import pattern
-                    // Note: Requires analyzer to mark namespace imports with "*" or provide the alias
                     if imp.name == "*" {
                         if let Some(alias) = &imp.alias {
                             if let Some(target_fid) = self.resolve_import_path(fid, &imp.source) {
@@ -707,10 +714,18 @@ impl Indexer {
         let from_path_str = &self.index.files.values().find(|f| f.id == from_id)?.path;
         let from_path = Path::new(from_path_str);
         let parent = from_path.parent()?;
-        let exts = ["ts", "js", "tsx", "rs", "py"];
+        
+        // 1. Try Exact Match First
+        // This handles "data.csv", "config.json", "scripts/runner.sh" exactly as written
         let base = parent.join(source);
+        if let Some(id) = self.index.files.get(&Self::to_index_path(&base)).map(|n| n.id) {
+            return Some(id);
+        }
+
+        // 2. Try Extensions (Existing)
+        let exts = ["ts", "js", "tsx", "rs", "py", "json", "sh"];
         let check = |p: PathBuf| self.index.files.get(&Self::to_index_path(&p)).map(|n| n.id);
-        if let Some(id) = check(base.clone()) { return Some(id); }
+        
         for e in exts { 
             if let Some(id) = check(base.with_extension(e)) { return Some(id); } 
             if let Some(id) = check(base.join(format!("index.{}", e))) { return Some(id); }
@@ -751,6 +766,95 @@ impl Indexer {
         for calls in self.index.resolved_calls.values_mut() {
             calls.sort();
             calls.dedup();
+        }
+    }
+
+    /// Scans all string literals in the codebase. If a literal looks like a relative path
+    /// to another file that exists in the index, create a file dependency.
+    fn resolve_literal_dependencies(&mut self) {
+        let mut potential_links: Vec<(FileId, String)> = Vec::new();
+
+        for (&file_id, literals) in &self.index.raw_literals {
+            for lit in literals {
+                // Heuristic: Only care about literals that look like paths
+                if (lit.contains('/') || lit.contains('.')) 
+                    && !lit.contains(' ') 
+                    && !lit.contains('\n') 
+                    && lit.len() > 3 
+                {
+                    potential_links.push((file_id, lit.clone()));
+                }
+            }
+        }
+
+        for (src_id, literal) in potential_links {
+            if let Some(target_id) = self.resolve_import_path(src_id, &literal) {
+                if src_id != target_id {
+                    let deps = self.index.file_dependencies.entry(src_id).or_default();
+                    if !deps.contains(&target_id) {
+                        deps.push(target_id);
+                    }
+
+                    // Link the "module" symbols together so graph traversal works
+                    let src_mod = self.index.symbols.values().find(|s| s.file_id == src_id && s.kind == "module").map(|s| s.id);
+                    let tgt_mod = self.index.symbols.values().find(|s| s.file_id == target_id && s.kind == "module").map(|s| s.id);
+
+                    if let (Some(s), Some(t)) = (src_mod, tgt_mod) {
+                         let calls = self.index.resolved_calls.entry(s).or_default();
+                         if !calls.contains(&t) {
+                             calls.push(t);
+                         }
+                    }
+                }
+            }
+        }
+    }
+
+    fn resolve_shared_literals(&mut self) {
+        let mut literal_map: HashMap<String, Vec<FileId>> = HashMap::new();
+
+        // 1. Build the Reverse Index
+        for (&file_id, literals) in &self.index.raw_literals {
+            for lit in literals {
+                let is_route = lit.starts_with('/');
+                let is_long_identifier = lit.len() > 10 && !lit.contains(' ') && (lit.contains('_') || lit.contains('-') || lit.contains('.'));
+                
+                if (is_route || is_long_identifier) && lit.len() > 3 {
+                     literal_map.entry(lit.clone()).or_default().push(file_id);
+                }
+            }
+        }
+
+        // 2. Create Edges for matches
+        for (_lit, file_ids) in literal_map {
+            if file_ids.len() < 2 { continue; }
+
+            for i in 0..file_ids.len() {
+                for j in (i + 1)..file_ids.len() {
+                    let id_a = file_ids[i];
+                    let id_b = file_ids[j];
+                    
+                    if id_a == id_b { continue; }
+
+                    let deps_a = self.index.file_dependencies.entry(id_a).or_default();
+                    if !deps_a.contains(&id_b) { deps_a.push(id_b); }
+                    
+                    let deps_b = self.index.file_dependencies.entry(id_b).or_default();
+                    if !deps_b.contains(&id_a) { deps_b.push(id_a); }
+
+                    // Link Modules
+                    let mod_a = self.index.symbols.values().find(|s| s.file_id == id_a && s.kind == "module").map(|s| s.id);
+                    let mod_b = self.index.symbols.values().find(|s| s.file_id == id_b && s.kind == "module").map(|s| s.id);
+                    
+                    if let (Some(ma), Some(mb)) = (mod_a, mod_b) {
+                        let calls_a = self.index.resolved_calls.entry(ma).or_default();
+                        if !calls_a.contains(&mb) { calls_a.push(mb); }
+
+                        let calls_b = self.index.resolved_calls.entry(mb).or_default();
+                        if !calls_b.contains(&ma) { calls_b.push(ma); }
+                    }
+                }
+            }
         }
     }
 
