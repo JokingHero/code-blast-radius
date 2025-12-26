@@ -1,7 +1,7 @@
 mod common;
 use common::TestWorkspace;
 use rfc_engine::indexer::Indexer;
-use rfc_engine::analyzer::find_related_symbols; // Updated Import
+use rfc_engine::analyzer::find_related_symbols; 
 
 // Helper to find ID by name
 fn has_func(index: &rfc_engine::schema::WorkspaceIndex, name: &str) -> bool {
@@ -38,17 +38,26 @@ fn test_typescript_call_chain() {
     assert!(related.is_some(), "Related symbols not found");
     let symbol_ids = related.unwrap();
     
-    // Should find 'add' (the target) and 'calculateTotal' (the caller)
-    assert_eq!(symbol_ids.len(), 2);
-    
-    // Get names and sort them for a stable assertion
-    let mut names: Vec<String> = symbol_ids.iter()
+    let names: Vec<String> = symbol_ids.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
-    names.sort();
+
+    // Debug print to see what we actually got
+    println!("Found symbols: {:?}", names);
+
+    // We expect 4 symbols now:
+    // 1. add (Target)
+    // 2. calculateTotal (Caller)
+    // 3. (module) utils (Parent of add)
+    // 4. (module) main (Parent of calculateTotal)
+    assert_eq!(symbol_ids.len(), 4, "Expected 4 symbols: target, caller, and their module parents");
     
-    assert_eq!(names[0], "add");
-    assert_eq!(names[1], "calculateTotal");
+    assert!(names.contains(&"add".to_string()));
+    assert!(names.contains(&"calculateTotal".to_string()));
+    
+    // Check for module presence loosely since the exact name depends on OS path separation sometimes
+    assert!(names.iter().any(|n| n.contains("(module) utils")));
+    assert!(names.iter().any(|n| n.contains("(module) main")));
 }
 
 #[test]

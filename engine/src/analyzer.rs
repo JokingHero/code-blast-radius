@@ -45,7 +45,7 @@ enum TraversalMode {
 }
 
 pub fn analyze_source(
-    _path: &Path,
+    path: &Path, // We use this now for the module name
     source_code: &str,
     config: &LanguageConfig,
 ) -> Result<FileAnalysis, String> {
@@ -63,6 +63,8 @@ pub fn analyze_source(
     }
 
     let tree = parser.parse(source_code, None).ok_or("Failed to parse code")?;
+    let root_node = tree.root_node();
+    
     let mut imports = Vec::new();
     let mut exports = Vec::new();
     let mut literals = Vec::new();
@@ -73,7 +75,7 @@ pub fn analyze_source(
     if !config.query_imports.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_imports) {
             let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, tree.root_node(), code_bytes);
+            let mut matches = cursor.matches(&q, root_node, code_bytes);
             while let Some(m) = matches.next() {
                 let mut src = String::new();
                 let mut name = String::new();
@@ -92,7 +94,7 @@ pub fn analyze_source(
     if !config.query_exports.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_exports) {
             let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, tree.root_node(), code_bytes);
+            let mut matches = cursor.matches(&q, root_node, code_bytes);
             while let Some(m) = matches.next() {
                 let mut src = String::new();
                 let mut name = None;
@@ -111,7 +113,7 @@ pub fn analyze_source(
     if !config.query_literals.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_literals) {
             let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, tree.root_node(), code_bytes);
+            let mut matches = cursor.matches(&q, root_node, code_bytes);
             while let Some(m) = matches.next() {
                 for cap in m.captures {
                     let text = cap.node.utf8_text(code_bytes).unwrap_or("").trim_matches(|c| c == '"' || c == '\'' || c == '`').to_string();
@@ -125,7 +127,7 @@ pub fn analyze_source(
     if !config.query_implements.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_implements) {
             let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, tree.root_node(), code_bytes);
+            let mut matches = cursor.matches(&q, root_node, code_bytes);
             while let Some(m) = matches.next() {
                 let mut child = String::new();
                 let mut parent = String::new();
@@ -147,22 +149,39 @@ pub fn analyze_source(
         .map_err(|e| format!("Invalid calls query for {:?}: {}", config.lang_enum, e))?;
     let docs_query = Query::new(&language, config.query_docs)
         .map_err(|e| format!("Invalid docs query for {:?}: {}", config.lang_enum, e))?;
-    
     let config_query = if !config.query_config.is_empty() {
         Some(Query::new(&language, config.query_config)
             .map_err(|e| format!("Invalid config query for {:?}: {}", config.lang_enum, e))?)
     } else {
         None
     };
-    
+
+    // --- Create the Module Symbol ---
+    // This represents the file itself and will catch top-level calls/configs
+    let module_name = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+    let mut module_info = FunctionInfo {
+        name: format!("(module) {}", module_name),
+        is_anonymous: false,
+        range_start: root_node.start_byte(),
+        range_end: root_node.end_byte(),
+        source_code: String::new(), // Optional: Don't duplicate source to save RAM, or copy it if needed
+        documentation: None, // We could parse top-level file comments here if desired
+        calls: Vec::new(),
+        fingerprints: HashMap::new(),
+        return_type: None,
+        local_types: HashMap::new(),
+        local_assigns: HashMap::new(),
+        config_keys: Vec::new(),
+    };
+
     // 6. Extract Definitions
     let mut variable_hints = Vec::new(); 
     let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&defs_query, tree.root_node(), code_bytes);
+    let mut matches = cursor.matches(&defs_query, root_node, code_bytes);
 
     while let Some(match_) = matches.next() {
         let mut def_node = None;
-        let mut name_opt: Option<String> = None; // Track if we found a name
+        let mut name_opt: Option<String> = None;
         let mut return_type = None;
         let mut v_name = None;
         let mut v_type = None;
@@ -216,15 +235,46 @@ pub fn analyze_source(
                 config_keys: Vec::new(),
             });
         } else if let Some(vn) = v_name {
+            // Collecting variable hints to distribute later
             variable_hints.push((match_.captures[0].node.byte_range(), vn, v_type, v_assign));
         }
     }
 
-    // 7. Config Queries
-    let mut all_config_matches = Vec::new();
+    // Helper closure to find the "Smallest Container" for a given range
+    // Returns index in `functions` or None if it belongs to `module_info`
+    let get_owner_index = |start: usize, end: usize, funcs: &[FunctionInfo]| -> Option<usize> {
+        let mut best_idx = None;
+        let mut smallest_len = usize::MAX;
+
+        for (i, func) in funcs.iter().enumerate() {
+            if start >= func.range_start && end <= func.range_end {
+                let len = func.range_end - func.range_start;
+                if len < smallest_len {
+                    smallest_len = len;
+                    best_idx = Some(i);
+                }
+            }
+        }
+        best_idx
+    };
+
+    // 7. Distribute Variable Hints
+    for (v_range, v_name, v_type, v_assign) in variable_hints {
+        if let Some(idx) = get_owner_index(v_range.start, v_range.end, &functions) {
+            let func = &mut functions[idx];
+            if let Some(t) = v_type { func.local_types.insert(v_name.clone(), t); }
+            if let Some(a) = v_assign { func.local_assigns.insert(v_name.clone(), a); }
+        } else {
+            // Add to Module
+            if let Some(t) = v_type { module_info.local_types.insert(v_name.clone(), t); }
+            if let Some(a) = v_assign { module_info.local_assigns.insert(v_name.clone(), a); }
+        }
+    }
+
+    // 8. Distribute Config Keys
     if let Some(ref q) = config_query {
         let mut cf_cursor = QueryCursor::new();
-        let mut cf_matches = cf_cursor.matches(q, tree.root_node(), code_bytes);
+        let mut cf_matches = cf_cursor.matches(q, root_node, code_bytes);
         while let Some(cfm) = cf_matches.next() {
             for cap in cfm.captures {
                 if q.capture_names()[cap.index as usize] == "config.key" {
@@ -232,70 +282,92 @@ pub fn analyze_source(
                         .unwrap_or("")
                         .trim_matches(|c| c == '"' || c == '\'' || c == '`')
                         .to_string();
+                    
                     if !text.is_empty() {
-                        all_config_matches.push((cap.node.byte_range(), text));
+                        let range = cap.node.byte_range();
+                        if let Some(idx) = get_owner_index(range.start, range.end, &functions) {
+                            functions[idx].config_keys.push(text);
+                        } else {
+                            module_info.config_keys.push(text);
+                        }
                     }
                 }
             }
         }
     }
 
-    // 8. Enrichment
+    // Deduplicate config keys
     for func in &mut functions {
-        for (v_range, v_name, v_type, v_assign) in &variable_hints {
-            if v_range.start >= func.range_start && v_range.end <= func.range_end {
-                if let Some(t) = v_type { func.local_types.insert(v_name.clone(), t.clone()); }
-                if let Some(a) = v_assign { func.local_assigns.insert(v_name.clone(), a.clone()); }
-            }
-        }
-
-        for (range, key) in &all_config_matches {
-            if range.start >= func.range_start && range.end <= func.range_end {
-                func.config_keys.push(key.clone());
-            }
-        }
         func.config_keys.sort();
         func.config_keys.dedup();
+    }
+    module_info.config_keys.sort();
+    module_info.config_keys.dedup();
 
-        if let Some(node) = tree.root_node().descendant_for_byte_range(func.range_start, func.range_end) {
-            let mut c_cursor = QueryCursor::new();
-            let mut c_matches = c_cursor.matches(&calls_query, node, code_bytes);
-            while let Some(cm) = c_matches.next() {
-                let mut m_name = None;
-                let mut r_name = None;
-                for cp in cm.captures {
-                    let t = cp.node.utf8_text(code_bytes).unwrap_or("").to_string();
-                    let cap_name = calls_query.capture_names()[cp.index as usize];
-                    if cap_name == "call.name" { m_name = Some(t); }
-                    else if cap_name == "call.receiver" { r_name = Some(t); }
-                }
-                if let Some(m) = m_name {
-                    func.calls.push(m.clone());
-                    if let Some(r) = r_name {
-                        func.fingerprints.entry(r).or_default().push(m);
-                    }
-                }
+    // 9. Extract and Distribute Calls (Global Pass)
+    let mut c_cursor = QueryCursor::new();
+    let mut c_matches = c_cursor.matches(&calls_query, root_node, code_bytes);
+    
+    while let Some(cm) = c_matches.next() {
+        let mut m_name = None;
+        let mut r_name = None;
+        let mut call_range = None;
+
+        for cp in cm.captures {
+            let t = cp.node.utf8_text(code_bytes).unwrap_or("").to_string();
+            let cap_name = calls_query.capture_names()[cp.index as usize];
+            if cap_name == "call.name" { 
+                m_name = Some(t); 
+                call_range = Some(cp.node.byte_range());
             }
+            else if cap_name == "call.receiver" { r_name = Some(t); }
+        }
 
-            let mut d_cursor = QueryCursor::new();
-            let mut d_matches = d_cursor.matches(&docs_query, tree.root_node(), code_bytes);
-            while let Some(dm) = d_matches.next() {
-                let d_def = dm.captures.iter()
-                    .find(|c| docs_query.capture_names()[c.index as usize] == "function.definition")
-                    .map(|c| c.node);
-                
-                if let Some(d_node) = d_def {
-                    if d_node.start_byte() == func.range_start {
-                        func.documentation = Some(dm.captures.iter()
-                            .filter(|c| docs_query.capture_names()[c.index as usize] == "function.docs")
-                            .map(|c| c.node.utf8_text(code_bytes).unwrap_or("").to_string())
-                            .collect::<Vec<_>>().join("\n"));
-                        break;
-                    }
+        if let (Some(m), Some(range)) = (m_name, call_range) {
+            if let Some(idx) = get_owner_index(range.start, range.end, &functions) {
+                let func = &mut functions[idx];
+                func.calls.push(m.clone());
+                if let Some(r) = r_name {
+                    func.fingerprints.entry(r).or_default().push(m);
+                }
+            } else {
+                // Top-Level Call -> Module
+                module_info.calls.push(m.clone());
+                if let Some(r) = r_name {
+                    module_info.fingerprints.entry(r).or_default().push(m);
                 }
             }
         }
     }
+
+    // 10. Extract Docs (Only for Defined Functions)
+    // We iterate existing functions and look for docs anchoring to their definition node
+    // This part is kept mostly same as before but optimized slightly
+    let mut d_cursor = QueryCursor::new();
+    let mut d_matches = d_cursor.matches(&docs_query, root_node, code_bytes);
+    while let Some(dm) = d_matches.next() {
+        let d_def = dm.captures.iter()
+            .find(|c| docs_query.capture_names()[c.index as usize] == "function.definition")
+            .map(|c| c.node);
+        
+        if let Some(d_node) = d_def {
+            // Find which function matches this definition node
+            for func in &mut functions {
+                if func.range_start == d_node.start_byte() {
+                    func.documentation = Some(dm.captures.iter()
+                        .filter(|c| docs_query.capture_names()[c.index as usize] == "function.docs")
+                        .map(|c| c.node.utf8_text(code_bytes).unwrap_or("").to_string())
+                        .collect::<Vec<_>>().join("\n"));
+                    break;
+                }
+            }
+        }
+    }
+
+    // 11. Final Assembly
+    // Add the module info to the list of functions. 
+    // The Indexer will need to recognize it by its special name or handling.
+    functions.push(module_info);
 
     Ok(FileAnalysis { 
         functions, imports, exports, literals, implementations, global_vars: HashMap::new() 

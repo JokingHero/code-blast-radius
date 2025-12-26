@@ -269,40 +269,50 @@ impl Indexer {
             if !analysis.literals.is_empty() { self.index.raw_literals.insert(file_id, analysis.literals); }
 
             let mut file_symbol_ids = Vec::new();
+            
             for func in analysis.functions {
                 let symbol_id = self.index.next_symbol_id;
                 self.index.next_symbol_id += 1;
                 
                 let name_lower = func.name.to_lowercase();
                 let code_trim = func.source_code.trim_start();
+                let is_module = func.name.starts_with("(module)");
 
-                // 1. Modern JS/TS Testing DSL detection
+                // 1. Determine Symbol Kind
+                let kind = if is_module {
+                    "module".to_string()
+                } else if func.source_code.contains("class ") || func.source_code.contains("interface ") {
+                    "container".to_string()
+                } else {
+                    "function".to_string()
+                };
+
+                // 2. Test Detection Logic
                 let is_js_test_block = code_trim.starts_with("it(") || code_trim.starts_with("it.") ||
                                        code_trim.starts_with("test(") || code_trim.starts_with("test.") ||
                                        code_trim.starts_with("describe(") || code_trim.starts_with("describe.") ||
                                        code_trim.starts_with("suite(") || code_trim.starts_with("context(") ||
                                        code_trim.starts_with("beforeEach(") || code_trim.starts_with("afterEach(");
 
-                // 2. Name-based heuristics
                 let is_test_named = name_lower.starts_with("test_") 
                     || name_lower.ends_with("_test")
                     || name_lower == "test"
                     || name_lower.contains("mock") 
                     || name_lower.contains("fixture");
 
-                // 3. Language specific decorators
                 let has_test_decorator = func.source_code.contains("#[test]") // Rust
                     || func.source_code.contains("@Test")   // Java/Python
                     || func.source_code.contains("@fixture"); // Pytest
 
-                let is_inline_test = is_js_test_block || is_test_named || has_test_decorator;
+                // Modules inherit the file's test status, functions check inline logic
+                let is_inline_test = !is_module && (is_js_test_block || is_test_named || has_test_decorator);
 
                 self.index.symbols.insert(symbol_id, SymbolNode {
                     id: symbol_id, 
                     file_id, 
-                    parent_id: None,
+                    parent_id: None, // Will be updated by container logic below
                     name: func.name.clone(), 
-                    kind: if func.source_code.contains("class ") || func.source_code.contains("interface ") { "container" } else { "function" }.to_string(), 
+                    kind: kind.clone(),
                     range_start: func.range_start, 
                     range_end: func.range_end,
                     doc_comment: func.documentation,
@@ -314,6 +324,7 @@ impl Indexer {
                 
                 file_symbol_ids.push(symbol_id);
                 
+                // We add modules to the map too, so we can technically "search" for a file by name
                 if func.name != "anonymous" {
                     self.index.symbol_map.entry(func.name.clone()).or_default().push(symbol_id);
                 }
@@ -326,7 +337,7 @@ impl Indexer {
                 if !func.fingerprints.is_empty() { self.index.fingerprints.insert(symbol_id, func.fingerprints); }
             }
 
-            // --- Keep the rest of your update_file logic exactly as it was ---
+            // --- Configuration Data Linking ---
             let is_data_file = matches!(config.lang_enum, 
                 crate::language::SupportedLanguage::Yaml | crate::language::SupportedLanguage::Json | 
                 crate::language::SupportedLanguage::Toml | crate::language::SupportedLanguage::Dotenv
@@ -337,9 +348,18 @@ impl Indexer {
                     self.index.config_definitions.entry(name.clone()).or_default().push(sid);
                 }
             }
+
+            // --- Container/Member Linking ---
+            // Note: We exclude "module" kind from being a parent container for methods 
+            // in this specific block, as it's meant for Classes/Interfaces. 
+            // The file/module relationship is implicitly handled by file_id.
             let container_ids: Vec<SymbolId> = file_symbol_ids.iter()
-                .filter(|&&id| self.index.symbols.get(&id).map_or(false, |s| s.kind == "container"))
+                .filter(|&&id| {
+                    let s = &self.index.symbols[&id];
+                    s.kind == "container"
+                })
                 .cloned().collect();
+
             for c_id in container_ids {
                 let (cs, ce) = { let c = &self.index.symbols[&c_id]; (c.range_start, c.range_end) };
                 let mut members = HashSet::new();
@@ -353,6 +373,28 @@ impl Indexer {
                 }
                 if !members.is_empty() { self.index.container_methods.insert(c_id, members); }
             }
+
+            // --- NEW CODE START: Link Orphans to Module Symbol ---
+            // 1. Find the module symbol ID for this file
+            let module_id = file_symbol_ids.iter().find(|&&id| {
+                self.index.symbols[&id].kind == "module"
+            }).cloned();
+
+            // 2. Assign the module as the parent for any symbol that doesn't have one yet
+            //    (i.e., top-level functions, classes, and variables)
+            if let Some(mid) = module_id {
+                for &id in &file_symbol_ids {
+                    if id == mid { continue; } // Don't parent the module to itself
+                    
+                    // We need to re-borrow mutable to update parent_id
+                    if let Some(sym) = self.index.symbols.get_mut(&id) {
+                        if sym.parent_id.is_none() {
+                            sym.parent_id = Some(mid);
+                        }
+                    }
+                }
+            }
+
             for (child, parent) in analysis.implementations {
                 if let Some(ids) = self.index.symbol_map.get(&child) {
                     if let Some(&cid) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == file_id) {
@@ -362,7 +404,7 @@ impl Indexer {
             }
         }
     }
-    
+
     pub fn resolve_references(&mut self) {
         self.index.resolved_calls.clear();
         self.index.inheritance.clear();
@@ -624,15 +666,44 @@ impl Indexer {
     }
 
     fn resolve_file_dependencies(&mut self) {
+        // 1. Pre-calculate a map of FileId -> SymbolId (for the "module" symbol)
+        // This avoids borrowing issues and makes the loop O(1) for lookups.
+        let mut file_to_module_sym: HashMap<FileId, SymbolId> = HashMap::new();
+        for sym in self.index.symbols.values() {
+            if sym.kind == "module" {
+                file_to_module_sym.insert(sym.file_id, sym.id);
+            }
+        }
+
         let fids: Vec<FileId> = self.index.file_imports.keys().cloned().collect();
+        
         for fid in fids {
             let mut deps = HashSet::new();
+            // Get the module symbol for the current file (the caller)
+            let src_module_id = file_to_module_sym.get(&fid).cloned();
+
             if let Some(imports) = self.index.file_imports.get(&fid) {
                 for imp in imports {
-                    if let Some(target_fid) = self.resolve_import_path(fid, &imp.source) { deps.insert(target_fid); }
+                    if let Some(target_fid) = self.resolve_import_path(fid, &imp.source) { 
+                        deps.insert(target_fid);
+                        
+                        // Link Module A -> Module B via resolved_calls
+                        // This allows the graph traversal to follow imports even if no specific functions are called
+                        if let (Some(src_id), Some(tgt_id)) = (src_module_id, file_to_module_sym.get(&target_fid)) {
+                            self.index.resolved_calls.entry(src_id).or_default().push(*tgt_id);
+                        }
+                    }
                 }
             }
-            if !deps.is_empty() { self.index.file_dependencies.insert(fid, deps.into_iter().collect()); }
+            if !deps.is_empty() { 
+                self.index.file_dependencies.insert(fid, deps.into_iter().collect()); 
+            }
+        }
+
+        // Clean up duplicates in resolved_calls that might have been created
+        for calls in self.index.resolved_calls.values_mut() {
+            calls.sort();
+            calls.dedup();
         }
     }
 
