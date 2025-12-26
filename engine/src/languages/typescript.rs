@@ -141,4 +141,10 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             arguments: (arguments (string) @config.key))
         ]
     "#,
+    query_vals: r#"
+        (variable_declarator
+            name: (identifier) @val.name
+            value: [(string) (template_string)] @val.value
+        )
+    "#,
 };

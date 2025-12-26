@@ -16,4 +16,5 @@ pub const JAVA_CONFIG: LanguageConfig = LanguageConfig {
         )
     "#,
     query_config: "",
+    query_vals: "",
 };

@@ -65,13 +65,45 @@ pub fn analyze_source(
     let tree = parser.parse(source_code, None).ok_or("Failed to parse code")?;
     let root_node = tree.root_node();
     
+    // --- STEP 0: CONSTANT PROPAGATION ---
+    // We scan for constants first (e.g., const API_URL = "/api/v1") so we can 
+    // substitute them in imports or inject them as literals later.
+    let mut local_constants: HashMap<String, String> = HashMap::new();
+    
+    if !config.query_vals.is_empty() {
+         if let Ok(q) = Query::new(&language, config.query_vals) {
+            let mut cursor = QueryCursor::new();
+            let mut matches = cursor.matches(&q, root_node, code_bytes);
+            while let Some(m) = matches.next() {
+                let mut name = String::new();
+                let mut val = String::new();
+                
+                for cap in m.captures {
+                    let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
+                    let capture_name = q.capture_names()[cap.index as usize];
+                    
+                    if capture_name == "val.name" { 
+                        name = text; 
+                    } else if capture_name == "val.value" { 
+                        // Strip quotes immediately to store the semantic value
+                        val = text.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_string(); 
+                    }
+                }
+                
+                if !name.is_empty() && !val.is_empty() {
+                    local_constants.insert(name, val);
+                }
+            }
+        }
+    }
+
     let mut imports = Vec::new();
     let mut exports = Vec::new();
     let mut literals = Vec::new();
     let mut implementations = Vec::new();
     let mut functions = Vec::new();
 
-    // 1. Imports
+    // 1. Imports (Enhanced with Substitution)
     if !config.query_imports.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_imports) {
             let mut cursor = QueryCursor::new();
@@ -86,7 +118,14 @@ pub fn analyze_source(
                     let capture_name = q.capture_names()[cap.index as usize];
                     
                     if capture_name == "import.source" { 
-                        src = text.replace(['"', '\''], ""); 
+                        // Logic:
+                        // 1. If 'text' matches a known constant (e.g. require(MY_CONST)), use the constant's value.
+                        // 2. Otherwise, treat it as a literal and strip quotes.
+                        if let Some(resolved) = local_constants.get(&text) {
+                            src = resolved.clone();
+                        } else {
+                            src = text.replace(['"', '\''], ""); 
+                        }
                     } else if capture_name == "import.name" { 
                         name = text; 
                     } else if capture_name == "import.alias" {
@@ -113,7 +152,15 @@ pub fn analyze_source(
                 for cap in m.captures {
                     let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
                     let capture_name = q.capture_names()[cap.index as usize];
-                    if capture_name == "export.source" { src = text.replace(['"', '\''], ""); }
+                    if capture_name == "export.source" { 
+                        // Similar substitution logic for exports could go here, 
+                        // generally exports use literals, but substitution is safe.
+                        if let Some(resolved) = local_constants.get(&text) {
+                            src = resolved.clone();
+                        } else {
+                            src = text.replace(['"', '\''], ""); 
+                        }
+                    }
                     else if capture_name == "export.name" { name = Some(text); }
                 }
                 if !src.is_empty() { exports.push(ExportNode { name, source: src }); }
@@ -121,7 +168,7 @@ pub fn analyze_source(
         }
     }
 
-    // 3. Literals
+    // 3. Literals (Enhanced with Injection)
     if !config.query_literals.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_literals) {
             let mut cursor = QueryCursor::new();
@@ -132,6 +179,15 @@ pub fn analyze_source(
                     if text.len() > 1 { literals.push(text); }
                 }
             }
+        }
+    }
+    
+    // INJECTION: Add the values of constants found in Step 0.
+    // This ensures that if a user writes `const API = "/users"`, the indexer
+    // sees "/users" as a literal present in this file for linking purposes.
+    for val in local_constants.values() {
+        if val.len() > 1 {
+            literals.push(val.clone());
         }
     }
 
@@ -211,6 +267,7 @@ pub fn analyze_source(
                 }
                 "variable.name" => {
                     v_name = Some(text.to_string());
+                    // Try to sniff what variable is assigned to: const x = someFunc()
                     if let Some(parent) = capture.node.parent() {
                         if let Some(val) = parent.child_by_field_name("value") {
                             if val.kind() == "call_expression" {
@@ -353,8 +410,6 @@ pub fn analyze_source(
     }
 
     // 10. Extract Docs (Only for Defined Functions)
-    // We iterate existing functions and look for docs anchoring to their definition node
-    // This part is kept mostly same as before but optimized slightly
     let mut d_cursor = QueryCursor::new();
     let mut d_matches = d_cursor.matches(&docs_query, root_node, code_bytes);
     while let Some(dm) = d_matches.next() {
@@ -377,8 +432,6 @@ pub fn analyze_source(
     }
 
     // 11. Final Assembly
-    // Add the module info to the list of functions. 
-    // The Indexer will need to recognize it by its special name or handling.
     functions.push(module_info);
 
     Ok(FileAnalysis { 

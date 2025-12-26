@@ -16,4 +16,16 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
         )
     "#,
     query_config: "",
+    query_vals: r#"
+        [
+            (const_item
+                name: (identifier) @val.name
+                value: (string_literal) @val.value
+            )
+            (let_declaration
+                pattern: (identifier) @val.name
+                value: (string_literal) @val.value
+            )
+        ]
+    "#,
 };

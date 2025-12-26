@@ -29,4 +29,10 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
         )
     "#,
     query_config: "",
+    query_vals: r#"
+        (variable_declarator
+            name: (identifier) @val.name
+            value: [(string) (template_string)] @val.value
+        )
+    "#,
 };

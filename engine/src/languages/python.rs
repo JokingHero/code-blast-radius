@@ -16,4 +16,10 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
         )
     "#,
     query_config: "",
+    query_vals: r#"
+        (assignment
+            left: (identifier) @val.name
+            right: (string) @val.value
+        )
+    "#,
 };

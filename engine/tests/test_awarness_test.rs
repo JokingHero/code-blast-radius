@@ -118,9 +118,16 @@ fn test_python_test_detection() {
     let mut indexer = Indexer::new();
     indexer.scan(&workspace.path);
     
-    let prod_file = indexer.index.files.values().find(|f| f.path.contains("logic.py")).unwrap();
-    let test_file = indexer.index.files.values().find(|f| f.path.contains("test_logic.py")).unwrap();
+    // Use stricter matching to ensure we don't accidentally grab "test_logic.py"
+    // when looking for "logic.py"
+    let prod_file = indexer.index.files.values()
+        .find(|f| f.path.ends_with("/logic.py") || f.path.ends_with("\\logic.py") || f.path == "logic.py")
+        .expect("Should find logic.py");
+        
+    let test_file = indexer.index.files.values()
+        .find(|f| f.path.contains("test_logic.py"))
+        .expect("Should find test_logic.py");
 
-    assert!(!prod_file.is_test);
-    assert!(test_file.is_test, "Python files starting with test_ should be flagged");
+    assert!(!prod_file.is_test, "logic.py should NOT be flagged as a test");
+    assert!(test_file.is_test, "test_logic.py should be flagged as a test");
 }

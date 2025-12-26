@@ -11,4 +11,5 @@ pub const JULIA_CONFIG: LanguageConfig = LanguageConfig {
     query_literals: r#"(string_literal) @string"#,
     query_implements: "",
     query_config: "",
+    query_vals: "",
 };
