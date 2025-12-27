@@ -2,6 +2,7 @@ use crate::schema::{ WorkspaceIndex, FileNode, SymbolNode, SymbolId, FileId };
 use crate::analyzer::analyze_source;
 use crate::language::{ get_language_configs, LanguageConfig };
 use crate::manifest::scan_manifests;
+use crate::topic::matches_topic;
 use std::path::{ Path, PathBuf };
 use std::fs::{ self, File };
 use std::io::Write;
@@ -578,6 +579,7 @@ impl Indexer {
         self.resolve_namespace_imports();
         self.resolve_literal_dependencies();
         self.resolve_shared_literals();
+        self.resolve_pubsub_wildcards();
         self.resolve_type_sniffing();
         self.resolve_fingerprints();
         self.resolve_implicit_connections();
@@ -1286,6 +1288,67 @@ impl Indexer {
         }
     }
 
+    fn resolve_pubsub_wildcards(&mut self) {
+        let mut patterns: Vec<(FileId, String)> = Vec::new();
+        let mut candidates: Vec<(FileId, String)> = Vec::new();
+
+        // 1. Partition literals
+        for (&file_id, literals) in &self.index.raw_literals {
+            for lit in literals {
+                // Heuristic: Must have length > 2 and contain a separator or wildcard
+                // to avoid matching common words like "start" or "error".
+                let has_separator = lit.contains('.') || lit.contains('/') || lit.contains(':');
+                if lit.len() < 3 || !has_separator {
+                    continue;
+                }
+
+                // Clean quotes
+                let clean = lit.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_string();
+
+                if clean.contains('*') || clean.contains('#') || clean.contains('>') {
+                    patterns.push((file_id, clean));
+                } else {
+                    candidates.push((file_id, clean));
+                }
+            }
+        }
+
+        // 2. Match Patterns vs Candidates
+        for (pat_file, pat_str) in &patterns {
+            for (cand_file, cand_str) in &candidates {
+                if pat_file == cand_file { continue; }
+
+                if matches_topic(pat_str, cand_str) {
+                    // Link Files
+                    let deps_a = self.index.file_dependencies.entry(*pat_file).or_default();
+                    if !deps_a.contains(cand_file) { deps_a.push(*cand_file); }
+
+                    let deps_b = self.index.file_dependencies.entry(*cand_file).or_default();
+                    if !deps_b.contains(pat_file) { deps_b.push(*pat_file); }
+
+                    // Link Modules (for semantic search context)
+                    self.link_modules(*pat_file, *cand_file);
+                }
+            }
+        }
+    }
+
+    // Helper to reduce code duplication in resolvers
+    fn link_modules(&mut self, file_a: FileId, file_b: FileId) {
+        let mod_a = self.index.symbols.values()
+            .find(|s| s.file_id == file_a && s.kind == "module").map(|s| s.id);
+        let mod_b = self.index.symbols.values()
+            .find(|s| s.file_id == file_b && s.kind == "module").map(|s| s.id);
+
+        if let (Some(ma), Some(mb)) = (mod_a, mod_b) {
+            let calls_a = self.index.resolved_calls.entry(ma).or_default();
+            if !calls_a.contains(&mb) { calls_a.push(mb); }
+            
+            let calls_b = self.index.resolved_calls.entry(mb).or_default();
+            if !calls_b.contains(&ma) { calls_b.push(ma); }
+        }
+    }
+    
     pub fn get_impacted_files(&self, target_path: &Path) -> Vec<String> {
         let target_key = Self::to_index_path(target_path);
         let target_id = match self.index.files.get(&target_key) {
