@@ -5,7 +5,14 @@ use rfc_engine::indexer::Indexer;
 use rfc_engine::analyzer::{find_related_symbols, generate_context_from_ids};
 
 #[derive(Parser, Debug)]
-#[command(author, version, about)]
+#[command(
+    name = "cfb", 
+    author, 
+    version, 
+    about = "Code Flow Brief: Context Management for Codebases",
+    long_about = "Code Flow Brief (cfb) analyzes your codebase to create precise, dependency-aware context recipes for LLMs."
+)]
+
 struct Cli {
     #[arg(short, long)]
     path: PathBuf,

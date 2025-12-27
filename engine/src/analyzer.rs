@@ -14,7 +14,8 @@ pub struct FunctionInfo {
     pub source_code: String,
     pub documentation: Option<String>,
     pub calls: Vec<String>, 
-    pub type_refs: Vec<String>, // NEW: "Nouns" used by this function (arguments, return types, etc.)
+    pub type_refs: Vec<String>, 
+    pub decorators: Vec<String>, // <--- NEW FIELD
     pub fingerprints: HashMap<String, Vec<String>>,
     pub return_type: Option<String>, 
     pub local_types: HashMap<String, String>, 
@@ -46,7 +47,7 @@ enum TraversalMode {
 }
 
 pub fn analyze_source(
-    path: &Path, // We use this now for the module name
+    path: &Path,
     source_code: &str,
     config: &LanguageConfig,
 ) -> Result<FileAnalysis, String> {
@@ -67,7 +68,6 @@ pub fn analyze_source(
     let root_node = tree.root_node();
     
     // --- STEP 0: CONSTANT PROPAGATION ---
-    // Scan for constants (e.g. const API = "/api") to substitute in imports/literals
     let mut local_constants: HashMap<String, String> = HashMap::new();
     
     if !config.query_vals.is_empty() {
@@ -102,7 +102,7 @@ pub fn analyze_source(
     let mut implementations = Vec::new();
     let mut functions = Vec::new();
 
-    // 1. Imports (Enhanced with Substitution)
+    // 1. Imports
     if !config.query_imports.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_imports) {
             let mut cursor = QueryCursor::new();
@@ -161,7 +161,7 @@ pub fn analyze_source(
         }
     }
 
-    // 3. Literals (Enhanced with Injection)
+    // 3. Literals
     if !config.query_literals.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_literals) {
             let mut cursor = QueryCursor::new();
@@ -174,7 +174,6 @@ pub fn analyze_source(
             }
         }
     }
-    // Inject values from constants to support linking
     for val in local_constants.values() {
         if val.len() > 1 { literals.push(val.clone()); }
     }
@@ -205,13 +204,21 @@ pub fn analyze_source(
         .map_err(|e| format!("Invalid calls query for {:?}: {}", config.lang_enum, e))?;
     let docs_query = Query::new(&language, config.query_docs)
         .map_err(|e| format!("Invalid docs query for {:?}: {}", config.lang_enum, e))?;
+    
     let config_query = if !config.query_config.is_empty() {
         Some(Query::new(&language, config.query_config)
             .map_err(|e| format!("Invalid config query for {:?}: {}", config.lang_enum, e))?)
     } else { None };
+    
     let types_query = if !config.query_types.is_empty() {
         Some(Query::new(&language, config.query_types)
             .map_err(|e| format!("Invalid types query for {:?}: {}", config.lang_enum, e))?)
+    } else { None };
+
+    // --- NEW: Decorators Query ---
+    let decorators_query = if !config.query_decorators.is_empty() {
+        Some(Query::new(&language, config.query_decorators)
+            .map_err(|e| format!("Invalid decorators query for {:?}: {}", config.lang_enum, e))?)
     } else { None };
 
     // --- Create the Module Symbol ---
@@ -225,6 +232,7 @@ pub fn analyze_source(
         documentation: None, 
         calls: Vec::new(),
         type_refs: Vec::new(),
+        decorators: Vec::new(), // NEW
         fingerprints: HashMap::new(),
         return_type: None,
         local_types: HashMap::new(),
@@ -287,6 +295,7 @@ pub fn analyze_source(
                 documentation: None,
                 calls: Vec::new(),
                 type_refs: Vec::new(),
+                decorators: Vec::new(), // NEW
                 fingerprints: HashMap::new(),
                 return_type,
                 local_types: HashMap::new(),
@@ -352,6 +361,44 @@ pub fn analyze_source(
         }
     }
 
+    // --- NEW: 8.5 Extract Decorators ---
+    if let Some(ref q) = decorators_query {
+        let mut dec_cursor = QueryCursor::new();
+        let mut dec_matches = dec_cursor.matches(q, root_node, code_bytes);
+        
+        while let Some(dm) = dec_matches.next() {
+            for cap in dm.captures {
+                let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
+                // Clean up: Remove '@' (Java/TS/Py) or '#[]' (Rust) or parens
+                let clean_name = text.trim_matches(|c| c == '@' || c == '#' || c == '[' || c == ']' || c == '(' || c == ')').to_string();
+                
+                if !clean_name.is_empty() {
+                    let range = cap.node.byte_range();
+                    
+                    // 1. Try strict containment (Java, Rust, TS)
+                    if let Some(idx) = get_owner_index(range.start, range.end, &functions) {
+                        functions[idx].decorators.push(clean_name);
+                    } else {
+                        // 2. Proximity Heuristic (Python, where decorators are siblings to function def)
+                        // Find a function that starts *after* this decorator, but reasonably close (e.g., within 200 bytes)
+                        let mut found_neighbor = false;
+                        for func in &mut functions {
+                            if func.range_start > range.end && (func.range_start - range.end) < 200 {
+                                func.decorators.push(clean_name.clone());
+                                found_neighbor = true;
+                                break; // Attach to the nearest one only
+                            }
+                        }
+
+                        if !found_neighbor {
+                            module_info.decorators.push(clean_name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // 9. Extract and Distribute Calls
     let mut c_cursor = QueryCursor::new();
     let mut c_matches = c_cursor.matches(&calls_query, root_node, code_bytes);
@@ -407,17 +454,15 @@ pub fn analyze_source(
         }
     }
 
-    // Deduplicate config keys and type refs
+    // Deduplicate logic
     for func in &mut functions {
-        func.config_keys.sort();
-        func.config_keys.dedup();
-        func.type_refs.sort();
-        func.type_refs.dedup();
+        func.config_keys.sort(); func.config_keys.dedup();
+        func.type_refs.sort(); func.type_refs.dedup();
+        func.decorators.sort(); func.decorators.dedup(); // NEW
     }
-    module_info.config_keys.sort();
-    module_info.config_keys.dedup();
-    module_info.type_refs.sort();
-    module_info.type_refs.dedup();
+    module_info.config_keys.sort(); module_info.config_keys.dedup();
+    module_info.type_refs.sort(); module_info.type_refs.dedup();
+    module_info.decorators.sort(); module_info.decorators.dedup(); // NEW
 
     // 10. Extract Docs (Only for Defined Functions)
     let mut d_cursor = QueryCursor::new();

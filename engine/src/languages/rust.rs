@@ -40,4 +40,9 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
             (type_arguments (type_identifier) @type.ref)
         ]
     "#,
+    // The analyzer's trim_matches logic will strip '#[' and ']' 
+    // and the resolve logic will handle arguments like 'derive(...)'.
+    query_decorators: r#"
+        (attribute_item) @decorator.name
+    "#,
 };

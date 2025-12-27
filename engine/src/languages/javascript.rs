@@ -36,4 +36,5 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
         )
     "#,
     query_types: "",
+    query_decorators: ""
 };

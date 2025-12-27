@@ -162,4 +162,13 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             (type_arguments (type_identifier) @type.ref)
         ]
     "#,
+    // TS decorators: @Component(...) or @Injectable
+    query_decorators: r#"
+        (decorator 
+            [
+                (call_expression function: (identifier) @decorator.name)
+                (identifier) @decorator.name
+            ]
+        )
+    "#,
 };

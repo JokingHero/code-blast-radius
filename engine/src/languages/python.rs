@@ -68,4 +68,7 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
             (class_definition superclasses: (argument_list (_) @type.ref))
         ]
     "#,
+    query_decorators: r#"
+        (decorator) @decorator.name
+    "#,
 };

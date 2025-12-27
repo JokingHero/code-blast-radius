@@ -22,8 +22,9 @@ name: (identifier) @function.name
     query_vals: "",
     // S-Exp: (column_definition name: (identifier))
     query_types: r#"
-(column_definition
-name: (identifier) @type.ref
-)
-"#,
+    (column_definition
+    name: (identifier) @type.ref
+    )
+    "#,
+    query_decorators: ""
 };

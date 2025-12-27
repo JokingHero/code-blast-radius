@@ -20,9 +20,10 @@ pub const PRISMA_CONFIG: LanguageConfig = LanguageConfig {
     query_vals: "",
     // S-Exp: (column_declaration (identifier) (column_type ...))
     query_types: r#"
-(column_declaration
-(identifier) @type.ref
-(column_type)
-)
-"#,
+    (column_declaration
+    (identifier) @type.ref
+    (column_type)
+    )
+    "#,
+    query_decorators: ""
 };

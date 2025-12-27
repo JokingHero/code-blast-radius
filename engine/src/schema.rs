@@ -51,6 +51,7 @@ pub struct SymbolNode {
     pub is_test: bool,
     pub is_external: bool,      // Is this from node_modules or a std lib?
     pub external_source: Option<String>, // e.g., "axios" or "fs"
+    pub decorators: Vec<String>, 
 }
 
 #[derive(Archive, Deserialize, Serialize, Debug, Default)]
@@ -102,4 +103,6 @@ pub struct WorkspaceIndex {
     pub resolved_type_refs: HashMap<SymbolId, Vec<SymbolId>>, 
     // Temporary storage for linking phase
     pub raw_type_refs: HashMap<SymbolId, Vec<String>>,
+    // Mapping of SymbolId -> List of Decorator names used on it
+    pub raw_decorators: HashMap<SymbolId, Vec<String>>,
 }

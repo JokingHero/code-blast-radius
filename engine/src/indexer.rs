@@ -105,10 +105,9 @@ impl Indexer {
             self.index.local_variable_types.remove(&sym_id);
             self.index.inheritance.remove(&sym_id);
             self.index.symbol_config_refs.remove(&sym_id);
-
-            // NEW: Clear type references
             self.index.raw_type_refs.remove(&sym_id);
             self.index.resolved_type_refs.remove(&sym_id);
+            self.index.raw_decorators.remove(&sym_id);
         }
 
         // Clean up config definitions mapping
@@ -321,7 +320,6 @@ impl Indexer {
             is_test: is_path_test,
         });
 
-        // --- CHANGED: Added Error Logging ---
         match analyze_source(path_obj, content, config) {
             Ok(analysis) => {
                 if !analysis.imports.is_empty() {
@@ -396,6 +394,8 @@ impl Indexer {
                         is_test: is_path_test || is_inline_test,
                         is_external: false,
                         external_source: None,
+                        // --- FIX IS HERE: Init the new field ---
+                        decorators: func.decorators.clone(),
                     });
 
                     file_symbol_ids.push(symbol_id);
@@ -421,6 +421,11 @@ impl Indexer {
 
                     if !func.type_refs.is_empty() {
                         self.index.raw_type_refs.insert(symbol_id, func.type_refs);
+                    }
+                    
+                    // --- Capture Decorators for Linking ---
+                    if !func.decorators.is_empty() {
+                        self.index.raw_decorators.insert(symbol_id, func.decorators);
                     }
                 }
 
@@ -513,7 +518,6 @@ impl Indexer {
                 }
             }
             Err(e) => {
-                // IMPORTANT: Print the error so we see it in test logs!
                 eprintln!("Error analyzing file {:?}: {}", path_obj, e);
             }
         }
@@ -527,6 +531,7 @@ impl Indexer {
 
         self.resolution_cache.clear();
         self.resolve_external_imports();
+        self.resolve_decorators();
         self.resolve_namespace_imports();
         self.resolve_literal_dependencies();
         self.resolve_shared_literals();
@@ -584,6 +589,8 @@ impl Indexer {
                             is_test: false,
                             is_external: true,
                             external_source: Some(pkg_name.clone()),
+                            // --- FIX IS HERE ---
+                            decorators: Vec::new(), 
                         });
                     }
                 }
@@ -593,6 +600,39 @@ impl Indexer {
         for sym in new_symbols {
             self.index.symbol_map.entry(sym.name.clone()).or_default().push(sym.id);
             self.index.symbols.insert(sym.id, sym);
+        }
+    }
+
+    fn resolve_decorators(&mut self) {
+        let entries: Vec<(SymbolId, Vec<String>)> = self.index.raw_decorators
+            .iter()
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+
+        for (caller_id, dec_names) in entries {
+            let caller_file_id = self.index.symbols[&caller_id].file_id;
+
+            for dec_name in dec_names {
+                // 1. Clean the name further if needed (e.g. remove "()")
+                // Some decorators are calls like @Route("/api"), we just want "Route"
+                let clean = dec_name.split('(').next().unwrap_or(&dec_name).trim();
+
+                // 2. Resolve exactly like a Type Reference or Call
+                // This creates a dependency: Function -> Decorator Definition
+                if let Some(target_id) = self.resolve_single_call(caller_file_id, clean) {
+                    self.index.resolved_calls.entry(caller_id).or_default().push(target_id);
+                } else if let Some(candidates) = self.index.symbol_map.get(clean) {
+                    // Fallback: Link to any symbol with this name
+                    let mut guesses = candidates.clone();
+                    self.index.resolved_calls.entry(caller_id).or_default().append(&mut guesses);
+                }
+            }
+            
+            // Sort/Dedup resolved calls for this symbol
+            if let Some(resolved) = self.index.resolved_calls.get_mut(&caller_id) {
+                resolved.sort();
+                resolved.dedup();
+            }
         }
     }
 
