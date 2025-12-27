@@ -80,7 +80,6 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
               )
               source: (string) @import.source
           )
-          ;; Capture Namespace Imports
           (import_statement
             (import_clause
               (namespace_import (identifier) @import.alias)
@@ -88,8 +87,35 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             source: (string) @import.source
           )
           (import_statement source: (string) @import.source)
+
+          ;; --- Dynamic Import & Require Support ---
+          
+          ;; import("literal")
+          (call_expression
+            function: (import)
+            arguments: (arguments [(string) (template_string)] @import.source)
+          )
+          
+          ;; import(variable) -> @import.dynamic
+          (call_expression
+            function: (import)
+            arguments: (arguments (identifier) @import.dynamic)
+          )
+
+          ;; require("literal")
+          (call_expression
+            function: (identifier) @req (#eq? @req "require")
+            arguments: (arguments [(string) (template_string)] @import.source)
+          )
+
+          ;; require(variable) -> @import.dynamic
+          (call_expression
+            function: (identifier) @req (#eq? @req "require")
+            arguments: (arguments (identifier) @import.dynamic)
+          )
         ]
     "#,
+    // --- UPDATED SECTION END ---
     query_exports: r#"
         [
             (export_statement
@@ -124,35 +150,30 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
     "#,
     query_config: r#"
         [
-          ;; process.env.KEY
           (member_expression
             object: (member_expression
               object: (identifier) @obj (#eq? @obj "process")
               property: (property_identifier) @prop (#eq? @prop "env"))
             property: (property_identifier) @config.key)
 
-          ;; process.env["KEY"]
           (subscript_expression
             object: (member_expression
               object: (identifier) @obj (#eq? @obj "process")
               property: (property_identifier) @prop (#eq? @prop "env"))
             index: (string) @config.key)
 
-          ;; config.get("KEY")
           (call_expression
             function: (member_expression
               property: (property_identifier) @method (#eq? @method "get"))
             arguments: (arguments (string) @config.key))
         ]
     "#,
-    // Matches: const X = "value"
     query_vals: r#"
         (variable_declarator
             name: (identifier) @val.name
             value: [(string) (template_string)] @val.value
         )
     "#,
-    // Matches types in annotations, heritage clauses, and generics
     query_types: r#"
         [
             (type_annotation (type_identifier) @type.ref)
@@ -162,7 +183,6 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             (type_arguments (type_identifier) @type.ref)
         ]
     "#,
-    // TS decorators: @Component(...) or @Injectable
     query_decorators: r#"
         (decorator 
             [

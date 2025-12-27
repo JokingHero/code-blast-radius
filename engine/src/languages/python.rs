@@ -32,6 +32,38 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
                     alias: (identifier) @import.alias
                 )
             )
+
+            ;; --- Dynamic Import Support ---
+
+            ;; importlib.import_module("literal")
+            (call
+                function: (attribute
+                    object: (identifier) @obj (#eq? @obj "importlib")
+                    attribute: (identifier) @meth (#eq? @meth "import_module")
+                )
+                arguments: (argument_list (string) @import.source)
+            )
+
+            ;; importlib.import_module(variable) -> @import.dynamic
+            (call
+                function: (attribute
+                    object: (identifier) @obj (#eq? @obj "importlib")
+                    attribute: (identifier) @meth (#eq? @meth "import_module")
+                )
+                arguments: (argument_list (identifier) @import.dynamic)
+            )
+
+            ;; __import__("literal")
+            (call
+                function: (identifier) @fn (#eq? @fn "__import__")
+                arguments: (argument_list (string) @import.source)
+            )
+             
+            ;; __import__(variable) -> @import.dynamic
+            (call
+                function: (identifier) @fn (#eq? @fn "__import__")
+                arguments: (argument_list (identifier) @import.dynamic)
+            )
         ]
     "#,
     query_exports: "",
@@ -49,27 +81,17 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
             right: (string) @val.value
         )
     "#,
-    // Type reference extraction
     query_types: r#"
         [
-            ;; def foo(x: MyType)
             (typed_parameter type: (_) @type.ref)
-            
-            ;; def foo(x: MyType = 1)
             (typed_default_parameter type: (_) @type.ref)
-
-            ;; -> MyType
             (function_definition return_type: (_) @type.ref)
-
-            ;; x: MyType = 1  (assignment with type field)
             (assignment type: (_) @type.ref)
-
-            ;; class MyClass(BaseClass):
             (class_definition superclasses: (argument_list (_) @type.ref))
         ]
     "#,
     query_decorators: r#"
         (decorator) @decorator.name
     "#,
-    di_decorators: &["dataclass", "Component", "Service"], // Libraries like 'injector' use these
+    di_decorators: &["dataclass", "Component", "Service"],
 };

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use tree_sitter::{Parser, Query, QueryCursor, StreamingIterator};
 
-use crate::language::{get_language, LanguageConfig};
+use crate::language::{LanguageConfig, SupportedLanguage, get_language};
 use crate::schema::{ImportNode, ExportNode, WorkspaceIndex, SymbolId};
 
 #[derive(Debug, Clone)]
@@ -122,20 +122,45 @@ pub fn analyze_source(
                         } else {
                             src = text.replace(['"', '\''], ""); 
                         }
-                    } else if capture_name == "import.name" { 
+                    } 
+                    else if capture_name == "import.dynamic" {
+                        if let Some(resolved) = local_constants.get(&text) {
+                            src = resolved.clone();
+                            // Clean quotes that might have been preserved in constant propagation
+                            src = src.replace(['"', '\'', '`'], "");
+                        }
+                    }
+                    else if capture_name == "import.name" { 
                         name = text; 
                     } else if capture_name == "import.alias" {
                         name = "*".to_string(); 
                         alias = Some(text);
                     }
                 }
-                if !src.is_empty() { 
+
+                if !src.is_empty() {
+                    if config.lang_enum == SupportedLanguage::Python {
+                        // Python 'import a.b' or 'importlib.import_module("a.b")' 
+                        // maps to 'a/b' on disk.
+                        // We avoid replacing leading dots used for relative imports (e.g. from . import x)
+                        // by only replacing if it doesn't look like a relative anchor, 
+                        // OR we rely on standardizing everything.
+                        // For 'import_module("plugins.payment")', src is "plugins.payment".
+                        
+                        // Simple heuristic: If it contains dots and isn't a relative path starting with ./
+                        if src.contains('.') && !src.starts_with("./") && !src.starts_with("../") {
+                            // Handle explicit relative imports 'from . import' (src=".") or 'from .. import' (src="..")
+                            if src != "." && src != ".." {
+                                src = src.replace('.', "/");
+                            }
+                        }
+                    }
+                    
                     imports.push(ImportNode { name, source: src, alias }); 
                 }
             }
         }
     }
-
     // 2. Exports
     if !config.query_exports.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_exports) {
