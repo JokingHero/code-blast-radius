@@ -39,7 +39,11 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
         [
           (call_expression 
             function: (member_expression 
-              object: [(identifier) (this)] @call.receiver
+              object: [
+                (identifier) 
+                (this) 
+                (member_expression) 
+              ] @call.receiver
               property: [(property_identifier) (identifier)] @call.name))
           
           (call_expression 

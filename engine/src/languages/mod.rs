@@ -11,3 +11,5 @@ pub mod json;
 pub mod yaml;
 pub mod toml;
 pub mod dotenv;
+pub mod sql;
+pub mod prisma;
