@@ -105,4 +105,8 @@ pub struct WorkspaceIndex {
     pub raw_type_refs: HashMap<SymbolId, Vec<String>>,
     // Mapping of SymbolId -> List of Decorator names used on it
     pub raw_decorators: HashMap<SymbolId, Vec<String>>,
+    
+    // Mapping of Route String -> FileId
+    // e.g., "/api/login" -> FileId(5) (which points to pages/api/login.ts)
+    pub implicit_routes: HashMap<String, FileId>, 
 }

@@ -10,6 +10,7 @@ use ignore::WalkBuilder;
 use blake3;
 use memmap2::MmapOptions;
 use rkyv::{ to_bytes, check_archived_root };
+
 pub struct Indexer {
     pub index: WorkspaceIndex,
     configs: HashMap<String, &'static LanguageConfig>,
@@ -47,6 +48,41 @@ impl Indexer {
         }
     }
 
+    /// Detects if a file path corresponds to a framework route (e.g. Next.js pages/api)
+    /// Returns the route string (e.g. "/api/user") if detected.
+    fn detect_framework_route(path: &Path) -> Option<String> {
+        // Normalize path separators to forward slashes for matching
+        let path_str = path.to_string_lossy().replace('\\', "/");
+        
+        // 1. Next.js Pages Router (pages/api/...)
+        if let Some(idx) = path_str.find("/pages/api/") {
+            let relative = &path_str[idx + "/pages".len()..]; // e.g. "/api/user.ts"
+            // Remove extension logic
+            if let Some(dot_idx) = relative.rfind('.') {
+                 let route = &relative[..dot_idx];
+                 // Handle index routes: /api/users/index -> /api/users
+                 if route.ends_with("/index") {
+                     return Some(route[..route.len() - "/index".len()].to_string());
+                 }
+                 return Some(route.to_string());
+            }
+        }
+
+        // 2. Next.js App Router (app/api/.../route.ts)
+        // file: .../app/api/auth/route.ts -> route: /api/auth
+        if path_str.ends_with("/route.ts") || path_str.ends_with("/route.js") {
+            if let Some(app_idx) = path_str.find("/app/") {
+                if let Some(route_idx) = path_str.rfind("/route.") {
+                     // skip "/app" (length 4) and grab until "/route"
+                     let relative = &path_str[app_idx + 4..route_idx]; 
+                     return Some(relative.to_string());
+                }
+            }
+        }
+
+        None
+    }
+
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         let bytes = to_bytes::<_, 4096>(&self.index).map_err(|e|
             anyhow::anyhow!("Serialization failed: {}", e)
@@ -78,6 +114,9 @@ impl Indexer {
         if let Some(node) = self.index.files.remove(path_key) {
             self.clear_file_symbols(node.id);
             self.index.file_dependencies.remove(&node.id);
+            
+            // Clean up implicit routes for this file
+            self.index.implicit_routes.retain(|_, v| *v != node.id);
         }
     }
 
@@ -320,6 +359,11 @@ impl Indexer {
             is_test: is_path_test,
         });
 
+        // --- Implicit Route Detection ---
+        if let Some(route) = Self::detect_framework_route(path_obj) {
+            self.index.implicit_routes.insert(route, file_id);
+        }
+
         match analyze_source(path_obj, content, config) {
             Ok(analysis) => {
                 if !analysis.imports.is_empty() {
@@ -394,7 +438,6 @@ impl Indexer {
                         is_test: is_path_test || is_inline_test,
                         is_external: false,
                         external_source: None,
-                        // --- FIX IS HERE: Init the new field ---
                         decorators: func.decorators.clone(),
                     });
 
@@ -423,7 +466,6 @@ impl Indexer {
                         self.index.raw_type_refs.insert(symbol_id, func.type_refs);
                     }
                     
-                    // --- Capture Decorators for Linking ---
                     if !func.decorators.is_empty() {
                         self.index.raw_decorators.insert(symbol_id, func.decorators);
                     }
@@ -532,6 +574,7 @@ impl Indexer {
         self.resolution_cache.clear();
         self.resolve_external_imports();
         self.resolve_decorators();
+        self.resolve_implicit_routes(); // Implicit route resolution
         self.resolve_namespace_imports();
         self.resolve_literal_dependencies();
         self.resolve_shared_literals();
@@ -589,8 +632,7 @@ impl Indexer {
                             is_test: false,
                             is_external: true,
                             external_source: Some(pkg_name.clone()),
-                            // --- FIX IS HERE ---
-                            decorators: Vec::new(), 
+                            decorators: Vec::new(),
                         });
                     }
                 }
@@ -613,25 +655,64 @@ impl Indexer {
             let caller_file_id = self.index.symbols[&caller_id].file_id;
 
             for dec_name in dec_names {
-                // 1. Clean the name further if needed (e.g. remove "()")
-                // Some decorators are calls like @Route("/api"), we just want "Route"
+                // Clean the name further if needed (e.g. remove "()")
                 let clean = dec_name.split('(').next().unwrap_or(&dec_name).trim();
 
-                // 2. Resolve exactly like a Type Reference or Call
-                // This creates a dependency: Function -> Decorator Definition
+                // Treat decorator as a dependency (like a function call)
                 if let Some(target_id) = self.resolve_single_call(caller_file_id, clean) {
                     self.index.resolved_calls.entry(caller_id).or_default().push(target_id);
                 } else if let Some(candidates) = self.index.symbol_map.get(clean) {
-                    // Fallback: Link to any symbol with this name
                     let mut guesses = candidates.clone();
-                    self.index.resolved_calls.entry(caller_id).or_default().append(&mut guesses);
+                    self.index.resolved_calls
+                        .entry(caller_id)
+                        .or_default()
+                        .append(&mut guesses);
                 }
             }
-            
-            // Sort/Dedup resolved calls for this symbol
             if let Some(resolved) = self.index.resolved_calls.get_mut(&caller_id) {
                 resolved.sort();
                 resolved.dedup();
+            }
+        }
+    }
+
+    fn resolve_implicit_routes(&mut self) {
+        let mut new_links = Vec::new();
+
+        // Iterate over every string literal found in code (e.g. fetch('/api/user'))
+        for (src_file_id, literals) in &self.index.raw_literals {
+            for lit in literals {
+                // Clean quotes
+                let clean_lit = lit.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                
+                // Direct Match: frontend uses "/api/user" and we have that implicit route registered
+                if let Some(&target_file_id) = self.index.implicit_routes.get(clean_lit) {
+                    // Avoid self-referential links if literal appears in defining file (rare for routes)
+                    if *src_file_id != target_file_id {
+                        new_links.push((*src_file_id, target_file_id));
+                    }
+                }
+            }
+        }
+
+        // Create Dependencies
+        for (src, tgt) in new_links {
+            // Link File Dependency
+            let deps = self.index.file_dependencies.entry(src).or_default();
+            if !deps.contains(&tgt) {
+                deps.push(tgt);
+            }
+
+            // Link Module Symbols (so semantic search traverses it)
+            // We link the module symbol of the source file to the module symbol of the target file
+            let src_mod = self.index.symbols.values().find(|s| s.file_id == src && s.kind == "module").map(|s| s.id);
+            let tgt_mod = self.index.symbols.values().find(|s| s.file_id == tgt && s.kind == "module").map(|s| s.id);
+
+            if let (Some(s), Some(t)) = (src_mod, tgt_mod) {
+                let calls = self.index.resolved_calls.entry(s).or_default();
+                if !calls.contains(&t) {
+                    calls.push(t);
+                }
             }
         }
     }
