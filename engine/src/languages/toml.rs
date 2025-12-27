@@ -19,5 +19,6 @@ pub const TOML_CONFIG: LanguageConfig = LanguageConfig {
     query_config: "",
     query_vals: "",
     query_types: "",
-    query_decorators: ""
+    query_decorators: "",
+    di_decorators: &[]
 };

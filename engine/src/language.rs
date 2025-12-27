@@ -57,6 +57,7 @@ pub struct LanguageConfig {
     pub query_vals: &'static str, 
     pub query_types: &'static str,
     pub query_decorators: &'static str,
+    pub di_decorators: &'static [&'static str], // ["Injectable", "Service", "Component", "Bean"]
 }
 
 /// Collects all configurations from the sub-modules in the `languages/` folder.

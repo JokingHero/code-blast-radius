@@ -71,4 +71,5 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
     query_decorators: r#"
         (decorator) @decorator.name
     "#,
+    di_decorators: &["dataclass", "Component", "Service"], // Libraries like 'injector' use these
 };

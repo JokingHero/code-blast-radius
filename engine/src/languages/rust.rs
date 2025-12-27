@@ -45,4 +45,5 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
     query_decorators: r#"
         (attribute_item) @decorator.name
     "#,
+    di_decorators: &[]
 };

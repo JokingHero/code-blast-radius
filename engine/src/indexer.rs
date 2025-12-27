@@ -581,6 +581,7 @@ impl Indexer {
         self.resolve_type_sniffing();
         self.resolve_fingerprints();
         self.resolve_implicit_connections();
+        self.resolve_dependency_injection();
         self.resolve_function_calls_with_fallback();
         self.resolve_config_links();
         self.resolve_type_references();
@@ -1316,6 +1317,111 @@ impl Indexer {
                     for &pid in pids {
                         self.index.inheritance.entry(pid).or_default().push(cid);
                     }
+                }
+            }
+        }
+    }
+
+    fn resolve_dependency_injection(&mut self) {
+        // 1. Identify all "Provider" symbols (Classes annotated with @Service, etc.)
+        let mut interface_to_providers: HashMap<SymbolId, Vec<SymbolId>> = HashMap::new();
+        let mut name_to_providers: HashMap<String, Vec<SymbolId>> = HashMap::new();
+
+        // Optimization: Pre-compute FileID -> LanguageConfig map to avoid O(N^2) lookups
+        // This mirrors the config detection logic in scan()
+        let mut file_configs: HashMap<FileId, &LanguageConfig> = HashMap::new();
+        for file in self.index.files.values() {
+            let path = Path::new(&file.path);
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+            let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            
+            let config = self.configs
+                .get(ext)
+                .or_else(|| self.configs.get(filename))
+                .or_else(|| if filename.starts_with('.') { self.configs.get(&filename[1..]) } else { None });
+            
+            if let Some(c) = config {
+                file_configs.insert(file.id, c);
+            }
+        }
+
+        // Step 1: Immutable scan of symbols to find Providers
+        for sym in self.index.symbols.values() {
+            if sym.decorators.is_empty() { continue; }
+            
+            if let Some(config) = file_configs.get(&sym.file_id) {
+                let is_provider = sym.decorators.iter().any(|d| {
+                    let clean = d.trim_start_matches('@').split('(').next().unwrap_or("").trim();
+                    config.di_decorators.contains(&clean)
+                });
+
+                if is_provider {
+                    name_to_providers.entry(sym.name.clone()).or_default().push(sym.id);
+                    for (parent_id, children) in &self.index.inheritance {
+                        if children.contains(&sym.id) {
+                            interface_to_providers.entry(*parent_id).or_default().push(sym.id);
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut new_links: Vec<(SymbolId, SymbolId)> = Vec::new();
+
+        // Step 2: Collect Injection Points (Constructors and Fields)
+        // We gather all necessary data into a Vec to release the borrow on `self.index`
+        // Data tuple: (LinkSourceSymbolId, FileId, TypeNameString)
+        let mut injection_points: Vec<(SymbolId, FileId, String)> = Vec::new();
+
+        for (scope_id, var_types) in &self.index.local_variable_types {
+            if let Some(scope_sym) = self.index.symbols.get(scope_id) {
+                // Link the CLASS/MODULE to the dependency, not just the constructor method.
+                let link_source_id = if scope_sym.name == "constructor" || scope_sym.name == "__init__" {
+                    scope_sym.parent_id.unwrap_or(*scope_id)
+                } else {
+                    *scope_id
+                };
+
+                for type_name in var_types.values() {
+                    let clean_type_name = type_name.split('<').next().unwrap_or(type_name).trim().to_string();
+                    injection_points.push((link_source_id, scope_sym.file_id, clean_type_name));
+                }
+            }
+        }
+
+        // Step 3: Resolve Injection Points
+        // Now `self` is free to be mutated by `resolve_single_call`
+        for (link_source_id, file_id, clean_type_name) in injection_points {
+            let type_sym_id_opt = self.resolve_single_call(file_id, &clean_type_name);
+
+            if let Some(type_sym_id) = type_sym_id_opt {
+                // CASE A: Interface Injection
+                if let Some(providers) = interface_to_providers.get(&type_sym_id) {
+                    for &provider_id in providers {
+                        new_links.push((link_source_id, provider_id));
+                    }
+                } 
+                // CASE B: Concrete Class Injection
+                else if let Some(providers_by_name) = name_to_providers.get(&clean_type_name) {
+                    if providers_by_name.contains(&type_sym_id) {
+                        new_links.push((link_source_id, type_sym_id));
+                    }
+                }
+            } 
+            // Fallback: If we couldn't resolve the Symbol ID of the type
+            else if let Some(providers) = name_to_providers.get(&clean_type_name) {
+                for &provider_id in providers {
+                    new_links.push((link_source_id, provider_id));
+                }
+            }
+        }
+
+        // Step 4: Commit Links
+        for (src, target) in new_links {
+            if src != target {
+                let calls = self.index.resolved_calls.entry(src).or_default();
+                if !calls.contains(&target) {
+                    calls.push(target);
                 }
             }
         }

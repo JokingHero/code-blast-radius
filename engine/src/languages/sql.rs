@@ -26,5 +26,6 @@ name: (identifier) @function.name
     name: (identifier) @type.ref
     )
     "#,
-    query_decorators: ""
+    query_decorators: "",
+    di_decorators: &[]
 };

@@ -28,7 +28,6 @@ pub const JAVA_CONFIG: LanguageConfig = LanguageConfig {
             ] @function.definition
         )
     "#,
-    // UPDATED: Basic import capture
     query_imports: r#"
         (import_declaration
             (scoped_identifier) @import.source
@@ -68,4 +67,5 @@ pub const JAVA_CONFIG: LanguageConfig = LanguageConfig {
             arguments: (_)?
         )
     "#,
+    di_decorators: &["Service", "Component", "Repository", "Controller", "Bean", "Configuration"],
 };
