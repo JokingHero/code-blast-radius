@@ -109,4 +109,7 @@ pub struct WorkspaceIndex {
     // Mapping of Route String -> FileId
     // e.g., "/api/login" -> FileId(5) (which points to pages/api/login.ts)
     pub implicit_routes: HashMap<String, FileId>, 
+
+    // Store raw alias mappings, e.g., "@/*" -> "src/*"
+    pub import_mappings: HashMap<String, String>, 
 }

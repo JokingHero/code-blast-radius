@@ -1,9 +1,9 @@
+use crate::manifest::scan_manifests;
 use crate::schema::{ WorkspaceIndex, FileNode, SymbolNode, SymbolId, FileId };
 use crate::analyzer::analyze_source;
 use crate::language::{ get_language_configs, LanguageConfig };
-use crate::manifest::scan_manifests;
 use crate::topic::matches_topic;
-use std::path::{ Path, PathBuf };
+use std::path::{ Path };
 use std::fs::{ self, File };
 use std::io::Write;
 use std::collections::{ HashMap, HashSet };
@@ -163,11 +163,15 @@ impl Indexer {
 
     pub fn scan(&mut self, root: &Path) {
         let root_abs = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let root_string = root_abs.to_string_lossy().to_string();
+        if !self.index.roots.contains(&root_string) {
+            self.index.roots.push(root_string);
+        }
+
         let mut seen_paths = HashSet::new();
 
-        // 1. Configure the walker to respect gitignore
         let walker = WalkBuilder::new(&root_abs)
-            .hidden(false) // Still scan hidden files like .env
+            .hidden(false) 
             .git_ignore(true)
             .build();
 
@@ -179,10 +183,12 @@ impl Indexer {
                     }
                     let path = entry.path();
 
-                    // 2. Opportunistic Manifest Scanning
-                    let new_externals = scan_manifests(path);
-                    if !new_externals.is_empty() {
-                        self.index.external_packages.extend(new_externals);
+                    let manifest_res = scan_manifests(path);
+                    if !manifest_res.externals.is_empty() {
+                        self.index.external_packages.extend(manifest_res.externals);
+                    }
+                    if !manifest_res.aliases.is_empty() {
+                        self.index.import_mappings.extend(manifest_res.aliases);
                     }
 
                     let ext = path
@@ -194,7 +200,6 @@ impl Indexer {
                         .and_then(|s| s.to_str())
                         .unwrap_or("");
 
-                    // Logic to handle hidden files like .env correctly
                     let config = self.configs
                         .get(ext)
                         .or_else(|| self.configs.get(filename))
@@ -243,7 +248,6 @@ impl Indexer {
             }
         }
 
-        // Cleanup removed files
         let to_remove: Vec<String> = self.index.files
             .keys()
             .filter(|path_key| !seen_paths.contains(*path_key))
@@ -254,7 +258,7 @@ impl Indexer {
             self.remove_file(&path_key);
         }
     }
-
+    
     fn is_test_path(path: &Path) -> bool {
         let path_str = path.to_string_lossy();
         let normalized = path_str.replace('\\', "/").to_lowercase();
@@ -1051,24 +1055,113 @@ impl Indexer {
     fn resolve_import_path(&self, from_id: FileId, source: &str) -> Option<FileId> {
         let from_path_str = &self.index.files.values().find(|f| f.id == from_id)?.path;
         let from_path = Path::new(from_path_str);
-        let parent = from_path.parent()?;
+        
+        // 1. Relative Imports (Standard)
+        if source.starts_with("./") || source.starts_with("../") {
+            let parent = from_path.parent()?;
+            let base = parent.join(source);
+            return self.check_path_variants(&base);
+        }
 
-        let base = parent.join(source);
-        if let Some(id) = self.index.files.get(&Self::to_index_path(&base)).map(|n| n.id) {
+        // 2. Rust Crate Alias
+        if source.starts_with("crate::") {
+            // "crate::utils::helper" -> "src/utils/helper.rs"
+            // This assumes standard cargo layout. 
+            let relative = source.replace("crate::", "src/").replace("::", "/");
+            // Rust paths are relative to project root, not current file
+            // We need to find where "src" starts relative to the workspace root
+            // For simplicity in this tool, let's treat it as a workspace-relative path
+            return self.check_path_variants(Path::new(&relative));
+        }
+
+        // 3. TSConfig / JSConfig Aliases
+        // Iterate over mapped aliases (e.g., "@/" -> "src/")
+        for (alias_key, alias_target) in &self.index.import_mappings {
+            if source.starts_with(alias_key) {
+                let replaced = source.replace(alias_key, alias_target);
+                // These are usually relative to the project root
+                if let Some(id) = self.check_path_variants(Path::new(&replaced)) {
+                    return Some(id);
+                }
+            }
+        }
+
+        // 4. Absolute / Root-Relative Imports (Python/Go/Generic)
+        // Try treating the import as a path from the workspace root
+        if let Some(id) = self.check_path_variants(Path::new(source)) {
             return Some(id);
         }
 
-        let exts = ["ts", "js", "tsx", "rs", "py", "json", "sh"];
-        let check = |p: PathBuf| self.index.files.get(&Self::to_index_path(&p)).map(|n| n.id);
+        // 5. "Fuzzy" Suffix Match (The LLM Context Saver)
+        // If we still haven't found it, and it's not a known external package...
+        // Check if there is exactly one file in the index that ends with this path.
+        // e.g. import "utils/math" -> matches "src/app/utils/math.ts"
+        if !self.index.external_packages.contains(&source.split('/').next().unwrap_or("").to_string()) {
+            let matches: Vec<FileId> = self.index.files.values()
+                .filter(|f| {
+                    // Check if file path ends with the source (ignoring extensions for now)
+                    let p = f.path.replace('\\', "/");
+                    p.contains(source) && 
+                    (p.ends_with(&format!("/{}.ts", source)) || 
+                     p.ends_with(&format!("/{}.js", source)) ||
+                     p.ends_with(&format!("/{}.rs", source)) ||
+                     p.ends_with(&format!("/{}.py", source)) ||
+                     p.ends_with(&format!("/{}", source))) // exact match
+                })
+                .map(|f| f.id)
+                .collect();
 
-        for e in exts {
-            if let Some(id) = check(base.with_extension(e)) {
-                return Some(id);
-            }
-            if let Some(id) = check(base.join(format!("index.{}", e))) {
-                return Some(id);
+            // Only link if unambiguous
+            if matches.len() == 1 {
+                return Some(matches[0]);
             }
         }
+
+        None
+    }
+
+    // Helper to try extensions
+    fn check_path_variants(&self, base: &Path) -> Option<FileId> {
+        let exts = ["ts", "js", "tsx", "jsx", "rs", "py", "json", "sh", "java"];
+        
+        // Helper to check a specific path
+        let check = |candidate: &Path| -> Option<FileId> {
+            let key = Self::to_index_path(candidate);
+            if let Some(node) = self.index.files.get(&key) {
+                return Some(node.id);
+            }
+            None
+        };
+
+        // Prepare candidates
+        let mut candidates = Vec::new();
+        candidates.push(base.to_path_buf());
+        
+        // If the base path looks relative (e.g. "src/utils/math"), try resolving it 
+        // against all indexed root folders.
+        if base.is_relative() {
+            for root in &self.index.roots {
+                candidates.push(Path::new(root).join(base));
+            }
+        }
+
+        for path in candidates {
+            // 1. Exact
+            if let Some(id) = check(&path) { return Some(id); }
+            
+            // 2. Extensions
+            for e in &exts {
+                if let Some(id) = check(&path.with_extension(e)) { return Some(id); }
+            }
+
+            // 3. Index Files (and Rust mod.rs)
+            for e in &exts {
+                if let Some(id) = check(&path.join(format!("index.{}", e))) { return Some(id); }
+            }
+            // Rust specific mod.rs check
+            if let Some(id) = check(&path.join("mod.rs")) { return Some(id); }
+        }
+
         None
     }
 
