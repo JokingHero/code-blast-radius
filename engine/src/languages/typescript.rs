@@ -243,4 +243,5 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
         )
     "#,
     di_decorators: &["Injectable", "Component", "Directive", "Pipe", "Service"],
+    magic_methods: &[]
 };

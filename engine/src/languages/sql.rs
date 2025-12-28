@@ -28,5 +28,6 @@ name: (identifier) @function.name
     "#,
     query_decorators: "",
     query_actions: "",
-    di_decorators: &[]
+    di_decorators: &[],
+    magic_methods: &[]
 };

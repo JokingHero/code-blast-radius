@@ -79,5 +79,6 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
             )
         )
     "#,
-    di_decorators: &[]
+    di_decorators: &[],
+    magic_methods: &[]
 };

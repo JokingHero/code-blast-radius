@@ -121,4 +121,5 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
         )
     "#,
     di_decorators: &["dataclass", "Component", "Service"],
+    magic_methods: &["__getattr__", "__getattribute__"], 
 };

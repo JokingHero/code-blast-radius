@@ -27,5 +27,6 @@ pub const PRISMA_CONFIG: LanguageConfig = LanguageConfig {
     "#,
     query_decorators: "",
     query_actions: "",
-    di_decorators: &[]
+    di_decorators: &[],
+    magic_methods: &[]
 };

@@ -15,5 +15,6 @@ pub const R_CONFIG: LanguageConfig = LanguageConfig {
     query_types: "",
     query_decorators: "",
     query_actions: "",
-    di_decorators: &[]
+    di_decorators: &[],
+    magic_methods: &[]
 };

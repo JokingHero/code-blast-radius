@@ -592,6 +592,7 @@ impl Indexer {
         self.resolve_shared_literals();
         self.resolve_pubsub_wildcards();
         self.resolve_type_sniffing();
+        self.resolve_magic_proxies(); 
         self.resolve_fingerprints();
         self.resolve_implicit_connections();
         self.resolve_dependency_injection();
@@ -1622,6 +1623,115 @@ impl Indexer {
             let calls = self.index.resolved_calls.entry(src).or_default();
             if !calls.contains(&tgt) {
                 calls.push(tgt);
+            }
+        }
+    }
+
+    fn resolve_magic_proxies(&mut self) {
+        let mut new_links = Vec::new();
+
+        // Iterate over every function that calls methods on objects (fingerprints)
+        // caller_id: The function containing the code
+        // receiver_map: "user" -> ["getName", "getDynamicProp"]
+        for (&caller_id, receiver_map) in &self.index.fingerprints {
+            
+            // 1. Try to find the Class ID for every receiver variable
+            for (receiver_var, methods) in receiver_map {
+                let mut type_class_id = None;
+                
+                // Reuse the type sniffing logic to find the variable's type
+                // Walk up the scope chain
+                let mut curr_scope = Some(caller_id);
+                while let Some(sid) = curr_scope {
+                    if let Some(vars) = self.index.local_variable_types.get(&sid) {
+                        if let Some(type_name) = vars.get(receiver_var) {
+                            // Resolve "User" string to SymbolId
+                             let clean = type_name.split('<').next().unwrap().trim();
+                             if let Some(ids) = self.index.symbol_map.get(clean) {
+                                 // Naive: take the first matching class/container
+                                 type_class_id = ids.iter().find(|&&id| {
+                                     let s = &self.index.symbols[&id];
+                                     s.kind == "container" || s.kind == "class"
+                                 }).cloned();
+                             }
+                            break;
+                        }
+                    }
+                    curr_scope = self.index.symbols.get(&sid).and_then(|s| s.parent_id);
+                }
+
+                // If we found the Class this variable belongs to...
+                if let Some(class_id) = type_class_id {
+                    // Check usage of Magic Methods
+                    self.link_magic_methods(caller_id, class_id, methods, &mut new_links);
+                }
+            }
+        }
+
+        // Commit the links
+        for (src, tgt) in new_links {
+            let calls = self.index.resolved_calls.entry(src).or_default();
+            if !calls.contains(&tgt) {
+                calls.push(tgt);
+            }
+        }
+    }
+
+    fn link_magic_methods(
+        &self, 
+        caller_id: SymbolId, 
+        class_id: SymbolId, 
+        called_methods: &[String], 
+        links: &mut Vec<(SymbolId, SymbolId)>
+    ) {
+        // 1. Get the language config for the file defining the Class
+        // We need to know if we are looking for "__getattr__" (Python) or "method_missing" (Ruby)
+        let file_id = self.index.symbols[&class_id].file_id;
+        let file_path = &self.index.files.values().find(|f| f.id == file_id).unwrap().path;
+        let path_obj = Path::new(file_path);
+        
+        // Quick config lookup (ideally cached, but this is fast enough)
+        let ext = path_obj.extension().and_then(|s| s.to_str()).unwrap_or("");
+        let config = self.configs.get(ext);
+
+        if let Some(config) = config {
+            if config.magic_methods.is_empty() { return; }
+
+            // 2. Identify explicit methods on the class to avoid false positives
+            // If the class actually HAS "do_dynamic_thing", we don't link __getattr__
+            let explicit_methods = self.index.container_methods.get(&class_id);
+
+            for method_name in called_methods {
+                let is_explicit = explicit_methods.map_or(false, |s| s.contains(method_name));
+                
+                // If the method is NOT explicitly defined on the class...
+                if !is_explicit {
+                    // 3. Look for a definition of a magic method on this class
+                    if let Some(class_members) = self.index.container_methods.get(&class_id) {
+                        for &magic_name in config.magic_methods {
+                            if class_members.contains(magic_name) {
+                                // Find the specific symbol ID for the magic method
+                                if let Some(candidates) = self.index.symbol_map.get(magic_name) {
+                                    for &magic_id in candidates {
+                                        // Ensure this magic method belongs to the class we are looking at
+                                        if self.index.symbols[&magic_id].parent_id == Some(class_id) {
+                                            links.push((caller_id, magic_id));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 4. (Optional but recommended) Walk up inheritance tree
+                    // If the Parent Class has __getattr__, we should link there too.
+                    if let Some(parents) = self.index.inheritance.get(&class_id) {
+                         for &parent_id in parents {
+                             // Recursive check (simplified depth-1 for brevity, ideally recursive)
+                             self.link_magic_methods(caller_id, parent_id, &[method_name.to_string()], links);
+                         }
+                    }
+                }
             }
         }
     }
