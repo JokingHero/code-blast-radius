@@ -2,7 +2,7 @@ use crate::{language::{LanguageConfig, SupportedLanguage}, languages::typescript
 
 pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
     lang_enum: SupportedLanguage::JavaScript,
-    file_extensions: &["js", "jsx", "mjs", "cjs"],
+    file_extensions: &["js", "jsx", "mjs", "cjs", "vue"],
     query_defs: r#"
         [
           (function_declaration name: (identifier) @function.name) @function.definition

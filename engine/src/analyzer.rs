@@ -496,11 +496,16 @@ pub fn analyze_source(
         
         while let Some(am) = a_matches.next() {
             for cap in am.captures {
-                let text = cap.node.utf8_text(code_bytes)
-                    .unwrap_or("")
-                    .trim_matches(|c| c == '"' || c == '\'' || c == '`')
-                    .to_string();
-                
+                let raw_text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();                
+                // If the text is a variable name (like LOGIN_CONST), try to resolve its value.
+                // If not found, fall back to the raw text (it might be a literal).
+                let resolved_text = if let Some(val) = local_constants.get(&raw_text) {
+                    val.clone()
+                } else {
+                    raw_text
+                };
+
+                let text = resolved_text.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_string();                
                 let capture_name = q.capture_names()[cap.index as usize];
                 let range = cap.node.byte_range();
 

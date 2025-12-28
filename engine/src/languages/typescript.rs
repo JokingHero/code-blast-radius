@@ -193,50 +193,52 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
     query_actions: r#"
         ;; --- 1. Redux / Object Pattern ---
         (call_expression
-            function: (identifier) @fn (#match? @fn "^(dispatch|put|emit)$")
+            function: (identifier) @fn (#match? @fn "^(dispatch|put|emit|commit)$")
             arguments: (arguments 
                 (object 
                     (pair 
                         key: (property_identifier) @k (#eq? @k "type") 
-                        value: [(string) (template_string)] @action.dispatch
+                        value: [(string) (template_string) (identifier)] @action.dispatch
                     )
                 )
             )
         )
-        (switch_case value: [(string) (template_string)] @action.handle)
-        (pair key: [(string) (template_string)] @action.handle value: [(arrow_function) (function_expression)])
+        ;; UPDATED: Allow identifiers in switch cases
+        (switch_case value: [(string) (template_string) (identifier)] @action.handle)
+        ;; UPDATED: Allow identifiers in object keys (computed property names or simple keys)
+        (pair key: [(string) (template_string) (identifier)] @action.handle value: [(arrow_function) (function_expression)])
 
         ;; --- 2. Event Emitter Patterns ---
         
-        ;; Case A: Direct Call -> emit('event')
+        ;; Case A: Direct Call -> emit('event') OR emit(VARIABLE)
         (call_expression
-            function: (identifier) @fn (#match? @fn "^(emit|dispatch|trigger|pub|publish)$")
+            function: (identifier) @fn (#match? @fn "^(emit|dispatch|trigger|pub|publish|commit)$")
             arguments: (arguments 
-                [(string) (template_string)] @action.dispatch
+                [(string) (template_string) (identifier)] @action.dispatch
             )
         )
 
-        ;; Case B: Method Call -> app.emit('event')
+        ;; Case B: Method Call -> app.emit('event') OR app.emit(VARIABLE)
         (call_expression
-            function: (member_expression property: (property_identifier) @fn (#match? @fn "^(emit|dispatch|trigger|pub|publish)$"))
+            function: (member_expression property: (property_identifier) @fn (#match? @fn "^(emit|dispatch|trigger|pub|publish|commit)$"))
             arguments: (arguments 
-                [(string) (template_string)] @action.dispatch
+                [(string) (template_string) (identifier)] @action.dispatch
             )
         )
 
-        ;; Case C: Direct Listener -> on('event')
+        ;; Case C: Direct Listener -> on('event') OR on(VARIABLE)
         (call_expression
             function: (identifier) @fn (#match? @fn "^(on|once|subscribe|sub|listen)$")
             arguments: (arguments 
-                [(string) (template_string)] @action.handle
+                [(string) (template_string) (identifier)] @action.handle
             )
         )
 
-        ;; Case D: Method Listener -> app.on('event')
+        ;; Case D: Method Listener -> app.on('event') OR app.on(VARIABLE)
         (call_expression
             function: (member_expression property: (property_identifier) @fn (#match? @fn "^(on|once|subscribe|sub|listen)$"))
             arguments: (arguments 
-                [(string) (template_string)] @action.handle
+                [(string) (template_string) (identifier)] @action.handle
             )
         )
     "#,

@@ -98,7 +98,7 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
         (call
             function: (attribute attribute: (identifier) @fn (#match? @fn "^(send|emit|dispatch|publish)$"))
             arguments: (argument_list 
-                (string) @action.dispatch
+                [(string) (identifier)] @action.dispatch
             )
         )
 
@@ -106,18 +106,17 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
         (decorator
             (call
                 function: (identifier) @fn (#match? @fn "^(receiver|on|subscribe)$")
-                arguments: (argument_list (string) @action.handle)
+                arguments: (argument_list [(string) (identifier)] @action.handle)
             )
         )
         
         ;; --- Handlers (Comparisons) ---
-        ;; We capture strings involved in direct comparisons with identifiers
         (comparison_operator
             (identifier)
-            (string) @action.handle
+            [(string) (identifier)] @action.handle
         )
         (comparison_operator
-            (string) @action.handle
+            [(string) (identifier)] @action.handle
             (identifier)
         )
     "#,
