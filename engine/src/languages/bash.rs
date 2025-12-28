@@ -20,5 +20,6 @@ pub const BASH_CONFIG: LanguageConfig = LanguageConfig {
     "#,
     query_types: "",
     query_decorators: "",
+    query_actions: "",
     di_decorators: &[]
 };

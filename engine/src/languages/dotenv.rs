@@ -21,5 +21,6 @@ pub const DOTENV_CONFIG: LanguageConfig = LanguageConfig {
     "#,
     query_types: "",
     query_decorators: "",
+    query_actions: "",
     di_decorators: &[]
 };

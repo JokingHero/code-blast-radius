@@ -93,5 +93,33 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
     query_decorators: r#"
         (decorator) @decorator.name
     "#,
+    query_actions: r#"
+        ;; --- Dispatchers ---
+        (call
+            function: (attribute attribute: (identifier) @fn (#match? @fn "^(send|emit|dispatch|publish)$"))
+            arguments: (argument_list 
+                (string) @action.dispatch
+            )
+        )
+
+        ;; --- Handlers (Decorators) ---
+        (decorator
+            (call
+                function: (identifier) @fn (#match? @fn "^(receiver|on|subscribe)$")
+                arguments: (argument_list (string) @action.handle)
+            )
+        )
+        
+        ;; --- Handlers (Comparisons) ---
+        ;; We capture strings involved in direct comparisons with identifiers
+        (comparison_operator
+            (identifier)
+            (string) @action.handle
+        )
+        (comparison_operator
+            (string) @action.handle
+            (identifier)
+        )
+    "#,
     di_decorators: &["dataclass", "Component", "Service"],
 };

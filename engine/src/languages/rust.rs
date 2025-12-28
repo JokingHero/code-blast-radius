@@ -53,5 +53,31 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
     query_decorators: r#"
         (attribute_item) @decorator.name
     "#,
+    query_actions: r#"
+        ;; --- Dispatchers ---
+        (call_expression
+            function: (field_expression field: (field_identifier) @fn (#match? @fn "^(emit|dispatch|publish|send)$"))
+            arguments: (arguments 
+                (string_literal) @action.dispatch
+            )
+        )
+
+        ;; --- Handlers (Match Arms) ---
+        ;; Match standard literal: "EVENT" => ...
+        (match_arm
+            pattern: (match_pattern
+                (string_literal) @action.handle
+            )
+        )
+        
+        ;; Match OR pattern: "A" | "B" => ...
+        (match_arm
+            pattern: (match_pattern
+                (or_pattern
+                    (string_literal) @action.handle
+                )
+            )
+        )
+    "#,
     di_decorators: &[]
 };

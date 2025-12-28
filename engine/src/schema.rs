@@ -112,4 +112,10 @@ pub struct WorkspaceIndex {
 
     // Store raw alias mappings, e.g., "@/*" -> "src/*"
     pub import_mappings: HashMap<String, String>, 
+
+     // Mapping: SymbolId (Function) -> List of Action Strings it dispatches
+    pub raw_action_dispatches: HashMap<SymbolId, Vec<String>>,
+    
+    // Mapping: SymbolId (Function/Reducer) -> List of Action Strings it handles
+    pub raw_action_handlers: HashMap<SymbolId, Vec<String>>,
 }

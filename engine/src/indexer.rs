@@ -474,6 +474,13 @@ impl Indexer {
                     if !func.decorators.is_empty() {
                         self.index.raw_decorators.insert(symbol_id, func.decorators);
                     }
+
+                    if !func.dispatched_actions.is_empty() {
+                        self.index.raw_action_dispatches.insert(symbol_id, func.dispatched_actions);
+                    }
+                    if !func.handled_actions.is_empty() {
+                        self.index.raw_action_handlers.insert(symbol_id, func.handled_actions);
+                    }
                 }
 
                 // Config Data Linking
@@ -593,6 +600,7 @@ impl Indexer {
         self.resolve_type_references();
         self.resolve_database_references();
         self.resolve_file_dependencies();
+        self.resolve_state_management();
     }
 
     fn resolve_external_imports(&mut self) {
@@ -1579,6 +1587,41 @@ impl Indexer {
                 if !calls.contains(&target) {
                     calls.push(target);
                 }
+            }
+        }
+    }
+
+    fn resolve_state_management(&mut self) {
+        // 1. Build a Reverse Index: ActionString -> Vec<SymbolId (Handler)>
+        let mut action_map: HashMap<String, Vec<SymbolId>> = HashMap::new();
+        
+        for (handler_id, actions) in &self.index.raw_action_handlers {
+            for action in actions {
+                action_map.entry(action.clone()).or_default().push(*handler_id);
+            }
+        }
+
+        // 2. Iterate Dispatchers and Link
+        let mut new_links = Vec::new();
+        
+        for (dispatch_id, actions) in &self.index.raw_action_dispatches {
+            for action in actions {
+                if let Some(handler_ids) = action_map.get(action) {
+                    for &target_id in handler_ids {
+                        // Prevent linking to self (rare but possible in tests)
+                        if *dispatch_id != target_id {
+                            new_links.push((*dispatch_id, target_id));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Commit to Graph (reuses existing call graph)
+        for (src, tgt) in new_links {
+            let calls = self.index.resolved_calls.entry(src).or_default();
+            if !calls.contains(&tgt) {
+                calls.push(tgt);
             }
         }
     }

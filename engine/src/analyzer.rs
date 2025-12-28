@@ -15,7 +15,9 @@ pub struct FunctionInfo {
     pub documentation: Option<String>,
     pub calls: Vec<String>, 
     pub type_refs: Vec<String>, 
-    pub decorators: Vec<String>, // <--- NEW FIELD
+    pub decorators: Vec<String>,
+    pub dispatched_actions: Vec<String>, 
+    pub handled_actions: Vec<String>,
     pub fingerprints: HashMap<String, Vec<String>>,
     pub return_type: Option<String>, 
     pub local_types: HashMap<String, String>, 
@@ -257,12 +259,14 @@ pub fn analyze_source(
         documentation: None, 
         calls: Vec::new(),
         type_refs: Vec::new(),
-        decorators: Vec::new(), // NEW
+        decorators: Vec::new(),
         fingerprints: HashMap::new(),
         return_type: None,
         local_types: HashMap::new(),
         local_assigns: HashMap::new(),
         config_keys: Vec::new(),
+        dispatched_actions: Vec::new(),
+        handled_actions: Vec::new(),
     };
 
     // 6. Extract Definitions
@@ -320,12 +324,14 @@ pub fn analyze_source(
                 documentation: None,
                 calls: Vec::new(),
                 type_refs: Vec::new(),
-                decorators: Vec::new(), // NEW
+                decorators: Vec::new(),
                 fingerprints: HashMap::new(),
                 return_type,
                 local_types: HashMap::new(),
                 local_assigns: HashMap::new(),
                 config_keys: Vec::new(),
+                dispatched_actions: Vec::new(),
+                handled_actions: Vec::new(),
             });
         } else if let Some(vn) = v_name {
             variable_hints.push((match_.captures[0].node.byte_range(), vn, v_type, v_assign));
@@ -479,15 +485,71 @@ pub fn analyze_source(
         }
     }
 
+    // 9.6 Extract State Actions (Redux/Context)
+    let actions_query = if !config.query_actions.is_empty() {
+        Some(Query::new(&language, config.query_actions).unwrap())
+    } else { None };
+
+    if let Some(ref q) = actions_query {
+        let mut a_cursor = QueryCursor::new();
+        let mut a_matches = a_cursor.matches(q, root_node, code_bytes);
+        
+        while let Some(am) = a_matches.next() {
+            for cap in am.captures {
+                let text = cap.node.utf8_text(code_bytes)
+                    .unwrap_or("")
+                    .trim_matches(|c| c == '"' || c == '\'' || c == '`')
+                    .to_string();
+                
+                let capture_name = q.capture_names()[cap.index as usize];
+                let range = cap.node.byte_range();
+
+                if let Some(idx) = get_owner_index(range.start, range.end, &functions) {
+                    if capture_name == "action.dispatch" {
+                        functions[idx].dispatched_actions.push(text);
+                    } else if capture_name == "action.handle" {
+                        functions[idx].handled_actions.push(text);
+                    }
+                } else {
+                    // If strict containment fails, check for Proximity (useful for Python decorators)
+                    // We only apply this to 'action.handle', as dispatch usually happens inside code blocks.
+                    let mut found_neighbor = false;
+                    
+                    if capture_name == "action.handle" {
+                        for func in &mut functions {
+                            // If function starts after the action, and is close (e.g. < 200 bytes)
+                            if func.range_start > range.end && (func.range_start - range.end) < 200 {
+                                func.handled_actions.push(text.clone());
+                                found_neighbor = true;
+                                break; // Attach to nearest only
+                            }
+                        }
+                    }
+
+                    if !found_neighbor {
+                        // Fallback to module scope
+                        if capture_name == "action.dispatch" {
+                            module_info.dispatched_actions.push(text);
+                        } else if capture_name == "action.handle" {
+                            module_info.handled_actions.push(text);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Deduplicate logic
     for func in &mut functions {
         func.config_keys.sort(); func.config_keys.dedup();
         func.type_refs.sort(); func.type_refs.dedup();
-        func.decorators.sort(); func.decorators.dedup(); // NEW
+        func.decorators.sort(); func.decorators.dedup();
+        func.dispatched_actions.sort(); func.dispatched_actions.dedup();
+        func.handled_actions.sort(); func.handled_actions.dedup();
     }
     module_info.config_keys.sort(); module_info.config_keys.dedup();
     module_info.type_refs.sort(); module_info.type_refs.dedup();
-    module_info.decorators.sort(); module_info.decorators.dedup(); // NEW
+    module_info.decorators.sort(); module_info.decorators.dedup();
 
     // 10. Extract Docs (Only for Defined Functions)
     let mut d_cursor = QueryCursor::new();

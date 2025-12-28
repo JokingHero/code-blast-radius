@@ -6,6 +6,7 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
     query_defs: r#"
         [
           (function_declaration name: (identifier) @function.name) @function.definition
+          (generator_function_declaration name: (identifier) @function.name) @function.definition
           (method_definition name: (property_identifier) @function.name) @function.definition
           (class_declaration name: (identifier) @function.name) @function.definition
           ((variable_declarator name: (identifier) @function.name value: [(arrow_function) (function_expression)]) @function.definition)
@@ -16,7 +17,13 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
       (
         (comment)+ @function.docs
         .
-        [ (function_declaration) (method_definition) (export_statement (variable_declaration)) (class_declaration) ] @function.definition
+        [ 
+            (function_declaration) 
+            (generator_function_declaration)
+            (method_definition) 
+            (export_statement (variable_declaration)) 
+            (class_declaration) 
+        ] @function.definition
       )
     "#,
     query_imports: TYPESCRIPT_CONFIG.query_imports,
@@ -37,5 +44,6 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
     "#,
     query_types: "",
     query_decorators: "",
+    query_actions: TYPESCRIPT_CONFIG.query_actions,
     di_decorators: &[]
 };

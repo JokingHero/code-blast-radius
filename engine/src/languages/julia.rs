@@ -14,5 +14,6 @@ pub const JULIA_CONFIG: LanguageConfig = LanguageConfig {
     query_vals: "",
     query_types: "",
     query_decorators: "",
+    query_actions: "",
     di_decorators: &[]
 };

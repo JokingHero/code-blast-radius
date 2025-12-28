@@ -67,5 +67,6 @@ pub const JAVA_CONFIG: LanguageConfig = LanguageConfig {
             arguments: (_)?
         )
     "#,
+    query_actions: "",
     di_decorators: &["Service", "Component", "Repository", "Controller", "Bean", "Configuration"],
 };

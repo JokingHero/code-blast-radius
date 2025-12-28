@@ -115,7 +115,6 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
           )
         ]
     "#,
-    // --- UPDATED SECTION END ---
     query_exports: r#"
         [
             (export_statement
@@ -189,6 +188,56 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
                 (call_expression function: (identifier) @decorator.name)
                 (identifier) @decorator.name
             ]
+        )
+    "#,
+    query_actions: r#"
+        ;; --- 1. Redux / Object Pattern ---
+        (call_expression
+            function: (identifier) @fn (#match? @fn "^(dispatch|put|emit)$")
+            arguments: (arguments 
+                (object 
+                    (pair 
+                        key: (property_identifier) @k (#eq? @k "type") 
+                        value: [(string) (template_string)] @action.dispatch
+                    )
+                )
+            )
+        )
+        (switch_case value: [(string) (template_string)] @action.handle)
+        (pair key: [(string) (template_string)] @action.handle value: [(arrow_function) (function_expression)])
+
+        ;; --- 2. Event Emitter Patterns ---
+        
+        ;; Case A: Direct Call -> emit('event')
+        (call_expression
+            function: (identifier) @fn (#match? @fn "^(emit|dispatch|trigger|pub|publish)$")
+            arguments: (arguments 
+                [(string) (template_string)] @action.dispatch
+            )
+        )
+
+        ;; Case B: Method Call -> app.emit('event')
+        (call_expression
+            function: (member_expression property: (property_identifier) @fn (#match? @fn "^(emit|dispatch|trigger|pub|publish)$"))
+            arguments: (arguments 
+                [(string) (template_string)] @action.dispatch
+            )
+        )
+
+        ;; Case C: Direct Listener -> on('event')
+        (call_expression
+            function: (identifier) @fn (#match? @fn "^(on|once|subscribe|sub|listen)$")
+            arguments: (arguments 
+                [(string) (template_string)] @action.handle
+            )
+        )
+
+        ;; Case D: Method Listener -> app.on('event')
+        (call_expression
+            function: (member_expression property: (property_identifier) @fn (#match? @fn "^(on|once|subscribe|sub|listen)$"))
+            arguments: (arguments 
+                [(string) (template_string)] @action.handle
+            )
         )
     "#,
     di_decorators: &["Injectable", "Component", "Directive", "Pipe", "Service"],
