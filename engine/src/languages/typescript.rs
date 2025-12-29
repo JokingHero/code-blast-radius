@@ -4,7 +4,7 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
     lang_enum: SupportedLanguage::TypeScript,
     file_extensions: &["ts", "tsx"],
     query_defs: r#"
-        [
+          ;; --- Standard Definitions ---
           (function_declaration 
             name: (identifier) @function.name 
             return_type: (type_annotation)? @function.return_type 
@@ -23,17 +23,63 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
           (class_declaration name: (type_identifier) @function.name) @function.definition
           (interface_declaration name: [(type_identifier) (identifier)] @function.name) @function.definition
 
+          ;; --- Arrow Functions ---
           ((variable_declarator 
             name: (identifier) @function.name 
             type: (type_annotation)? @variable.type 
             value: [(arrow_function) (function_expression)]
           ) @function.definition)
 
+          ;; --- Factory Patterns ---
+          
+          ;; 1. Direct Call: const useStore = create(...)
+          (variable_declarator
+            name: (identifier) @function.name
+            value: (call_expression
+                function: (identifier) @fn_name
+                (#match? @fn_name "^(create|make|define|build|atom|selector)$")
+            )
+          ) @function.definition
+
+          ;; 2. Member Factory: const User = mongoose.model(...)
+          (variable_declarator
+            name: (identifier) @function.name
+            value: (call_expression
+                function: (member_expression
+                    object: (_)
+                    property: [(property_identifier) (identifier)] @fn_name
+                    (#match? @fn_name "^(create|make|define|model|component|router|styled)$")
+                )
+            )
+          ) @function.definition
+
+          ;; 3. Styled Component (Object Access): const Title = styled.h1`...`
+          (variable_declarator
+            name: (identifier) @function.name
+            value: (call_expression
+                function: (member_expression
+                    object: (identifier) @obj_name
+                    (#eq? @obj_name "styled")
+                )
+            )
+          ) @function.definition
+
+          ;; 4. Styled Component (Curried Call): const Box = styled('div')(...)
+          (variable_declarator
+            name: (identifier) @function.name
+            value: (call_expression
+                function: (call_expression
+                    function: (identifier) @inner_fn
+                    (#eq? @inner_fn "styled")
+                )
+            )
+          ) @function.definition
+
+          ;; --- Variables Fallback ---
           (variable_declarator
             name: (identifier) @variable.name
             type: (type_annotation)? @variable.type
           )
-        ]
     "#,
     query_calls: r#"
         [
@@ -65,6 +111,7 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
           (export_statement (variable_declaration)) 
           (class_declaration) 
           (interface_declaration) 
+          (variable_declaration)
         ] @function.definition
       )
     "#,
@@ -88,27 +135,21 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
           )
           (import_statement source: (string) @import.source)
 
-          ;; --- Dynamic Import & Require Support ---
-          
-          ;; import("literal")
           (call_expression
             function: (import)
             arguments: (arguments [(string) (template_string)] @import.source)
           )
           
-          ;; import(variable) -> @import.dynamic
           (call_expression
             function: (import)
             arguments: (arguments (identifier) @import.dynamic)
           )
 
-          ;; require("literal")
           (call_expression
             function: (identifier) @req (#eq? @req "require")
             arguments: (arguments [(string) (template_string)] @import.source)
           )
 
-          ;; require(variable) -> @import.dynamic
           (call_expression
             function: (identifier) @req (#eq? @req "require")
             arguments: (arguments (identifier) @import.dynamic)
@@ -191,7 +232,6 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
         )
     "#,
     query_actions: r#"
-        ;; --- 1. Redux / Object Pattern ---
         (call_expression
             function: (identifier) @fn (#match? @fn "^(dispatch|put|emit|commit)$")
             arguments: (arguments 
@@ -203,38 +243,27 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
                 )
             )
         )
-        ;; UPDATED: Allow identifiers in switch cases
         (switch_case value: [(string) (template_string) (identifier)] @action.handle)
-        ;; UPDATED: Allow identifiers in object keys (computed property names or simple keys)
         (pair key: [(string) (template_string) (identifier)] @action.handle value: [(arrow_function) (function_expression)])
 
-        ;; --- 2. Event Emitter Patterns ---
-        
-        ;; Case A: Direct Call -> emit('event') OR emit(VARIABLE)
         (call_expression
             function: (identifier) @fn (#match? @fn "^(emit|dispatch|trigger|pub|publish|commit)$")
             arguments: (arguments 
                 [(string) (template_string) (identifier)] @action.dispatch
             )
         )
-
-        ;; Case B: Method Call -> app.emit('event') OR app.emit(VARIABLE)
         (call_expression
             function: (member_expression property: (property_identifier) @fn (#match? @fn "^(emit|dispatch|trigger|pub|publish|commit)$"))
             arguments: (arguments 
                 [(string) (template_string) (identifier)] @action.dispatch
             )
         )
-
-        ;; Case C: Direct Listener -> on('event') OR on(VARIABLE)
         (call_expression
             function: (identifier) @fn (#match? @fn "^(on|once|subscribe|sub|listen)$")
             arguments: (arguments 
                 [(string) (template_string) (identifier)] @action.handle
             )
         )
-
-        ;; Case D: Method Listener -> app.on('event') OR app.on(VARIABLE)
         (call_expression
             function: (member_expression property: (property_identifier) @fn (#match? @fn "^(on|once|subscribe|sub|listen)$"))
             arguments: (arguments 

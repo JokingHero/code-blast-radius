@@ -8,6 +8,7 @@ use crate::schema::{ImportNode, ExportNode, WorkspaceIndex, SymbolId};
 #[derive(Debug, Clone)]
 pub struct FunctionInfo {
     pub name: String,
+    pub kind: String, // Carries the detected type (macro, function, container) to the Indexer
     pub is_anonymous: bool, 
     pub range_start: usize,
     pub range_end: usize,
@@ -104,6 +105,7 @@ pub fn analyze_source(
     let mut implementations = Vec::new();
     let mut functions = Vec::new();
 
+    // ... (Imports, Exports, Literals, Implements steps 1-4 remain same) ...
     // 1. Imports
     if !config.query_imports.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_imports) {
@@ -113,51 +115,29 @@ pub fn analyze_source(
                 let mut src = String::new();
                 let mut name = String::new();
                 let mut alias = None;
-                
                 for cap in m.captures {
                     let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
                     let capture_name = q.capture_names()[cap.index as usize];
-                    
                     if capture_name == "import.source" { 
                         if let Some(resolved) = local_constants.get(&text) {
                             src = resolved.clone();
                         } else {
                             src = text.replace(['"', '\''], ""); 
                         }
-                    } 
-                    else if capture_name == "import.dynamic" {
+                    } else if capture_name == "import.dynamic" {
                         if let Some(resolved) = local_constants.get(&text) {
                             src = resolved.clone();
-                            // Clean quotes that might have been preserved in constant propagation
                             src = src.replace(['"', '\'', '`'], "");
                         }
-                    }
-                    else if capture_name == "import.name" { 
-                        name = text; 
-                    } else if capture_name == "import.alias" {
-                        name = "*".to_string(); 
-                        alias = Some(text);
-                    }
+                    } else if capture_name == "import.name" { name = text; } 
+                    else if capture_name == "import.alias" { name = "*".to_string(); alias = Some(text); }
                 }
-
                 if !src.is_empty() {
                     if config.lang_enum == SupportedLanguage::Python {
-                        // Python 'import a.b' or 'importlib.import_module("a.b")' 
-                        // maps to 'a/b' on disk.
-                        // We avoid replacing leading dots used for relative imports (e.g. from . import x)
-                        // by only replacing if it doesn't look like a relative anchor, 
-                        // OR we rely on standardizing everything.
-                        // For 'import_module("plugins.payment")', src is "plugins.payment".
-                        
-                        // Simple heuristic: If it contains dots and isn't a relative path starting with ./
                         if src.contains('.') && !src.starts_with("./") && !src.starts_with("../") {
-                            // Handle explicit relative imports 'from . import' (src=".") or 'from .. import' (src="..")
-                            if src != "." && src != ".." {
-                                src = src.replace('.', "/");
-                            }
+                            if src != "." && src != ".." { src = src.replace('.', "/"); }
                         }
                     }
-                    
                     imports.push(ImportNode { name, source: src, alias }); 
                 }
             }
@@ -175,19 +155,14 @@ pub fn analyze_source(
                     let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
                     let capture_name = q.capture_names()[cap.index as usize];
                     if capture_name == "export.source" { 
-                        if let Some(resolved) = local_constants.get(&text) {
-                            src = resolved.clone();
-                        } else {
-                            src = text.replace(['"', '\''], ""); 
-                        }
-                    }
-                    else if capture_name == "export.name" { name = Some(text); }
+                        if let Some(resolved) = local_constants.get(&text) { src = resolved.clone(); } 
+                        else { src = text.replace(['"', '\''], ""); }
+                    } else if capture_name == "export.name" { name = Some(text); }
                 }
                 if !src.is_empty() { exports.push(ExportNode { name, source: src }); }
             }
         }
     }
-
     // 3. Literals
     if !config.query_literals.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_literals) {
@@ -201,10 +176,7 @@ pub fn analyze_source(
             }
         }
     }
-    for val in local_constants.values() {
-        if val.len() > 1 { literals.push(val.clone()); }
-    }
-
+    for val in local_constants.values() { if val.len() > 1 { literals.push(val.clone()); } }
     // 4. Implementations
     if !config.query_implements.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_implements) {
@@ -216,13 +188,13 @@ pub fn analyze_source(
                 for cap in m.captures {
                     let name = q.capture_names()[cap.index as usize];
                     let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
-                    if name == "impl.child" { child = text; } 
-                    else if name == "impl.parent" { parent = text; }
+                    if name == "impl.child" { child = text; } else if name == "impl.parent" { parent = text; }
                 }
                 if !child.is_empty() && !parent.is_empty() { implementations.push((child, parent)); }
             }
         }
     }
+
 
     // 5. Build Queries
     let defs_query = Query::new(&language, config.query_defs)
@@ -242,7 +214,6 @@ pub fn analyze_source(
             .map_err(|e| format!("Invalid types query for {:?}: {}", config.lang_enum, e))?)
     } else { None };
 
-    // --- NEW: Decorators Query ---
     let decorators_query = if !config.query_decorators.is_empty() {
         Some(Query::new(&language, config.query_decorators)
             .map_err(|e| format!("Invalid decorators query for {:?}: {}", config.lang_enum, e))?)
@@ -252,6 +223,7 @@ pub fn analyze_source(
     let module_name = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
     let mut module_info = FunctionInfo {
         name: format!("(module) {}", module_name),
+        kind: "module".to_string(),
         is_anonymous: false,
         range_start: root_node.start_byte(),
         range_end: root_node.end_byte(),
@@ -274,6 +246,10 @@ pub fn analyze_source(
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(&defs_query, root_node, code_bytes);
 
+    // --- DEBUG START ---
+    println!("DEBUG: Analyzing {}", path.display());
+    // --- DEBUG END ---
+
     while let Some(match_) = matches.next() {
         let mut def_node = None;
         let mut name_opt: Option<String> = None;
@@ -286,6 +262,10 @@ pub fn analyze_source(
             let cap_name = defs_query.capture_names()[capture.index as usize];
             let text = capture.node.utf8_text(code_bytes).unwrap_or("");
             
+            // --- DEBUG START ---
+            println!("  Capture: {} -> {}", cap_name, text);
+            // --- DEBUG END ---
+
             match cap_name {
                 "function.definition" => def_node = Some(capture.node),
                 "function.name" => name_opt = Some(text.to_string()),
@@ -315,8 +295,28 @@ pub fn analyze_source(
         }
 
         if let Some(node) = def_node {
+            let node_kind = node.kind();
+            
+            // --- DEBUG START ---
+            println!("  -> Found Definition: {:?} Kind: {}", name_opt, node_kind);
+            // --- DEBUG END ---
+
+            let kind = if node_kind == "macro_definition" {
+                "macro".to_string()
+            } else if node_kind == "macro_invocation" {
+                "macro_generated".to_string()
+            } else if node_kind.contains("class") 
+                   || node_kind.contains("interface") 
+                   || node_kind.contains("struct") 
+                   || node_kind.contains("impl") {
+                "container".to_string()
+            } else {
+                "function".to_string()
+            };
+
             functions.push(FunctionInfo {
                 name: name_opt.clone().unwrap_or_else(|| "anonymous".to_string()),
+                kind, 
                 is_anonymous: name_opt.is_none(),
                 range_start: node.start_byte(),
                 range_end: node.end_byte(),
@@ -334,6 +334,9 @@ pub fn analyze_source(
                 handled_actions: Vec::new(),
             });
         } else if let Some(vn) = v_name {
+            // --- DEBUG START ---
+            println!("  -> Found Var Hint: {}", vn);
+            // --- DEBUG END ---
             variable_hints.push((match_.captures[0].node.byte_range(), vn, v_type, v_assign));
         }
     }
@@ -392,7 +395,7 @@ pub fn analyze_source(
         }
     }
 
-    // --- NEW: 8.5 Extract Decorators ---
+    // 8.5 Extract Decorators
     if let Some(ref q) = decorators_query {
         let mut dec_cursor = QueryCursor::new();
         let mut dec_matches = dec_cursor.matches(q, root_node, code_bytes);
@@ -400,27 +403,22 @@ pub fn analyze_source(
         while let Some(dm) = dec_matches.next() {
             for cap in dm.captures {
                 let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
-                // Clean up: Remove '@' (Java/TS/Py) or '#[]' (Rust) or parens
                 let clean_name = text.trim_matches(|c| c == '@' || c == '#' || c == '[' || c == ']' || c == '(' || c == ')').to_string();
                 
                 if !clean_name.is_empty() {
                     let range = cap.node.byte_range();
                     
-                    // 1. Try strict containment (Java, Rust, TS)
                     if let Some(idx) = get_owner_index(range.start, range.end, &functions) {
                         functions[idx].decorators.push(clean_name);
                     } else {
-                        // 2. Proximity Heuristic (Python, where decorators are siblings to function def)
-                        // Find a function that starts *after* this decorator, but reasonably close (e.g., within 200 bytes)
                         let mut found_neighbor = false;
                         for func in &mut functions {
                             if func.range_start > range.end && (func.range_start - range.end) < 200 {
                                 func.decorators.push(clean_name.clone());
                                 found_neighbor = true;
-                                break; // Attach to the nearest one only
+                                break;
                             }
                         }
-
                         if !found_neighbor {
                             module_info.decorators.push(clean_name);
                         }
@@ -465,7 +463,7 @@ pub fn analyze_source(
         }
     }
 
-    // 9.5 Extract Type References (The "Nouns")
+    // 9.5 Extract Type References
     if let Some(ref q) = types_query {
         let mut t_cursor = QueryCursor::new();
         let mut t_matches = t_cursor.matches(q, root_node, code_bytes);
@@ -485,7 +483,7 @@ pub fn analyze_source(
         }
     }
 
-    // 9.6 Extract State Actions (Redux/Context)
+    // 9.6 Extract State Actions
     let actions_query = if !config.query_actions.is_empty() {
         Some(Query::new(&language, config.query_actions).unwrap())
     } else { None };
@@ -497,8 +495,6 @@ pub fn analyze_source(
         while let Some(am) = a_matches.next() {
             for cap in am.captures {
                 let raw_text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();                
-                // If the text is a variable name (like LOGIN_CONST), try to resolve its value.
-                // If not found, fall back to the raw text (it might be a literal).
                 let resolved_text = if let Some(val) = local_constants.get(&raw_text) {
                     val.clone()
                 } else {
@@ -516,23 +512,19 @@ pub fn analyze_source(
                         functions[idx].handled_actions.push(text);
                     }
                 } else {
-                    // If strict containment fails, check for Proximity (useful for Python decorators)
-                    // We only apply this to 'action.handle', as dispatch usually happens inside code blocks.
                     let mut found_neighbor = false;
                     
                     if capture_name == "action.handle" {
                         for func in &mut functions {
-                            // If function starts after the action, and is close (e.g. < 200 bytes)
                             if func.range_start > range.end && (func.range_start - range.end) < 200 {
                                 func.handled_actions.push(text.clone());
                                 found_neighbor = true;
-                                break; // Attach to nearest only
+                                break;
                             }
                         }
                     }
 
                     if !found_neighbor {
-                        // Fallback to module scope
                         if capture_name == "action.dispatch" {
                             module_info.dispatched_actions.push(text);
                         } else if capture_name == "action.handle" {
@@ -556,7 +548,7 @@ pub fn analyze_source(
     module_info.type_refs.sort(); module_info.type_refs.dedup();
     module_info.decorators.sort(); module_info.decorators.dedup();
 
-    // 10. Extract Docs (Only for Defined Functions)
+    // 10. Extract Docs
     let mut d_cursor = QueryCursor::new();
     let mut d_matches = d_cursor.matches(&docs_query, root_node, code_bytes);
     while let Some(dm) = d_matches.next() {

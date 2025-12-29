@@ -3,10 +3,67 @@ use crate::language::{LanguageConfig, SupportedLanguage};
 pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
     lang_enum: SupportedLanguage::Rust,
     file_extensions: &["rs"],
-    query_defs: r#"(function_item name: (identifier) @function.name) @function.definition"#,
+    query_defs: r#"
+        ;; 1. Standard Function Definitions
+        (function_item name: (identifier) @function.name) @function.definition
+        
+        ;; 2. Macro Definitions (macro_rules! foo {})
+        (macro_definition name: (identifier) @function.name) @function.definition
+
+        ;; 3. Common Library Patterns
+        
+        ;; thread_local! { static FOO: ... } or { pub static FOO: ... }
+        ;; We match 'static' literal followed immediately by an identifier
+        (macro_invocation
+            macro: (identifier) @m (#eq? @m "thread_local")
+            (token_tree
+                (identifier) @kw_static (#eq? @kw_static "static")
+                .
+                (identifier) @function.name
+            )
+        ) @function.definition
+
+        ;; lazy_static! { static ref FOO: ... }
+        ;; We match 'ref' literal followed immediately by an identifier
+        (macro_invocation
+            macro: (identifier) @m (#eq? @m "lazy_static")
+            (token_tree
+                (identifier) @kw_ref (#eq? @kw_ref "ref")
+                .
+                (identifier) @function.name
+            )
+        ) @function.definition
+
+        ;; 4. Heuristic: "Definers"
+        ;; Matches: define_handler!(MyHandler, ...)
+        ;; Matches: create_struct!(MyStruct)
+        ;; We look for the FIRST identifier inside the token tree
+        (macro_invocation
+            macro: (identifier) @macro_type
+            (token_tree . (identifier) @function.name)
+            (#match? @macro_type "^(define_|create_|decl_|impl_|make_)")
+        ) @function.definition
+        
+        ;; 5. Heuristic: "Test modules" often hidden in macros
+        ;; Matches: test_suite!( my_suite_name )
+        (macro_invocation
+            macro: (identifier) @macro_type
+            (token_tree . (identifier) @function.name)
+            (#match? @macro_type "_suite$")
+        ) @function.definition
+    "#,
     query_calls: r#"(call_expression function: [(identifier) @call.name (field_expression field: (field_identifier) @call.name)])"#,
-    query_docs: r#"((line_comment)+ @function.docs . (function_item) @function.definition)"#,
-    // UPDATED: Capture use declarations
+    query_docs: r#"
+        (
+            (line_comment)+ @function.docs 
+            . 
+            [
+                (function_item)
+                (macro_definition)
+                (macro_invocation)
+            ] @function.definition
+        )
+    "#,
     query_imports: r#"
         (use_declaration
             argument: [

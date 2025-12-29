@@ -389,18 +389,10 @@ impl Indexer {
 
                     let name_lower = func.name.to_lowercase();
                     let code_trim = func.source_code.trim_start();
-                    let is_module = func.name.starts_with("(module)");
-
-                    let kind = if is_module {
-                        "module".to_string()
-                    } else if
-                        func.source_code.contains("class ") ||
-                        func.source_code.contains("interface ")
-                    {
-                        "container".to_string()
-                    } else {
-                        "function".to_string()
-                    };
+                    
+                    // Use the kind detected by Analyzer (Function, Macro, Container, etc.) ---
+                    let kind = func.kind.clone();
+                    let is_module = kind == "module"; 
 
                     // Test Detection Logic...
                     let is_js_test_block =
