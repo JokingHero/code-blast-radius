@@ -493,19 +493,30 @@ pub fn analyze_source(
     while let Some(cm) = c_matches.next() {
         let mut m_name = None;
         let mut r_name = None;
+        let mut dynamic_receiver = None; 
         let mut call_range = None;
 
         for cp in cm.captures {
             let t = cp.node.utf8_text(code_bytes).unwrap_or("").to_string();
             let cap_name = calls_query.capture_names()[cp.index as usize];
+            
             if cap_name == "call.name" { 
                 m_name = Some(t); 
                 call_range = Some(cp.node.byte_range());
             }
-            else if cap_name == "call.receiver" { r_name = Some(t); }
+            else if cap_name == "call.receiver" { 
+                r_name = Some(t); 
+            }
+            else if cap_name == "call.dynamic_dispatch" {
+                dynamic_receiver = Some(t);
+                call_range = Some(cp.node.byte_range());
+            }
         }
 
-        if let (Some(m), Some(range)) = (m_name, call_range) {
+        // Logic A: Standard Method/Function Call
+        // We use call_range.clone() here so we don't consume the Option 
+        // if we need to fall through to Logic B.
+        if let (Some(m), Some(range)) = (m_name, call_range.clone()) {
             if let Some(idx) = get_owner_index(range.start, range.end, &functions) {
                 let func = &mut functions[idx];
                 func.calls.push(m.clone());
@@ -517,6 +528,17 @@ pub fn analyze_source(
                 if let Some(r) = r_name {
                     module_info.fingerprints.entry(r).or_default().push(m);
                 }
+            }
+        }
+        
+        // Logic B: Dynamic Dispatch / Reflection
+        // We register a wildcard "*" to tell the indexer: "Link everything about this type."
+        else if let (Some(dr), Some(range)) = (dynamic_receiver, call_range) {
+            if let Some(idx) = get_owner_index(range.start, range.end, &functions) {
+                let func = &mut functions[idx];
+                func.fingerprints.entry(dr).or_default().push("*".to_string());
+            } else {
+                 module_info.fingerprints.entry(dr).or_default().push("*".to_string());
             }
         }
     }

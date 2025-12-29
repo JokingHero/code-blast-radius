@@ -951,14 +951,22 @@ impl Indexer {
 
     fn resolve_type_sniffing(&mut self) {
         let mut new_links = Vec::new();
+
+        // Iterate over every function/symbol that calls methods on objects
+        // caller_id: The function doing the calling
+        // receiver_map: e.g., "userService" -> ["login", "logout"] OR "service" -> ["*"]
         for (&caller_id, receiver_map) in &self.index.fingerprints {
-            for (receiver, methods) in receiver_map {
+            for (receiver_var_name, methods_called) in receiver_map {
+
+                // --- 1. Trace the Variable's Type Scope ---
+                // We walk up the scope chain (Function -> Class -> Module) to find
+                // where 'receiver_var_name' is defined (e.g., arguments, local vars).
                 let mut type_hint = None;
                 let mut curr_scope = Some(caller_id);
 
                 while let Some(sid) = curr_scope {
                     if let Some(vars) = self.index.local_variable_types.get(&sid) {
-                        if let Some(h) = vars.get(receiver) {
+                        if let Some(h) = vars.get(receiver_var_name) {
                             type_hint = Some(h);
                             break;
                         }
@@ -966,34 +974,62 @@ impl Indexer {
                     curr_scope = self.index.symbols.get(&sid).and_then(|s| s.parent_id);
                 }
 
+                // --- 2. Resolve Type String to Symbol ID ---
                 if let Some(hint) = type_hint {
-                    let mut resolved_type = None;
+                    let mut resolved_type_name = None;
+
+                    // Handle "returns:MyFunction" hint format (from type inference logic)
                     if hint.starts_with("returns:") {
-                        if let Some(targets) = self.index.symbol_map.get(&hint[8..]) {
-                            resolved_type = self.index.symbols
+                        let func_name = &hint[8..];
+                        if let Some(targets) = self.index.symbol_map.get(func_name) {
+                            // Heuristic: Grab return type from the first matching function.
+                            // (If multiple functions have same name but different returns, this is best-effort)
+                            resolved_type_name = self.index.symbols
                                 .get(&targets[0])
                                 .and_then(|s| s.return_type.clone());
                         }
                     } else {
-                        resolved_type = Some(hint.clone());
+                        // Standard Type Hint (e.g., "UserService", "List<User>")
+                        resolved_type_name = Some(hint.clone());
                     }
 
-                    if let Some(tn) = resolved_type {
-                        let clean = tn.split('<').next().unwrap().to_string();
-                        if let Some(type_ids) = self.index.symbol_map.get(&clean) {
-                            for &tid in type_ids {
-                                new_links.push((caller_id, tid));
-                                if let Some(mems) = self.index.container_methods.get(&tid) {
-                                    for m in methods {
-                                        if mems.contains(m) {
-                                            if let Some(mids) = self.index.symbol_map.get(m) {
+                    if let Some(tn) = resolved_type_name {
+                        // Clean generics: "UserService<Config>" -> "UserService"
+                        let clean_type_name = tn.split('<').next().unwrap_or(&tn).trim();
+
+                        // Look up the Class/Interface/Container by name
+                        if let Some(type_symbol_ids) = self.index.symbol_map.get(clean_type_name) {
+                            for &type_id in type_symbol_ids {
+                                
+                                // Always link to the Container (Class) itself.
+                                // If methods_called contains "*", this is the ONLY link we might get.
+                                // This provides the LLM with the "Menu of Options" (the full class definition).
+                                new_links.push((caller_id, type_id));
+
+                                // Now try to link to specific methods within that Container
+                                if let Some(known_methods) = self.index.container_methods.get(&type_id) {
+                                    for method_called in methods_called {
+                                        
+                                        // If the method is a wildcard (from getattr/reflection),
+                                        // we skip looking up a child symbol named "*". 
+                                        // The link to the parent 'type_id' above covers this case.
+                                        if method_called == "*" {
+                                            continue;
+                                        }
+
+                                        // If the Class actually has this method...
+                                        if known_methods.contains(method_called) {
+                                            // Find the specific SymbolID for this method name...
+                                            if let Some(method_ids) = self.index.symbol_map.get(method_called) {
+                                                // ...but ensure it belongs to the Class we just found.
+                                                // (Distinguish User.save() from Order.save())
                                                 new_links.extend(
-                                                    mids
+                                                    method_ids
                                                         .iter()
-                                                        .filter(
-                                                            |&&mid|
-                                                                self.index.symbols
-                                                                    [&mid].parent_id == Some(tid)
+                                                        .filter(|&&mid|
+                                                            self.index.symbols.get(&mid)
+                                                                .map(|s| s.parent_id == Some(type_id))
+                                                                .unwrap_or(false)
                                                         )
                                                         .map(|&mid| (caller_id, mid))
                                                 );
@@ -1007,8 +1043,13 @@ impl Indexer {
                 }
             }
         }
-        for (c, t) in new_links {
-            self.index.resolved_calls.entry(c).or_default().push(t);
+
+        // --- 3. Commit Links to Graph ---
+        for (caller, target) in new_links {
+            let calls = self.index.resolved_calls.entry(caller).or_default();
+            if !calls.contains(&target) {
+                calls.push(target);
+            }
         }
     }
 

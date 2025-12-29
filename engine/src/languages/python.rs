@@ -9,7 +9,20 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
             (class_definition name: (identifier) @function.name) @function.definition
         ]
     "#,
-    query_calls: r#"(call function: [(identifier) @call.name (attribute attribute: (identifier) @call.name)])"#,
+    query_calls: r#"
+        [
+            (call function: [(identifier) @call.name (attribute attribute: (identifier) @call.name)])
+            
+            ;; NEW: Capture getattr(service, ...)
+            (call
+                function: (identifier) @fn (#eq? @fn "getattr")
+                arguments: (argument_list 
+                    (identifier) @call.dynamic_dispatch
+                    (_) ;; The method name (variable or string)
+                )
+            )
+        ]
+    "#,
     query_docs: r#"
         [
             (function_definition body: (block . (expression_statement (string) @function.docs))) @function.definition
