@@ -58,3 +58,33 @@ fn test_const_propagation_shared_route() {
     let deps = indexer.index.file_dependencies.get(&client_id).expect("Client should link to server");
     assert!(deps.contains(&server_id), "Shared route should link files even when one uses a constant");
 }
+
+#[test]
+fn test_template_string_constant_propagation() {
+    let workspace = TestWorkspace::new();
+
+    // 1. Backend defines route
+    workspace.create_file("backend/users.py", r#"
+        @app.route("/api/v1/users")
+        def get_users(): pass
+    "#);
+
+    // 2. Frontend constructs string via constants
+    workspace.create_file("frontend/api.ts", r#"
+        const API_VER = "v1";
+        const RESOURCE = "users";
+        
+        // Analyzer should assemble this into "/api/v1/users"
+        fetch(`/api/${API_VER}/${RESOURCE}`);
+    "#);
+
+    let mut indexer = Indexer::new();
+    indexer.scan(&workspace.path);
+    indexer.resolve_references();
+
+    let back_id = indexer.index.files.values().find(|f| f.path.contains("users.py")).unwrap().id;
+    let front_id = indexer.index.files.values().find(|f| f.path.contains("api.ts")).unwrap().id;
+
+    let deps = indexer.index.file_dependencies.get(&front_id).expect("Frontend should link to backend");
+    assert!(deps.contains(&back_id), "Template string expansion failed to link to backend route");
+}

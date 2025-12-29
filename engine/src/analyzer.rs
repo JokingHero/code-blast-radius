@@ -163,15 +163,73 @@ pub fn analyze_source(
             }
         }
     }
-    // 3. Literals
+    // 3. Literals & Template Expansion
     if !config.query_literals.is_empty() {
         if let Ok(q) = Query::new(&language, config.query_literals) {
             let mut cursor = QueryCursor::new();
             let mut matches = cursor.matches(&q, root_node, code_bytes);
+            
             while let Some(m) = matches.next() {
                 for cap in m.captures {
-                    let text = cap.node.utf8_text(code_bytes).unwrap_or("").trim_matches(|c| c == '"' || c == '\'' || c == '`').to_string();
-                    if text.len() > 1 { literals.push(text); }
+                    let node = cap.node;
+                    let node_kind = node.kind();
+
+                    // Logic for Template Strings (JS/TS `...` or Python f"...")
+                    if node_kind == "template_string" || node_kind == "string" { // Python sometimes wraps f-strings in 'string'
+                        let mut synthetic = String::new();
+                        let mut is_complex = false;
+                        
+                        // Iterate over children to build the string
+                        let mut cursor = node.walk();
+                        for child in node.children(&mut cursor) {
+                            let k = child.kind();
+                            
+                            // JS/TS: string_fragment, Python: string_content
+                            if k == "string_fragment" || k == "string_content" {
+                                synthetic.push_str(&child.utf8_text(code_bytes).unwrap_or(""));
+                            } 
+                            // JS/TS: ${var}
+                            else if k == "template_substitution" || k == "interpolation" {
+                                is_complex = true;
+                                let mut found_const = false;
+                                
+                                // Try to find the identifier inside the substitution
+                                // We look for the first identifier child
+                                let mut sub_cursor = child.walk();
+                                for sub_child in child.children(&mut sub_cursor) {
+                                    if sub_child.kind() == "identifier" {
+                                        let var_name = sub_child.utf8_text(code_bytes).unwrap_or("");
+                                        if let Some(val) = local_constants.get(var_name) {
+                                            // STRIP QUOTES from the constant value before inserting
+                                            let raw_val = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                                            synthetic.push_str(raw_val);
+                                            found_const = true;
+                                        }
+                                        break; // Only handle simple ${var}, not ${func()}
+                                    }
+                                }
+                                
+                                if !found_const {
+                                    // If we can't resolve it, add a wildcard for fuzzy matching later
+                                    synthetic.push('*');
+                                }
+                            }
+                        }
+
+                        // Check if we actually built something meaningful
+                        if is_complex && !synthetic.is_empty() {
+                             literals.push(synthetic.clone());
+                        }
+                    }
+
+                    // Fallback to standard raw text extraction for normal strings
+                    let text = node.utf8_text(code_bytes).unwrap_or("")
+                        .trim_matches(|c| c == '"' || c == '\'' || c == '`')
+                        .to_string();
+                    
+                    if text.len() > 1 { 
+                        literals.push(text); 
+                    }
                 }
             }
         }

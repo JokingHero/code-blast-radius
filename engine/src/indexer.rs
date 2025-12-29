@@ -695,17 +695,41 @@ impl Indexer {
     fn resolve_implicit_routes(&mut self) {
         let mut new_links = Vec::new();
 
-        // Iterate over every string literal found in code (e.g. fetch('/api/user'))
+        // 1. Snapshot implicit routes to avoid borrow checker issues
+        let route_definitions: Vec<(String, FileId)> = self.index.implicit_routes
+            .iter()
+            .map(|(r, f)| (r.clone(), *f))
+            .collect();
+
         for (src_file_id, literals) in &self.index.raw_literals {
             for lit in literals {
-                // Clean quotes
                 let clean_lit = lit.trim_matches(|c| c == '"' || c == '\'' || c == '`');
                 
-                // Direct Match: frontend uses "/api/user" and we have that implicit route registered
+                // OPTION A: Exact Match (The resolved constant case)
+                // Generated: "/api/v1/users" -> Matches: "/api/v1/users"
                 if let Some(&target_file_id) = self.index.implicit_routes.get(clean_lit) {
-                    // Avoid self-referential links if literal appears in defining file (rare for routes)
                     if *src_file_id != target_file_id {
                         new_links.push((*src_file_id, target_file_id));
+                    }
+                    continue; // Match found, next literal
+                }
+
+                // OPTION B: Wildcard Match (The unresolved variable case)
+                // Generated: "/api/v1/*" -> Matches: "/api/v1/users" or "/api/v1/:id"
+                if clean_lit.contains('*') {
+                    // Convert glob to regex-like prefix check (simplified)
+                    let prefix = clean_lit.split('*').next().unwrap_or("");
+                    if prefix.len() > 3 { // Avoid matching "*" or "/"
+                        for (route_def, target_file_id) in &route_definitions {
+                            if *src_file_id == *target_file_id { continue; }
+
+                            // Check if backend route starts with the resolved prefix
+                            // Frontend: "/api/v1/*"
+                            // Backend:  "/api/v1/users"
+                            if route_def.starts_with(prefix) {
+                                new_links.push((*src_file_id, *target_file_id));
+                            }
+                        }
                     }
                 }
             }
