@@ -12,8 +12,7 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
 
         ;; 3. Common Library Patterns
         
-        ;; thread_local! { static FOO: ... } or { pub static FOO: ... }
-        ;; We match 'static' literal followed immediately by an identifier
+        ;; thread_local! { static FOO: ... }
         (macro_invocation
             macro: (identifier) @m (#eq? @m "thread_local")
             (token_tree
@@ -24,7 +23,6 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
         ) @function.definition
 
         ;; lazy_static! { static ref FOO: ... }
-        ;; We match 'ref' literal followed immediately by an identifier
         (macro_invocation
             macro: (identifier) @m (#eq? @m "lazy_static")
             (token_tree
@@ -34,18 +32,43 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
             )
         ) @function.definition
 
-        ;; 4. Heuristic: "Definers"
-        ;; Matches: define_handler!(MyHandler, ...)
-        ;; Matches: create_struct!(MyStruct)
-        ;; We look for the FIRST identifier inside the token tree
+        ;; 4. Improved Heuristic: "Definers"
+        ;; We use #not-match? to skip keywords like 'pub', 'async', 'crate'
+        
+        ;; Case A: Direct Identifier (e.g., create_struct!(MyStruct))
         (macro_invocation
             macro: (identifier) @macro_type
-            (token_tree . (identifier) @function.name)
+            (token_tree 
+                (identifier) @function.name
+            )
             (#match? @macro_type "^(define_|create_|decl_|impl_|make_)")
+            (#not-match? @function.name "^(pub|async|unsafe|extern|crate|use)$")
         ) @function.definition
-        
-        ;; 5. Heuristic: "Test modules" often hidden in macros
-        ;; Matches: test_suite!( my_suite_name )
+
+        ;; Case B: Visibility Modifier (e.g., create_struct!(pub MyStruct))
+        (macro_invocation
+            macro: (identifier) @macro_type
+            (token_tree 
+                (identifier) @_vis 
+                . 
+                (identifier) @function.name
+            )
+            (#match? @macro_type "^(define_|create_|decl_|impl_|make_)")
+            (#match? @_vis "^(pub)$")
+        ) @function.definition
+
+        ;; 5. Heuristic: Route Definitions (Web Frameworks)
+        ;; Matches: route!(GET, "/path", MyHandler) -> Captures MyHandler
+        (macro_invocation
+            macro: (identifier) @m (#match? @m "(route|endpoint)")
+            (token_tree
+                (identifier) ;; Method (GET)
+                (string_literal) ;; Path
+                (identifier) @function.name ;; Handler
+            )
+        ) @function.definition
+
+        ;; 6. Heuristic: "Test modules"
         (macro_invocation
             macro: (identifier) @macro_type
             (token_tree . (identifier) @function.name)
@@ -53,6 +76,7 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
         ) @function.definition
     "#,
     query_calls: r#"(call_expression function: [(identifier) @call.name (field_expression field: (field_identifier) @call.name)])"#,
+    // ... (rest of the file remains the same)
     query_docs: r#"
         (
             (line_comment)+ @function.docs 
@@ -81,7 +105,6 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
         )
     "#,
     query_config: "",
-    // Matches: const X: &str = "val" or let x = "val"
     query_vals: r#"
         [
             (const_item
@@ -94,7 +117,6 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
             )
         ]
     "#,
-    // Matches types in args, return, fields, and generics
     query_types: r#"
         [
             (parameter type: (type_identifier) @type.ref)
@@ -105,29 +127,21 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
             (type_arguments (type_identifier) @type.ref)
         ]
     "#,
-    // The analyzer's trim_matches logic will strip '#[' and ']' 
-    // and the resolve logic will handle arguments like 'derive(...)'.
     query_decorators: r#"
         (attribute_item) @decorator.name
     "#,
     query_actions: r#"
-        ;; --- Dispatchers ---
         (call_expression
             function: (field_expression field: (field_identifier) @fn (#match? @fn "^(emit|dispatch|publish|send)$"))
             arguments: (arguments 
                 (string_literal) @action.dispatch
             )
         )
-
-        ;; --- Handlers (Match Arms) ---
-        ;; Match standard literal: "EVENT" => ...
         (match_arm
             pattern: (match_pattern
                 (string_literal) @action.handle
             )
         )
-        
-        ;; Match OR pattern: "A" | "B" => ...
         (match_arm
             pattern: (match_pattern
                 (or_pattern

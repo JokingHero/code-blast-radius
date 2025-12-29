@@ -40,3 +40,22 @@ fn test_rust_macro_definitions() {
     // Assert specific pattern worked (GLOBAL_CONFIG found)
     assert!(indexer.index.symbol_map.contains_key("GLOBAL_CONFIG"));
 }
+
+#[test]
+fn test_rust_macro_definitions_with_visibility() {
+    let workspace = TestWorkspace::new();
+
+    // The heuristic should capture 'MyStruct', skipping 'pub'
+    workspace.create_file("src/models.rs", r#"
+        create_struct!(pub MyStruct);
+    "#);
+
+    let mut indexer = Indexer::new();
+    indexer.scan(&workspace.path);
+
+    // Assert 'MyStruct' is found
+    assert!(indexer.index.symbol_map.contains_key("MyStruct"), "Failed to extract MyStruct from 'pub MyStruct'");
+    
+    // Assert 'pub' is NOT found as a symbol
+    assert!(!indexer.index.symbol_map.contains_key("pub"), "Incorrectly indexed 'pub' keyword as a function name");
+}
