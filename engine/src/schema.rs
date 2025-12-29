@@ -118,4 +118,7 @@ pub struct WorkspaceIndex {
     
     // Mapping: SymbolId (Function/Reducer) -> List of Action Strings it handles
     pub raw_action_handlers: HashMap<SymbolId, Vec<String>>,
+
+    // Maps "@my-app/ui" -> "packages/ui" (relative to root)
+    pub package_path_map: HashMap<String, String>, 
 }

@@ -184,6 +184,14 @@ impl Indexer {
                     let path = entry.path();
 
                     let manifest_res = scan_manifests(path);
+                    if let Some(pkg_name) = manifest_res.package_name {
+                        // If we are scanning "packages/ui/package.json", the dir is "packages/ui"
+                        if let Some(parent_dir) = path.parent() {
+                            // Store relative path to keep things clean, or absolute if you prefer
+                            let dir_key = Self::to_index_path(parent_dir); 
+                            self.index.package_path_map.insert(pkg_name, dir_key);
+                        }
+                    }
                     if !manifest_res.externals.is_empty() {
                         self.index.external_packages.extend(manifest_res.externals);
                     }
@@ -1070,12 +1078,38 @@ impl Indexer {
             // This assumes standard cargo layout. 
             let relative = source.replace("crate::", "src/").replace("::", "/");
             // Rust paths are relative to project root, not current file
-            // We need to find where "src" starts relative to the workspace root
-            // For simplicity in this tool, let's treat it as a workspace-relative path
             return self.check_path_variants(Path::new(&relative));
         }
 
-        // 3. TSConfig / JSConfig Aliases
+        // 3. Monorepo / Workspace Package Resolution (NEW)
+        // Check if the import matches a known local package definition (from package.json / Cargo.toml names)
+        for (pkg_name, pkg_root_str) in &self.index.package_path_map {
+            // We check for:
+            // A. Exact Match: import "my-pkg"
+            // B. Subpath Match: import "my-pkg/utils" (ensuring we don't match "my-pkg-extra" by checking for '/')
+            
+            let is_exact = source == pkg_name;
+            let is_subpath = source.starts_with(pkg_name) && source.as_bytes().get(pkg_name.len()) == Some(&b'/');
+
+            if is_exact || is_subpath {
+                let pkg_root = Path::new(pkg_root_str);
+                
+                let target_path = if is_exact {
+                    // Import is just the package name -> resolve to package root (check_path_variants handles index.ts/main.rs)
+                    pkg_root.to_path_buf()
+                } else {
+                    // Import is a subpath -> join the remainder
+                    let suffix = &source[pkg_name.len() + 1..]; // Skip "pkg_name/"
+                    pkg_root.join(suffix)
+                };
+
+                if let Some(id) = self.check_path_variants(&target_path) {
+                    return Some(id);
+                }
+            }
+        }
+
+        // 4. TSConfig / JSConfig Aliases
         // Iterate over mapped aliases (e.g., "@/" -> "src/")
         for (alias_key, alias_target) in &self.index.import_mappings {
             if source.starts_with(alias_key) {
@@ -1087,13 +1121,13 @@ impl Indexer {
             }
         }
 
-        // 4. Absolute / Root-Relative Imports (Python/Go/Generic)
+        // 5. Absolute / Root-Relative Imports (Python/Go/Generic)
         // Try treating the import as a path from the workspace root
         if let Some(id) = self.check_path_variants(Path::new(source)) {
             return Some(id);
         }
 
-        // 5. "Fuzzy" Suffix Match (The LLM Context Saver)
+        // 6. "Fuzzy" Suffix Match (The LLM Context Saver)
         // If we still haven't found it, and it's not a known external package...
         // Check if there is exactly one file in the index that ends with this path.
         // e.g. import "utils/math" -> matches "src/app/utils/math.ts"
