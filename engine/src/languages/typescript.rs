@@ -4,7 +4,7 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
     lang_enum: SupportedLanguage::TypeScript,
     file_extensions: &["ts", "tsx"],
     query_defs: r#"
-          ;; --- Standard Definitions ---
+          ;; Standard Definitions
           (function_declaration 
             name: (identifier) @function.name 
             return_type: (type_annotation)? @function.return_type 
@@ -23,59 +23,63 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
           (class_declaration name: (type_identifier) @function.name) @function.definition
           (interface_declaration name: [(type_identifier) (identifier)] @function.name) @function.definition
 
-          ;; --- Arrow Functions ---
           ((variable_declarator 
             name: (identifier) @function.name 
             type: (type_annotation)? @variable.type 
             value: [(arrow_function) (function_expression)]
           ) @function.definition)
 
-          ;; --- Factory Patterns ---
+          ;; --- Factories / Framework Patterns ---
           
-          ;; 1. Direct Call: const useStore = create(...)
+          ;; 1. Direct Call (e.g., const useStore = create(...))
           (variable_declarator
             name: (identifier) @function.name
             value: (call_expression
                 function: (identifier) @fn_name
-                (#match? @fn_name "^(create|make|define|build|atom|selector)$")
             )
+            (#match? @fn_name "^(create|make|define|build|atom|selector)$")
           ) @function.definition
 
-          ;; 2. Member Factory: const User = mongoose.model(...)
+          ;; 2. Member Factory (e.g., mongoose.model, sequelize.define)
           (variable_declarator
             name: (identifier) @function.name
             value: (call_expression
                 function: (member_expression
-                    object: (_)
                     property: [(property_identifier) (identifier)] @fn_name
-                    (#match? @fn_name "^(create|make|define|model|component|router|styled)$")
                 )
             )
+            (#match? @fn_name "^(create|make|define|model|component|router|styled)$")
           ) @function.definition
 
-          ;; 3. Styled Component (Object Access): const Title = styled.h1`...`
+          ;; 3. Styled Components: Tagged Template as Call (Observed Structure)
+          ;; Matches: styled.h1`...` parsed as call(function: styled.h1, args: template_string)
           (variable_declarator
             name: (identifier) @function.name
             value: (call_expression
                 function: (member_expression
                     object: (identifier) @obj_name
-                    (#eq? @obj_name "styled")
                 )
+                arguments: (template_string)
             )
+            (#eq? @obj_name "styled")
           ) @function.definition
 
-          ;; 4. Styled Component (Curried Call): const Box = styled('div')(...)
+          ;; 4. Styled Components: Curried Call (e.g. styled('div')`...`)
+          ;; Matches: styled('div')`...`
           (variable_declarator
             name: (identifier) @function.name
             value: (call_expression
                 function: (call_expression
-                    function: (identifier) @inner_fn
-                    (#eq? @inner_fn "styled")
+                    function: (call_expression
+                        function: (identifier) @inner_fn
+                    )
                 )
+                arguments: (template_string)
             )
+            (#eq? @inner_fn "styled")
           ) @function.definition
 
-          ;; --- Variables Fallback ---
+          ;; Variable Fallback
           (variable_declarator
             name: (identifier) @variable.name
             type: (type_annotation)? @variable.type
@@ -146,13 +150,15 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
           )
 
           (call_expression
-            function: (identifier) @req (#eq? @req "require")
+            function: (identifier) @req 
             arguments: (arguments [(string) (template_string)] @import.source)
+            (#eq? @req "require")
           )
 
           (call_expression
-            function: (identifier) @req (#eq? @req "require")
+            function: (identifier) @req 
             arguments: (arguments (identifier) @import.dynamic)
+            (#eq? @req "require")
           )
         ]
     "#,
@@ -192,20 +198,28 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
         [
           (member_expression
             object: (member_expression
-              object: (identifier) @obj (#eq? @obj "process")
-              property: (property_identifier) @prop (#eq? @prop "env"))
-            property: (property_identifier) @config.key)
+              object: (identifier) @obj 
+              property: (property_identifier) @prop)
+            property: (property_identifier) @config.key
+            (#eq? @obj "process")
+            (#eq? @prop "env")
+          )
 
           (subscript_expression
             object: (member_expression
-              object: (identifier) @obj (#eq? @obj "process")
-              property: (property_identifier) @prop (#eq? @prop "env"))
-            index: (string) @config.key)
+              object: (identifier) @obj 
+              property: (property_identifier) @prop)
+            index: (string) @config.key
+            (#eq? @obj "process")
+            (#eq? @prop "env")
+          )
 
           (call_expression
             function: (member_expression
-              property: (property_identifier) @method (#eq? @method "get"))
-            arguments: (arguments (string) @config.key))
+              property: (property_identifier) @method)
+            arguments: (arguments (string) @config.key)
+            (#eq? @method "get")
+          )
         ]
     "#,
     query_vals: r#"
@@ -233,42 +247,59 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
     "#,
     query_actions: r#"
         (call_expression
-            function: (identifier) @fn (#match? @fn "^(dispatch|put|emit|commit)$")
+            function: (identifier) @fn 
             arguments: (arguments 
                 (object 
                     (pair 
-                        key: (property_identifier) @k (#eq? @k "type") 
+                        key: (property_identifier) @k 
                         value: [(string) (template_string) (identifier)] @action.dispatch
                     )
                 )
             )
+            (#match? @fn "^(dispatch|put|emit|commit)$")
+            (#eq? @k "type") 
         )
         (switch_case value: [(string) (template_string) (identifier)] @action.handle)
         (pair key: [(string) (template_string) (identifier)] @action.handle value: [(arrow_function) (function_expression)])
 
         (call_expression
-            function: (identifier) @fn (#match? @fn "^(emit|dispatch|trigger|pub|publish|commit)$")
+            function: (identifier) @fn 
             arguments: (arguments 
                 [(string) (template_string) (identifier)] @action.dispatch
             )
+            (#match? @fn "^(emit|dispatch|trigger|pub|publish|commit)$")
         )
         (call_expression
-            function: (member_expression property: (property_identifier) @fn (#match? @fn "^(emit|dispatch|trigger|pub|publish|commit)$"))
+            function: (member_expression property: (property_identifier) @fn)
             arguments: (arguments 
                 [(string) (template_string) (identifier)] @action.dispatch
             )
+            (#match? @fn "^(emit|dispatch|trigger|pub|publish|commit)$")
         )
         (call_expression
-            function: (identifier) @fn (#match? @fn "^(on|once|subscribe|sub|listen)$")
+            function: (identifier) @fn 
             arguments: (arguments 
                 [(string) (template_string) (identifier)] @action.handle
             )
+            (#match? @fn "^(on|once|subscribe|sub|listen)$")
         )
         (call_expression
-            function: (member_expression property: (property_identifier) @fn (#match? @fn "^(on|once|subscribe|sub|listen)$"))
+            function: (member_expression property: (property_identifier) @fn)
             arguments: (arguments 
                 [(string) (template_string) (identifier)] @action.handle
             )
+            (#match? @fn "^(on|once|subscribe|sub|listen)$")
+        )
+    "#,
+    query_middleware: r#"
+        (call_expression
+            function: (member_expression
+                property: (property_identifier) @prop
+            )
+            arguments: (arguments 
+                [(identifier) (call_expression)] @middleware.use
+            )
+            (#eq? @prop "use")
         )
     "#,
     di_decorators: &["Injectable", "Component", "Directive", "Pipe", "Service"],

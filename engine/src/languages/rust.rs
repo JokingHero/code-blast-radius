@@ -76,7 +76,6 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
         ) @function.definition
     "#,
     query_calls: r#"(call_expression function: [(identifier) @call.name (field_expression field: (field_identifier) @call.name)])"#,
-    // ... (rest of the file remains the same)
     query_docs: r#"
         (
             (line_comment)+ @function.docs 
@@ -150,6 +149,7 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
             )
         )
     "#,
+    query_middleware: "",
     di_decorators: &[],
     magic_methods: &[]
 };

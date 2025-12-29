@@ -388,6 +388,9 @@ impl Indexer {
                 if !analysis.literals.is_empty() {
                     self.index.raw_literals.insert(file_id, analysis.literals);
                 }
+                if !analysis.middleware_usage.is_empty() {
+                    self.index.raw_middleware_usage.insert(file_id, analysis.middleware_usage);
+                }
 
                 let mut file_symbol_ids = Vec::new();
 
@@ -602,6 +605,7 @@ impl Indexer {
         self.resolve_database_references();
         self.resolve_file_dependencies();
         self.resolve_state_management();
+        self.resolve_middleware_injection(); 
     }
 
     fn resolve_external_imports(&mut self) {
@@ -1823,6 +1827,67 @@ impl Indexer {
                          }
                     }
                 }
+            }
+        }
+    }
+
+    fn resolve_middleware_injection(&mut self) {
+        let mut new_links = Vec::new();
+
+        // 1. Snapshot the usage map to avoid borrowing self.index immutably
+        // while we need to call mutable methods on self inside the loop.
+        let usage_snapshot: Vec<(FileId, Vec<String>)> = self.index.raw_middleware_usage
+            .iter()
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+
+        // 2. Iterate over the snapshot
+        for (hub_file_id, middleware_names) in usage_snapshot {
+            
+            // Resolve the Middleware symbols themselves
+            let mut middleware_ids = Vec::new();
+            for name in &middleware_names {
+                // Now we can safely call mutable methods on self
+                if let Some(sid) = self.resolve_single_call(hub_file_id, name) {
+                    middleware_ids.push(sid);
+                }
+            }
+
+            if middleware_ids.is_empty() { continue; }
+
+            // 3. Identify "Sibling" dependencies
+            // We must also snapshot the imports for this specific file, otherwise
+            // looking them up would borrow self.index again.
+            let imports = self.index.file_imports.get(&hub_file_id).cloned().unwrap_or_default();
+
+            for imp in imports {
+                // Resolve the file imported by the Hub
+                if let Some(imported_file_id) = self.resolve_import_path(hub_file_id, &imp.source) {
+                    
+                    // Don't link middleware to itself
+                    if middleware_ids.iter().any(|&mid| self.index.symbols[&mid].file_id == imported_file_id) {
+                        continue;
+                    }
+
+                    // Find the "Module" symbol of the imported file to attach the link to
+                    let target_mod_id = self.index.symbols.values()
+                        .find(|s| s.file_id == imported_file_id && s.kind == "module")
+                        .map(|s| s.id);
+
+                    if let Some(target_id) = target_mod_id {
+                        for &mid in &middleware_ids {
+                            new_links.push((target_id, mid));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Commit Links
+        for (router_id, middleware_id) in new_links {
+            let calls = self.index.resolved_calls.entry(router_id).or_default();
+            if !calls.contains(&middleware_id) {
+                calls.push(middleware_id);
             }
         }
     }

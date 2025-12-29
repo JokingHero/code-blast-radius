@@ -33,6 +33,7 @@ pub struct FileAnalysis {
     pub literals: Vec<String>,
     pub implementations: Vec<(String, String)>, 
     pub global_vars: HashMap<String, String>, 
+    pub middleware_usage: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -63,7 +64,8 @@ pub fn analyze_source(
     if source_code.trim().is_empty() {
         return Ok(FileAnalysis { 
             functions: vec![], imports: vec![], exports: vec![], 
-            literals: vec![], implementations: vec![], global_vars: HashMap::new() 
+            literals: vec![], implementations: vec![], global_vars: HashMap::new(),
+            middleware_usage: vec![],
         });
     }
 
@@ -616,6 +618,32 @@ pub fn analyze_source(
         }
     }
 
+    // 9.7 Extract Middleware Usage (NEW)
+    let middleware_query = if !config.query_middleware.is_empty() {
+        Some(Query::new(&language, config.query_middleware).map_err(|e| e.to_string())?)
+    } else { None };
+
+    let mut detected_middleware = Vec::new();
+
+    if let Some(ref q) = middleware_query {
+        let mut mw_cursor = QueryCursor::new();
+        let mut mw_matches = mw_cursor.matches(q, root_node, code_bytes);
+        
+        while let Some(m) = mw_matches.next() {
+            for cap in m.captures {
+                let capture_name = q.capture_names()[cap.index as usize];
+                let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
+                
+                // Clean quotes for Django strings
+                let clean_text = text.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_string();
+                
+                if capture_name == "middleware.use" || capture_name == "middleware.config" {
+                    detected_middleware.push(clean_text);
+                }
+            }
+        }
+    }
+
     // Deduplicate logic
     for func in &mut functions {
         func.config_keys.sort(); func.config_keys.dedup();
@@ -653,7 +681,7 @@ pub fn analyze_source(
     functions.push(module_info);
 
     Ok(FileAnalysis { 
-        functions, imports, exports, literals, implementations, global_vars: HashMap::new() 
+        functions, imports, exports, literals, implementations, global_vars: HashMap::new(), middleware_usage: detected_middleware,
     })
 }
 

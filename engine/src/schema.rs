@@ -119,6 +119,10 @@ pub struct WorkspaceIndex {
     // Mapping: SymbolId (Function/Reducer) -> List of Action Strings it handles
     pub raw_action_handlers: HashMap<SymbolId, Vec<String>>,
 
+    // Mapping of FileId -> List of Middleware Symbol Names/Strings used in this file
+    // e.g. app.ts -> ["AuthMiddleware", "Logger"]
+    pub raw_middleware_usage: HashMap<FileId, Vec<String>>,
+
     // Maps "@my-app/ui" -> "packages/ui" (relative to root)
     pub package_path_map: HashMap<String, String>, 
 }

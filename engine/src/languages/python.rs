@@ -13,13 +13,13 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
         [
             (call function: [(identifier) @call.name (attribute attribute: (identifier) @call.name)])
             
-            ;; NEW: Capture getattr(service, ...)
             (call
-                function: (identifier) @fn (#eq? @fn "getattr")
+                function: (identifier) @fn
                 arguments: (argument_list 
                     (identifier) @call.dynamic_dispatch
-                    (_) ;; The method name (variable or string)
+                    (_) 
                 )
+                (#eq? @fn "getattr")
             )
         ]
     "#,
@@ -45,37 +45,33 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
                     alias: (identifier) @import.alias
                 )
             )
-
-            ;; --- Dynamic Import Support ---
-
-            ;; importlib.import_module("literal")
             (call
                 function: (attribute
-                    object: (identifier) @obj (#eq? @obj "importlib")
-                    attribute: (identifier) @meth (#eq? @meth "import_module")
+                    object: (identifier) @obj 
+                    attribute: (identifier) @meth 
                 )
                 arguments: (argument_list (string) @import.source)
+                (#eq? @obj "importlib")
+                (#eq? @meth "import_module")
             )
-
-            ;; importlib.import_module(variable) -> @import.dynamic
             (call
                 function: (attribute
-                    object: (identifier) @obj (#eq? @obj "importlib")
-                    attribute: (identifier) @meth (#eq? @meth "import_module")
+                    object: (identifier) @obj 
+                    attribute: (identifier) @meth 
                 )
                 arguments: (argument_list (identifier) @import.dynamic)
+                (#eq? @obj "importlib")
+                (#eq? @meth "import_module")
             )
-
-            ;; __import__("literal")
             (call
-                function: (identifier) @fn (#eq? @fn "__import__")
+                function: (identifier) @fn 
                 arguments: (argument_list (string) @import.source)
+                (#eq? @fn "__import__")
             )
-             
-            ;; __import__(variable) -> @import.dynamic
             (call
-                function: (identifier) @fn (#eq? @fn "__import__")
+                function: (identifier) @fn 
                 arguments: (argument_list (identifier) @import.dynamic)
+                (#eq? @fn "__import__")
             )
         ]
     "#,
@@ -107,23 +103,20 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
         (decorator) @decorator.name
     "#,
     query_actions: r#"
-        ;; --- Dispatchers ---
         (call
-            function: (attribute attribute: (identifier) @fn (#match? @fn "^(send|emit|dispatch|publish)$"))
+            function: (attribute attribute: (identifier) @fn)
             arguments: (argument_list 
                 [(string) (identifier)] @action.dispatch
             )
+            (#match? @fn "^(send|emit|dispatch|publish)$")
         )
-
-        ;; --- Handlers (Decorators) ---
         (decorator
             (call
-                function: (identifier) @fn (#match? @fn "^(receiver|on|subscribe)$")
+                function: (identifier) @fn 
                 arguments: (argument_list [(string) (identifier)] @action.handle)
             )
+            (#match? @fn "^(receiver|on|subscribe)$")
         )
-        
-        ;; --- Handlers (Comparisons) ---
         (comparison_operator
             (identifier)
             [(string) (identifier)] @action.handle
@@ -131,6 +124,36 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
         (comparison_operator
             [(string) (identifier)] @action.handle
             (identifier)
+        )
+    "#,
+    // Middleware Detection
+    // 1. Django: MIDDLEWARE = [...]
+    // 2. Flask: @app.before_request (no parens) OR @app.before_request() (parens)
+    query_middleware: r#"
+        (assignment
+            left: (identifier) @var 
+            right: (list (string) @middleware.config)
+            (#eq? @var "MIDDLEWARE")
+        )
+
+        ;; Flask: @app.before_request (Attribute, no call)
+        (decorated_definition
+            (decorator
+                (attribute attribute: (identifier) @attr)
+            )
+            (function_definition name: (identifier) @middleware.use)
+            (#eq? @attr "before_request")
+        )
+
+        ;; Flask: @app.before_request() (Call inside decorator)
+        (decorated_definition
+            (decorator
+                (call
+                    function: (attribute attribute: (identifier) @attr)
+                )
+            )
+            (function_definition name: (identifier) @middleware.use)
+            (#eq? @attr "before_request")
         )
     "#,
     di_decorators: &["dataclass", "Component", "Service"],
