@@ -13,3 +13,4 @@ pub mod toml;
 pub mod dotenv;
 pub mod sql;
 pub mod prisma;
+pub mod hcl;

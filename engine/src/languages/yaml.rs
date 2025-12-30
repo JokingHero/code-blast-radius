@@ -30,7 +30,20 @@ pub const YAML_CONFIG: LanguageConfig = LanguageConfig {
     "#,
     query_implements: "",
     query_config: "",
-    query_vals: "",
+    query_vals: r#"
+        ;; Standard key: value
+        (block_mapping_pair
+            key: (flow_node (plain_scalar (string_scalar) @val.name))
+            value: (flow_node (plain_scalar (string_scalar) @val.value))
+        )
+        
+        ;; Docker Compose / K8s "environment:" list syntax
+        ;; - NAME=VALUE
+        (block_sequence_item
+            (flow_node (plain_scalar (string_scalar) @env_pair))
+            (#match? @env_pair "=")
+        ) @val.name ;; We will need to split this string in analyzer, or accept fuzzy match
+    "#,
     query_types: "",
     query_decorators: "",
     query_actions: "",

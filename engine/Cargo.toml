@@ -41,6 +41,7 @@ tree-sitter-yaml = "0.7.2"      # Maintained by amaanq/tree-sitter-grammars
 tree-sitter-toml-ng = "0.7.0"   # The Next-Gen TOML parser
 tree-sitter-sequel = "0.3.11"   # SQL 
 tree-sitter-prisma-io = "1.6.0"
+tree-sitter-hcl = "1.1.0"
 
 [build-dependencies]
 cc = "1.0"

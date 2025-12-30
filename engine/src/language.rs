@@ -18,7 +18,7 @@ pub enum SupportedLanguage {
     Dotenv,
     Sql,
     Prisma,
-    
+    Hcl,
 }
 
 /// Central mapping from the enum to the actual Tree-Sitter grammar object.
@@ -39,6 +39,7 @@ pub fn get_language(lang: SupportedLanguage) -> Language {
         SupportedLanguage::Toml => tree_sitter_toml_ng::LANGUAGE.into(),
         SupportedLanguage::Sql => tree_sitter_sequel::LANGUAGE.into(),
         SupportedLanguage::Prisma => tree_sitter_prisma_io::LANGUAGE.into(),
+        SupportedLanguage::Hcl => tree_sitter_hcl::LANGUAGE.into(),
     }
 }
 
@@ -82,5 +83,6 @@ pub fn get_language_configs() -> Vec<&'static LanguageConfig> {
         &languages::dotenv::DOTENV_CONFIG,
         &languages::sql::SQL_CONFIG,
         &languages::prisma::PRISMA_CONFIG,
+        &languages::hcl::HCL_CONFIG,
     ]
 }

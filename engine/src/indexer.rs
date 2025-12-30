@@ -606,6 +606,7 @@ impl Indexer {
         self.resolve_file_dependencies();
         self.resolve_state_management();
         self.resolve_middleware_injection(); 
+        self.resolve_iac_links();
     }
 
     fn resolve_external_imports(&mut self) {
@@ -1888,6 +1889,95 @@ impl Indexer {
             let calls = self.index.resolved_calls.entry(router_id).or_default();
             if !calls.contains(&middleware_id) {
                 calls.push(middleware_id);
+            }
+        }
+    }
+
+    fn resolve_iac_links(&mut self) {
+        // Use a typed vector to store links before applying them
+        let mut new_file_links: Vec<(FileId, FileId)> = Vec::new();
+
+        // 1. The Environment Bridge
+        // Link: Code(process.env.VAR) -> Config(VAR: "value")
+        
+        // A. Gather all defined "values" from YAML, JSON, TOML, HCL
+        let mut env_var_definitions: HashMap<String, Vec<FileId>> = HashMap::new();
+        
+        for (file_id, literals) in &self.index.raw_literals {
+            for lit in literals {
+                // Split literal by non-alphanumeric chars to find embedded keys.
+                // This handles cases like: '{"name": "MY_BUCKET_NAME"}'
+                let parts = lit.split(|c: char| !c.is_alphanumeric() && c != '_');
+                
+                for part in parts {
+                    // Heuristic: Env vars are usually UPPER_SNAKE_CASE and > 3 chars
+                    if part.len() > 3 
+                       && part.chars().all(|c| c.is_uppercase() || c.is_numeric() || c == '_') 
+                       && part.contains('_') 
+                    {
+                        let entry = env_var_definitions.entry(part.to_string()).or_default();
+                        // Deduplicate file IDs
+                        if !entry.contains(file_id) {
+                            entry.push(*file_id);
+                        }
+                    }
+                }
+            }
+        }
+
+        // B. Connect Usage to Definition
+        for (sym_id, config_keys) in &self.index.symbol_config_refs {
+            if let Some(sym) = self.index.symbols.get(sym_id) {
+                let user_file_id = sym.file_id;
+                
+                for key in config_keys {
+                    if let Some(def_files) = env_var_definitions.get(key) {
+                        for &def_file_id in def_files {
+                            if user_file_id != def_file_id {
+                                new_file_links.push((user_file_id, def_file_id));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Cloud Resource Heuristic
+        // Link: Code(import "aws-sdk/s3") -> Terraform(resource "aws_s3_bucket")
+        
+        // Identify "Cloud Aware" App Files
+        let mut aws_s3_users = Vec::new();
+        for (file_id, imports) in &self.index.file_imports {
+            for imp in imports {
+                if imp.source.contains("aws-sdk") || imp.source.contains("boto3") {
+                     aws_s3_users.push(*file_id);
+                }
+            }
+        }
+        
+        // Identify "S3 Defining" Infra Files
+        let mut s3_definers = Vec::new();
+        for sym in self.index.symbols.values() {
+            // Check for Terraform/HCL resources
+            if sym.kind == "resource" && sym.name.contains("aws_s3_bucket") {
+                s3_definers.push(sym.file_id);
+            }
+        }
+
+        // Create Weak Links
+        for user_id in &aws_s3_users {
+            for def_id in &s3_definers {
+                if user_id != def_id {
+                    new_file_links.push((*user_id, *def_id));
+                }
+            }
+        }
+
+        // 3. Apply Links
+        for (src, tgt) in new_file_links {
+            let deps = self.index.file_dependencies.entry(src).or_default();
+            if !deps.contains(&tgt) {
+                deps.push(tgt);
             }
         }
     }

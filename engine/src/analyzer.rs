@@ -306,13 +306,10 @@ pub fn analyze_source(
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(&defs_query, root_node, code_bytes);
 
-    // --- DEBUG START ---
-    println!("DEBUG: Analyzing {}", path.display());
-    // --- DEBUG END ---
-
     while let Some(match_) = matches.next() {
         let mut def_node = None;
         let mut name_opt: Option<String> = None;
+        let mut kind_opt: Option<String> = None; // Added to capture kind override
         let mut return_type = None;
         let mut v_name = None;
         let mut v_type = None;
@@ -322,18 +319,16 @@ pub fn analyze_source(
             let cap_name = defs_query.capture_names()[capture.index as usize];
             let text = capture.node.utf8_text(code_bytes).unwrap_or("");
             
-            // --- DEBUG START ---
-            println!("  Capture: {} -> {}", cap_name, text);
-            // --- DEBUG END ---
-
             match cap_name {
                 "function.definition" => def_node = Some(capture.node),
                 "function.name" => name_opt = Some(text.to_string()),
+                "function.kind" => kind_opt = Some(text.to_string()), // Capture kind
                 "function.return_type" => {
                     return_type = Some(text.trim_start_matches(|c| c == ':' || c == '=' || c == '>').trim().to_string());
                 }
                 "variable.name" => {
                     v_name = Some(text.to_string());
+                    // ... existing variable assignment logic
                     if let Some(parent) = capture.node.parent() {
                         if let Some(val) = parent.child_by_field_name("value") {
                             if val.kind() == "call_expression" {
@@ -357,11 +352,10 @@ pub fn analyze_source(
         if let Some(node) = def_node {
             let node_kind = node.kind();
             
-            // --- DEBUG START ---
-            println!("  -> Found Definition: {:?} Kind: {}", name_opt, node_kind);
-            // --- DEBUG END ---
-
-            let kind = if node_kind == "macro_definition" {
+            // Priority: Captured Kind -> Node Kind Heuristics
+            let kind = if let Some(k) = kind_opt {
+                k
+            } else if node_kind == "macro_definition" {
                 "macro".to_string()
             } else if node_kind == "macro_invocation" {
                 "macro_generated".to_string()
@@ -377,6 +371,7 @@ pub fn analyze_source(
             functions.push(FunctionInfo {
                 name: name_opt.clone().unwrap_or_else(|| "anonymous".to_string()),
                 kind, 
+                // ... rest is identical
                 is_anonymous: name_opt.is_none(),
                 range_start: node.start_byte(),
                 range_end: node.end_byte(),
@@ -394,13 +389,12 @@ pub fn analyze_source(
                 handled_actions: Vec::new(),
             });
         } else if let Some(vn) = v_name {
-            // --- DEBUG START ---
-            println!("  -> Found Var Hint: {}", vn);
-            // --- DEBUG END ---
             variable_hints.push((match_.captures[0].node.byte_range(), vn, v_type, v_assign));
         }
     }
-
+    
+    // ... (Rest of the file remains unchanged: Step 7-11)
+    
     // Helper: Smallest Container
     let get_owner_index = |start: usize, end: usize, funcs: &[FunctionInfo]| -> Option<usize> {
         let mut best_idx = None;
@@ -516,8 +510,6 @@ pub fn analyze_source(
         }
 
         // Logic A: Standard Method/Function Call
-        // We use call_range.clone() here so we don't consume the Option 
-        // if we need to fall through to Logic B.
         if let (Some(m), Some(range)) = (m_name, call_range.clone()) {
             if let Some(idx) = get_owner_index(range.start, range.end, &functions) {
                 let func = &mut functions[idx];
@@ -534,7 +526,6 @@ pub fn analyze_source(
         }
         
         // Logic B: Dynamic Dispatch / Reflection
-        // We register a wildcard "*" to tell the indexer: "Link everything about this type."
         else if let (Some(dr), Some(range)) = (dynamic_receiver, call_range) {
             if let Some(idx) = get_owner_index(range.start, range.end, &functions) {
                 let func = &mut functions[idx];
@@ -618,7 +609,7 @@ pub fn analyze_source(
         }
     }
 
-    // 9.7 Extract Middleware Usage (NEW)
+    // 9.7 Extract Middleware Usage
     let middleware_query = if !config.query_middleware.is_empty() {
         Some(Query::new(&language, config.query_middleware).map_err(|e| e.to_string())?)
     } else { None };
@@ -633,8 +624,6 @@ pub fn analyze_source(
             for cap in m.captures {
                 let capture_name = q.capture_names()[cap.index as usize];
                 let text = cap.node.utf8_text(code_bytes).unwrap_or("").to_string();
-                
-                // Clean quotes for Django strings
                 let clean_text = text.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_string();
                 
                 if capture_name == "middleware.use" || capture_name == "middleware.config" {
