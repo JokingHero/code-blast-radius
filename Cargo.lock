@@ -181,6 +181,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "rfc-engine",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
