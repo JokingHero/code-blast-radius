@@ -84,6 +84,12 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             name: (identifier) @variable.name
             type: (type_annotation)? @variable.type
           )
+
+          ;; Constructor Parameters (for DI)
+          (required_parameter
+            pattern: (identifier) @variable.name
+            type: (type_annotation)? @variable.type
+          )
     "#,
     query_calls: r#"
         [
@@ -228,13 +234,16 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             value: [(string) (template_string)] @val.value
         )
     "#,
+    // FIXED: Simplified to use broad node captures.
+    // - (type_identifier) catches almost all types (interfaces, generics, array types, etc.)
+    // - (predefined_type) catches things like 'string', 'number' (less useful for linking but valid)
+    // - Specific rules for extends/new where a simple (identifier) acts as a type.
     query_types: r#"
         [
-            (type_annotation (type_identifier) @type.ref)
+            (type_identifier) @type.ref
+            (predefined_type) @type.ref
             (extends_clause value: (identifier) @type.ref)
-            (implements_clause (type_identifier) @type.ref)
             (new_expression constructor: (identifier) @type.ref)
-            (type_arguments (type_identifier) @type.ref)
         ]
     "#,
     query_decorators: r#"
@@ -300,6 +309,15 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
                 [(identifier) (call_expression)] @middleware.use
             )
             (#eq? @prop "use")
+        )
+    "#,
+    query_route_defs: r#"
+        (decorator
+            (call_expression
+                function: (identifier) @fn
+                arguments: (arguments [(string) (template_string)] @route.path)
+            )
+            (#match? @fn "^(Controller|Get|Post|Put|Delete|Patch)$")
         )
     "#,
     di_decorators: &["Injectable", "Component", "Directive", "Pipe", "Service"],

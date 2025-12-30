@@ -60,6 +60,7 @@ pub struct LanguageConfig {
     pub query_decorators: &'static str,
     pub query_actions: &'static str, 
     pub query_middleware: &'static str, 
+    pub query_route_defs: &'static str,
     pub di_decorators: &'static [&'static str], // ["Injectable", "Service", "Component", "Bean"]
     pub magic_methods: &'static [&'static str], 
 }

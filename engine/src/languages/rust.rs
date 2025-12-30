@@ -150,6 +150,7 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
         )
     "#,
     query_middleware: "",
+    query_route_defs: "",
     di_decorators: &[],
     magic_methods: &[]
 };

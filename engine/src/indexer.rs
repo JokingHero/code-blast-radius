@@ -117,7 +117,9 @@ impl Indexer {
             self.index.file_dependencies.remove(&node.id);
             
             // Clean up implicit routes for this file
-            self.index.implicit_routes.retain(|_, v| *v != node.id);
+            self.index.implicit_routes.retain(|_, sym_id| {
+                self.index.symbols.get(sym_id).map_or(false, |s| s.file_id != node.id)
+            });
         }
     }
 
@@ -372,10 +374,7 @@ impl Indexer {
             is_test: is_path_test,
         });
 
-        // --- Implicit Route Detection ---
-        if let Some(route) = Self::detect_framework_route(path_obj) {
-            self.index.implicit_routes.insert(route, file_id);
-        }
+
 
         match analyze_source(path_obj, content, config) {
             Ok(analysis) => {
@@ -392,6 +391,8 @@ impl Indexer {
                     self.index.raw_middleware_usage.insert(file_id, analysis.middleware_usage);
                 }
 
+
+
                 let mut file_symbol_ids = Vec::new();
 
                 for func in analysis.functions {
@@ -401,11 +402,11 @@ impl Indexer {
                     let name_lower = func.name.to_lowercase();
                     let code_trim = func.source_code.trim_start();
                     
-                    // Use the kind detected by Analyzer (Function, Macro, Container, etc.) ---
+                    // Use the kind detected by Analyzer (Function, Macro, Container, etc.)
                     let kind = func.kind.clone();
                     let is_module = kind == "module"; 
 
-                    // Test Detection Logic...
+                    // --- Test Detection Logic ---
                     let is_js_test_block =
                         code_trim.starts_with("it(") ||
                         code_trim.starts_with("it.") ||
@@ -447,6 +448,7 @@ impl Indexer {
                         is_external: false,
                         external_source: None,
                         decorators: func.decorators.clone(),
+                        routes: func.routes.clone(),
                     });
 
                     file_symbol_ids.push(symbol_id);
@@ -486,7 +488,7 @@ impl Indexer {
                     }
                 }
 
-                // Config Data Linking
+                // --- Config Data Linking ---
                 let is_data_file = matches!(
                     config.lang_enum,
                     crate::language::SupportedLanguage::Yaml |
@@ -501,7 +503,7 @@ impl Indexer {
                     }
                 }
 
-                // Container/Member Linking
+                // --- Container/Member Linking ---
                 let container_ids: Vec<SymbolId> = file_symbol_ids
                     .iter()
                     .filter(|&&id| {
@@ -542,7 +544,7 @@ impl Indexer {
                     }
                 }
 
-                // Link Orphans
+                // --- Link Orphans to Module ---
                 let module_id = file_symbol_ids
                     .iter()
                     .find(|&&id| { self.index.symbols[&id].kind == "module" })
@@ -562,6 +564,7 @@ impl Indexer {
                     }
                 }
 
+                // --- Store Implementations ---
                 for (child, parent) in analysis.implementations {
                     if let Some(ids) = self.index.symbol_map.get(&child) {
                         if
@@ -572,6 +575,22 @@ impl Indexer {
                             self.index.raw_implementations.entry(cid).or_default().push(parent);
                         }
                     }
+                }
+                // --- 4. Populate Implicit Routes (Symbol-based) ---
+                // A. Path-Based (Next.js) -> Map to Module Symbol
+                if let Some(route) = Self::detect_framework_route(path_obj) {
+                     if let Some(mid) = file_symbol_ids.iter().find(|&&id| self.index.symbols[&id].kind == "module") {
+                         self.index.implicit_routes.insert(route, *mid);
+                     }
+                }
+
+                // B. Code-Based (NestJS) -> Map to specific Symbol (Controller/Method)
+                for &sid in &file_symbol_ids {
+                     if let Some(sym) = self.index.symbols.get(&sid) {
+                         for r in &sym.routes {
+                             self.index.implicit_routes.insert(r.clone(), sid);
+                         }
+                     }
                 }
             }
             Err(e) => {
@@ -596,7 +615,7 @@ impl Indexer {
         self.resolve_pubsub_wildcards();
         self.resolve_type_sniffing();
         self.resolve_magic_proxies(); 
-        self.resolve_fingerprints();
+        self.resolve_fingerprints(); // Re-enabled with unique match check
         self.resolve_implicit_connections();
         self.resolve_dependency_injection();
         self.resolve_function_calls_with_fallback();
@@ -654,6 +673,7 @@ impl Indexer {
                             is_external: true,
                             external_source: Some(pkg_name.clone()),
                             decorators: Vec::new(),
+                            routes: Vec::new(),
                         });
                     }
                 }
@@ -701,9 +721,9 @@ impl Indexer {
         let mut new_links = Vec::new();
 
         // 1. Snapshot implicit routes to avoid borrow checker issues
-        let route_definitions: Vec<(String, FileId)> = self.index.implicit_routes
+        let route_definitions: Vec<(String, SymbolId)> = self.index.implicit_routes
             .iter()
-            .map(|(r, f)| (r.clone(), *f))
+            .map(|(r, s)| (r.clone(), *s))
             .collect();
 
         for (src_file_id, literals) in &self.index.raw_literals {
@@ -711,28 +731,26 @@ impl Indexer {
                 let clean_lit = lit.trim_matches(|c| c == '"' || c == '\'' || c == '`');
                 
                 // OPTION A: Exact Match (The resolved constant case)
-                // Generated: "/api/v1/users" -> Matches: "/api/v1/users"
-                if let Some(&target_file_id) = self.index.implicit_routes.get(clean_lit) {
-                    if *src_file_id != target_file_id {
-                        new_links.push((*src_file_id, target_file_id));
-                    }
-                    continue; // Match found, next literal
+                if let Some(&target_sym_id) = self.index.implicit_routes.get(clean_lit) {
+                     if let Some(target_sym) = self.index.symbols.get(&target_sym_id) {
+                        if *src_file_id != target_sym.file_id {
+                            new_links.push((*src_file_id, target_sym_id));
+                        }
+                     }
+                     continue; 
                 }
 
-                // OPTION B: Wildcard Match (The unresolved variable case)
-                // Generated: "/api/v1/*" -> Matches: "/api/v1/users" or "/api/v1/:id"
+                // OPTION B: Wildcard Match
                 if clean_lit.contains('*') {
-                    // Convert glob to regex-like prefix check (simplified)
                     let prefix = clean_lit.split('*').next().unwrap_or("");
-                    if prefix.len() > 3 { // Avoid matching "*" or "/"
-                        for (route_def, target_file_id) in &route_definitions {
-                            if *src_file_id == *target_file_id { continue; }
+                    if prefix.len() > 3 { 
+                        for (route_def, target_sym_id) in &route_definitions {
+                            if let Some(target_sym) = self.index.symbols.get(target_sym_id) {
+                                if *src_file_id == target_sym.file_id { continue; }
 
-                            // Check if backend route starts with the resolved prefix
-                            // Frontend: "/api/v1/*"
-                            // Backend:  "/api/v1/users"
-                            if route_def.starts_with(prefix) {
-                                new_links.push((*src_file_id, *target_file_id));
+                                if route_def.starts_with(prefix) {
+                                    new_links.push((*src_file_id, *target_sym_id));
+                                }
                             }
                         }
                     }
@@ -741,22 +759,27 @@ impl Indexer {
         }
 
         // Create Dependencies
-        for (src, tgt) in new_links {
-            // Link File Dependency
-            let deps = self.index.file_dependencies.entry(src).or_default();
-            if !deps.contains(&tgt) {
-                deps.push(tgt);
-            }
+        for (src_file_id, tgt_sym_id) in new_links {
+            if let Some(tgt_sym) = self.index.symbols.get(&tgt_sym_id) {
+                let tgt_file_id = tgt_sym.file_id;
+                
+                // Link File Dependency
+                let deps = self.index.file_dependencies.entry(src_file_id).or_default();
+                if !deps.contains(&tgt_file_id) {
+                    deps.push(tgt_file_id);
+                }
 
-            // Link Module Symbols (so semantic search traverses it)
-            // We link the module symbol of the source file to the module symbol of the target file
-            let src_mod = self.index.symbols.values().find(|s| s.file_id == src && s.kind == "module").map(|s| s.id);
-            let tgt_mod = self.index.symbols.values().find(|s| s.file_id == tgt && s.kind == "module").map(|s| s.id);
+                // Link Module Symbols -> Target Symbol
+                // We link the module symbol of the source file to the SPECIFIC target symbol (Controller/Etc)
+                let src_mod = self.index.symbols.values()
+                    .find(|s| s.file_id == src_file_id && s.kind == "module")
+                    .map(|s| s.id);
 
-            if let (Some(s), Some(t)) = (src_mod, tgt_mod) {
-                let calls = self.index.resolved_calls.entry(s).or_default();
-                if !calls.contains(&t) {
-                    calls.push(t);
+                if let Some(s) = src_mod {
+                    let calls = self.index.resolved_calls.entry(s).or_default();
+                    if !calls.contains(&tgt_sym_id) {
+                        calls.push(tgt_sym_id);
+                    }
                 }
             }
         }
@@ -964,14 +987,23 @@ impl Indexer {
             for (receiver_var_name, methods_called) in receiver_map {
 
                 // --- 1. Trace the Variable's Type Scope ---
+                // Strip "this." or "self." prefix for lookup since constructor params are stored as "api" not "this.api"
+                let lookup_name = if receiver_var_name.starts_with("this.") {
+                    &receiver_var_name[5..]
+                } else if receiver_var_name.starts_with("self.") {
+                    &receiver_var_name[5..]
+                } else {
+                    receiver_var_name.as_str()
+                };
+
                 // We walk up the scope chain (Function -> Class -> Module) to find
-                // where 'receiver_var_name' is defined (e.g., arguments, local vars).
+                // where 'lookup_name' is defined (e.g., arguments, local vars).
                 let mut type_hint = None;
                 let mut curr_scope = Some(caller_id);
 
                 while let Some(sid) = curr_scope {
                     if let Some(vars) = self.index.local_variable_types.get(&sid) {
-                        if let Some(h) = vars.get(receiver_var_name) {
+                        if let Some(h) = vars.get(lookup_name) {
                             type_hint = Some(h);
                             break;
                         }
@@ -1061,11 +1093,85 @@ impl Indexer {
     fn resolve_fingerprints(&mut self) {
         let mut links = Vec::new();
         for (&cid, fprints) in &self.index.fingerprints {
-            for (_, meths) in fprints {
+            // Check if this caller already has resolved_calls (e.g., from type sniffing)
+            let existing_calls = self.index.resolved_calls.get(&cid).cloned().unwrap_or_default();
+            
+            for (receiver_var, meths) in fprints {
+                // Skip if this receiver already has a resolved container target
+                // This prevents fingerprints from adding duplicate links when type sniffing succeeded
+                let already_has_container = existing_calls.iter().any(|&target_id| {
+                    if let Some(_sym) = self.index.symbols.get(&target_id) {
+                        // Check if target is a container that has the methods
+                        if let Some(cont_meths) = self.index.container_methods.get(&target_id) {
+                            meths.iter().all(|m| cont_meths.contains(m))
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                });
+                
+                if already_has_container {
+                    continue; // Type sniffing already resolved this, skip fingerprint fallback
+                }
+
+                // 1. Collect all structural candidates (Containers that implement ALL methods)
+                let mut candidates = Vec::new();
                 for (&cont_id, cont_meths) in &self.index.container_methods {
+                    // EXCLUDE MODULES from duck typing candidates.
+                    // Modules structurally "contain" all methods in the file, which creates
+                    // false positives (God Object problem) and interferes with name matching.
+                    if let Some(sym) = self.index.symbols.get(&cont_id) {
+                        if sym.kind == "module" {
+                            continue;
+                        }
+                    }
+
                     if meths.iter().all(|m| cont_meths.contains(m)) {
-                        links.push((cid, cont_id));
-                        for m in meths {
+                        candidates.push(cont_id);
+                    }
+                }
+
+                if candidates.is_empty() { continue; }
+
+                // 2. Heuristic: Name Matching
+                // If we have multiple candidates (ambiguity), filter by name similarity to reduce leaks.
+                // e.g. "this.prisma.user" -> "user". "user" matches "UsersService" but not "OrdersService".
+                let receiver_hint = receiver_var.split('.').last().unwrap_or(receiver_var).to_lowercase();
+                let clean_hint = receiver_hint.trim_matches(|c| c == '_' || c == '$');
+                
+                let name_matched_candidates: Vec<SymbolId> = if clean_hint.len() < 2 {
+                    // Hint too short to be useful, skip filtering
+                    Vec::new()
+                } else {
+                    candidates.iter().filter(|&&pid| {
+                        if let Some(sym) = self.index.symbols.get(&pid) {
+                            let sym_name = sym.name.to_lowercase();
+                            // Check for loose containment
+                            sym_name.contains(clean_hint) || clean_hint.contains(&sym_name)
+                        } else {
+                            false
+                        }
+                    }).cloned().collect()
+                };
+
+                // 3. Decision Logic
+                let final_candidates = if !name_matched_candidates.is_empty() {
+                    // Strong Signal: Variable name matches Class name (e.g. "user" -> "UsersService").
+                    name_matched_candidates
+                } else {
+                    // Weak Signal: No name match.
+                    // Fallback to ALL structural matches (Classic Duck Typing).
+                    // This handles generic variables like "shape" matching "Circle" and "Square".
+                    candidates
+                };
+
+                for cont_id in final_candidates {
+                    links.push((cid, cont_id));
+                    // Link specific methods inside that container
+                    if let Some(_cont_meths) = self.index.container_methods.get(&cont_id) {
+                         for m in meths {
                             if let Some(m_ids) = self.index.symbol_map.get(m) {
                                 for &mid in m_ids {
                                     if self.index.symbols[&mid].parent_id == Some(cont_id) {
@@ -1073,7 +1179,7 @@ impl Indexer {
                                     }
                                 }
                             }
-                        }
+                         }
                     }
                 }
             }
@@ -1318,9 +1424,20 @@ impl Indexer {
         for (func_id, prints) in &self.index.fingerprints {
             for (receiver, _) in prints {
                 for (table_name, &table_sym_id) in &schema_map {
-                    // Check for "Order" or ".Order" in "prisma.Order"
+                    // Check logic:
+                    // 1. Exact match (SQL: "users" == "users")
+                    // 2. Suffix match (ORM: "prisma.User" ends with "User")
+                    // 3. Case-insensitive Suffix (ORM: "prisma.user" ends with "user" which matches "User" case-insensitively)
+                    
+                    let receiver_lower = receiver.to_lowercase();
+                    let table_lower = table_name.to_lowercase();
+
                     if receiver == table_name || receiver.ends_with(&format!(".{}", table_name)) {
                         new_links.push((*func_id, table_sym_id));
+                    } 
+                    // Case-insensitive fallback for Prisma "prisma.user" vs "model User"
+                    else if receiver_lower == table_lower || receiver_lower.ends_with(&format!(".{}", table_lower)) {
+                         new_links.push((*func_id, table_sym_id));
                     }
                 }
             }
@@ -1376,7 +1493,22 @@ impl Indexer {
     fn resolve_literal_dependencies(&mut self) {
         let mut potential_links: Vec<(FileId, String)> = Vec::new();
 
+        // Get config file IDs to exclude
+        let config_file_ids: HashSet<FileId> = self.index.files.iter()
+            .filter(|(path, _)| {
+                let p = path.to_lowercase();
+                p.ends_with("tsconfig.json") || p.ends_with("jsconfig.json") || 
+                p.ends_with("package.json") || p.ends_with(".env")
+            })
+            .map(|(_, node)| node.id)
+            .collect();
+
         for (&file_id, literals) in &self.index.raw_literals {
+            // Skip config files from creating literal-based links
+            if config_file_ids.contains(&file_id) {
+                continue;
+            }
+
             for lit in literals {
                 if
                     (lit.contains('/') || lit.contains('.')) &&
@@ -1420,9 +1552,29 @@ impl Indexer {
     fn resolve_shared_literals(&mut self) {
         let mut literal_map: HashMap<String, Vec<FileId>> = HashMap::new();
 
+        // Get config file IDs to exclude
+        let config_file_ids: HashSet<FileId> = self.index.files.iter()
+            .filter(|(path, _)| {
+                let p = path.to_lowercase();
+                p.ends_with("tsconfig.json") || p.ends_with("jsconfig.json") || 
+                p.ends_with("package.json") || p.ends_with(".env")
+            })
+            .map(|(_, node)| node.id)
+            .collect();
+
         // 1. Build the Reverse Index
         for (&file_id, literals) in &self.index.raw_literals {
+            // Skip config files from shared literal linking
+            if config_file_ids.contains(&file_id) {
+                continue;
+            }
+
             for lit in literals {
+                // FIX: Ignore literals that look like import paths
+                if lit.starts_with("./") || lit.starts_with("../") || lit.starts_with("@") {
+                    continue;
+                }
+
                 let is_route = lit.starts_with('/');
                 let is_long_identifier =
                     lit.len() > 10 &&
@@ -1490,8 +1642,22 @@ impl Indexer {
         let mut patterns: Vec<(FileId, String)> = Vec::new();
         let mut candidates: Vec<(FileId, String)> = Vec::new();
 
+        // Get config file IDs to exclude
+        let config_file_ids: HashSet<FileId> = self.index.files.iter()
+            .filter(|(path, _)| {
+                let p = path.to_lowercase();
+                p.ends_with("tsconfig.json") || p.ends_with("jsconfig.json") || 
+                p.ends_with("package.json") || p.ends_with(".env")
+            })
+            .map(|(_, node)| node.id)
+            .collect();
+
         // 1. Partition literals
         for (&file_id, literals) in &self.index.raw_literals {
+            if config_file_ids.contains(&file_id) {
+                continue;
+            }
+            
             for lit in literals {
                 // Heuristic: Must have length > 2 and contain a separator or wildcard
                 // to avoid matching common words like "start" or "error".

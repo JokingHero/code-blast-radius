@@ -52,6 +52,7 @@ pub struct SymbolNode {
     pub is_external: bool,      // Is this from node_modules or a std lib?
     pub external_source: Option<String>, // e.g., "axios" or "fs"
     pub decorators: Vec<String>, 
+    pub routes: Vec<String>,
 }
 
 #[derive(Archive, Deserialize, Serialize, Debug, Default)]
@@ -106,9 +107,9 @@ pub struct WorkspaceIndex {
     // Mapping of SymbolId -> List of Decorator names used on it
     pub raw_decorators: HashMap<SymbolId, Vec<String>>,
     
-    // Mapping of Route String -> FileId
-    // e.g., "/api/login" -> FileId(5) (which points to pages/api/login.ts)
-    pub implicit_routes: HashMap<String, FileId>, 
+    // Mapping of Route String -> SymbolId (pointing to the Module or specific Function/Class)
+    // e.g., "/api/login" -> SymbolId(10) (which points to LoginController or the file module)
+    pub implicit_routes: HashMap<String, SymbolId>, 
 
     // Store raw alias mappings, e.g., "@/*" -> "src/*"
     pub import_mappings: HashMap<String, String>, 

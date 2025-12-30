@@ -156,6 +156,15 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
             (#eq? @attr "before_request")
         )
     "#,
+    query_route_defs: r#"
+        (decorator
+            (call
+                function: (attribute attribute: (identifier) @fn)
+                arguments: (argument_list [(string)] @route.path)
+            )
+            (#match? @fn "^(route|get|post)$")
+        )
+    "#, 
     di_decorators: &["dataclass", "Component", "Service"],
     magic_methods: &["__getattr__", "__getattribute__"], 
 };

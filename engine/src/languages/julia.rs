@@ -16,6 +16,7 @@ pub const JULIA_CONFIG: LanguageConfig = LanguageConfig {
     query_decorators: "",
     query_actions: "",
     query_middleware: "",
+    query_route_defs: "",
     di_decorators: &[],
     magic_methods: &[]
 };
