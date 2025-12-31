@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use crate::resolution::Indexer;
-use crate::models::{FileId, SymbolId, SymbolKind};
+use crate::models::{FileId, SymbolId, SymbolKind, EdgeKind};
 use crate::topic::matches_topic;
 
 impl Indexer {
@@ -25,25 +25,25 @@ impl Indexer {
         }
 
         for (src, tgt) in new_links {
-            let calls = self.index.resolved_calls.entry(src).or_default();
-            if !calls.contains(&tgt) { calls.push(tgt); }
+            self.add_edge(src, tgt, EdgeKind::Dispatches);
+            self.add_edge(src, tgt, EdgeKind::Calls);
         }
     }
 
     pub(crate) fn resolve_pubsub_wildcards(&mut self) {
         let mut patterns: Vec<(FileId, String)> = Vec::new();
         let mut candidates: Vec<(FileId, String)> = Vec::new();
-        
         let config_file_ids: HashSet<FileId> = self.index.files.iter()
             .filter(|(path, _)| { let p = path.to_lowercase(); p.ends_with("tsconfig.json") || p.ends_with("package.json") })
             .map(|(_, node)| node.id).collect();
 
-        for (&file_id, literals) in &self.index.raw_literals {
+        let literals_snapshot: Vec<(FileId, Vec<String>)> = self.index.raw_literals.iter().map(|(k, v)| (*k, v.clone())).collect();
+
+        for (file_id, literals) in literals_snapshot {
             if config_file_ids.contains(&file_id) { continue; }
             for lit in literals {
                 if lit.len() < 3 || (!lit.contains('.') && !lit.contains('/') && !lit.contains(':')) { continue; }
                 let clean = lit.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_string();
-                
                 if clean.contains('*') || clean.contains('#') || clean.contains('>') {
                     patterns.push((file_id, clean));
                 } else {
@@ -56,11 +56,9 @@ impl Indexer {
             for (cand_file, cand_str) in &candidates {
                 if pat_file == cand_file { continue; }
                 if matches_topic(pat_str, cand_str) {
-                    let deps_a = self.index.file_dependencies.entry(*pat_file).or_default();
-                    if !deps_a.contains(cand_file) { deps_a.push(*cand_file); }
-                    let deps_b = self.index.file_dependencies.entry(*cand_file).or_default();
-                    if !deps_b.contains(pat_file) { deps_b.push(*pat_file); }
-                    
+                    // FIX: Restore File Dependency (Publisher -> Subscriber)
+                    let deps = self.index.file_dependencies.entry(*cand_file).or_default();
+                    if !deps.contains(pat_file) { deps.push(*pat_file); }
                     self.link_modules(*pat_file, *cand_file);
                 }
             }
@@ -69,14 +67,15 @@ impl Indexer {
 
     pub(crate) fn resolve_magic_proxies(&mut self) {
         let mut new_links = Vec::new();
-        for (&caller_id, receiver_map) in &self.index.fingerprints {
+        let fingerprints_snapshot: Vec<(SymbolId, HashMap<String, Vec<String>>)> = self.index.fingerprints.iter().map(|(k, v)| (*k, v.clone())).collect();
+
+        for (caller_id, receiver_map) in fingerprints_snapshot {
             for (receiver_var, methods) in receiver_map {
                 let mut type_class_id = None;
-                // Reuse scope walking
                 let mut curr_scope = Some(caller_id);
                 while let Some(sid) = curr_scope {
                     if let Some(vars) = self.index.local_variable_types.get(&sid) {
-                        if let Some(type_name) = vars.get(receiver_var) {
+                        if let Some(type_name) = vars.get(&receiver_var) {
                              let clean = type_name.split('<').next().unwrap().trim();
                              if let Some(ids) = self.index.symbol_map.get(clean) {
                                  type_class_id = ids.iter().find(|&&id| {
@@ -91,25 +90,24 @@ impl Indexer {
                 }
 
                 if let Some(class_id) = type_class_id {
-                    // Logic inline to avoid pub method exposure for now
                      let file_id = self.index.symbols[&class_id].file_id;
                      let file_path = &self.index.files.values().find(|f| f.id == file_id).unwrap().path;
                      let ext = Path::new(file_path).extension().and_then(|s| s.to_str()).unwrap_or("");
                      
                      if let Some(config) = self.configs.get(ext) {
                         if !config.magic_methods.is_empty() {
-                            let explicit_methods = self.index.container_methods.get(&class_id);
-                            for method_name in methods {
-                                let is_explicit = explicit_methods.map_or(false, |s| s.contains(method_name));
-                                if !is_explicit {
-                                    if let Some(class_members) = self.index.container_methods.get(&class_id) {
-                                        for &magic_name in config.magic_methods {
-                                            if class_members.contains(magic_name) {
-                                                if let Some(candidates) = self.index.symbol_map.get(magic_name) {
-                                                    for &magic_id in candidates {
-                                                        if self.index.symbols[&magic_id].parent_id == Some(class_id) {
-                                                            new_links.push((caller_id, magic_id));
-                                                        }
+                            let has_explicit = if let Some(explicit_methods) = self.index.container_methods.get(&class_id) {
+                                methods.iter().any(|m| explicit_methods.contains(m))
+                            } else { false };
+
+                            if !has_explicit {
+                                if let Some(class_members) = self.index.container_methods.get(&class_id) {
+                                    for &magic_name in config.magic_methods {
+                                        if class_members.contains(magic_name) {
+                                            if let Some(candidates) = self.index.symbol_map.get(magic_name) {
+                                                for &magic_id in candidates {
+                                                    if self.index.symbols[&magic_id].parent_id == Some(class_id) {
+                                                        new_links.push((caller_id, magic_id));
                                                     }
                                                 }
                                             }
@@ -123,8 +121,7 @@ impl Indexer {
             }
         }
         for (src, tgt) in new_links {
-            let calls = self.index.resolved_calls.entry(src).or_default();
-            if !calls.contains(&tgt) { calls.push(tgt); }
+            self.add_edge(src, tgt, EdgeKind::Calls);
         }
     }
 
@@ -135,15 +132,11 @@ impl Indexer {
             for dec_name in dec_names {
                 let clean = dec_name.split('(').next().unwrap_or(&dec_name).trim();
                 if let Some(target_id) = self.resolve_single_call(caller_file_id, clean) {
-                    self.index.resolved_calls.entry(caller_id).or_default().push(target_id);
+                    self.add_edge(caller_id, target_id, EdgeKind::Calls); 
                 } else if let Some(candidates) = self.index.symbol_map.get(clean) {
-                    let mut guesses = candidates.clone();
-                    self.index.resolved_calls.entry(caller_id).or_default().append(&mut guesses);
+                    let guesses = candidates.clone();
+                    for g in guesses { self.add_edge(caller_id, g, EdgeKind::Calls); }
                 }
-            }
-            if let Some(resolved) = self.index.resolved_calls.get_mut(&caller_id) {
-                resolved.sort();
-                resolved.dedup();
             }
         }
     }

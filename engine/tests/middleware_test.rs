@@ -46,7 +46,7 @@ fn test_express_middleware_context() {
     // If I search for "getUser", I must see "AuthMiddleware" in the context,
     // even though "users.ts" never imports "auth.ts".
     
-    let related = find_related_symbols(&indexer.index, "getUser").unwrap();
+    let related = find_related_symbols(&indexer, "getUser").unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -110,7 +110,7 @@ MIDDLEWARE = [
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let related = find_related_symbols(&indexer.index, "my_view").unwrap();
+    let related = find_related_symbols(&indexer, "my_view").unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();

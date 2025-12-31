@@ -3,6 +3,8 @@ use common::TestWorkspace;
 use rfc_engine::resolution::Indexer;
 use rfc_engine::query::traversal::find_related_symbols;
 
+use crate::common::get_calls;
+
 #[test]
 fn test_return_type_bridge_sniffing() {
     let workspace = TestWorkspace::new();
@@ -41,7 +43,7 @@ fn test_return_type_bridge_sniffing() {
     let connect_ids = indexer.index.symbol_map.get("connect").expect("Should find 'connect' symbol");
     let _connect_id = connect_ids[0];
 
-    let related = find_related_symbols(&indexer.index, "connect").unwrap();
+    let related = find_related_symbols(&indexer, "connect").unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -79,9 +81,11 @@ fn test_explicit_type_sniffing() {
 
     // Check if "sync" is a caller of "writeFile"
     let sync_id = indexer.index.symbol_map.get("sync").unwrap()[0];
-    let resolutions = indexer.index.resolved_calls.get(&sync_id).expect("sync should have resolutions");
-
-    assert!(resolutions.contains(&write_id), "Should link 'sync' to 'writeFile' via explicit :FileSystem annotation");
+    let resolutions = get_calls(&indexer.index, sync_id);
+    // Note: Implicit type sniffing now adds Call edges if it finds methods, 
+    // or TypeReference edges for the variable itself. 
+    // Check resolve_type_sniffing logic: it adds EdgeKind::Calls for methods.
+    assert!(resolutions.contains(&write_id));
 }
 
 #[test]
@@ -118,6 +122,6 @@ fn test_chained_inference_no_bloat() {
     let login_id = indexer.index.symbol_map.get("login").unwrap()[0];
     let run_id = indexer.index.symbol_map.get("run").unwrap()[0];
     
-    let calls = indexer.index.resolved_calls.get(&run_id).unwrap();
+    let calls = get_calls(&indexer.index, run_id);
     assert!(calls.contains(&login_id), "Should resolve call via variable assignment 'service = auth'");
 }

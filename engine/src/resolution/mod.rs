@@ -3,12 +3,21 @@ pub mod utils;
 pub mod resolvers;
 
 use crate::manifest::scan_manifests;
-use crate::models::{FileId, FileNode, SymbolId, SymbolKind, SymbolNode, WorkspaceIndex};
+use crate::models::{
+    Edge,
+    EdgeKind,
+    FileId,
+    FileNode,
+    SymbolId,
+    SymbolKind,
+    SymbolNode,
+    WorkspaceIndex,
+};
 use crate::analysis::analyze_source;
-use crate::analysis::language::{get_language_configs, LanguageConfig};
+use crate::analysis::language::{ get_language_configs, LanguageConfig };
 use std::path::Path;
 use std::fs;
-use std::collections::{HashMap, HashSet};
+use std::collections::{ HashMap, HashSet };
 use ignore::WalkBuilder;
 use blake3;
 
@@ -16,6 +25,8 @@ pub struct Indexer {
     pub index: WorkspaceIndex,
     configs: HashMap<String, &'static LanguageConfig>,
     resolution_cache: HashMap<(FileId, String), Option<SymbolId>>,
+    // Runtime-only Reverse Graph (Target -> [Sources])
+    pub reverse_graph: HashMap<SymbolId, Vec<Edge>>,
 }
 
 impl Indexer {
@@ -30,15 +41,51 @@ impl Indexer {
             index: WorkspaceIndex::default(),
             configs: config_map,
             resolution_cache: HashMap::new(),
+            reverse_graph: HashMap::new(),
+        }
+    }
+
+    pub fn add_edge(&mut self, source: SymbolId, target: SymbolId, kind: EdgeKind) {
+        if source == target { return; }
+        let edges = self.index.graph.entry(source).or_default();
+        for edge in edges.iter() {
+            if edge.target_id == target && edge.kind == kind { return; }
+        }
+        edges.push(Edge { target_id: target, kind });
+    }
+
+    pub fn build_reverse_graph(&mut self) {
+        self.reverse_graph.clear();
+        for (&source, edges) in &self.index.graph {
+            for edge in edges {
+                self.reverse_graph.entry(edge.target_id).or_default().push(Edge {
+                    target_id: source,
+                    kind: edge.kind,
+                });
+            }
+        }
+    }
+
+    /// Rebuilds structural edges (Contains) based on symbol parent_id field.
+    fn resolve_structure(&mut self) {
+        let mut edges_to_add = Vec::new();
+        for sym in self.index.symbols.values() {
+            if let Some(pid) = sym.parent_id {
+                edges_to_add.push((pid, sym.id));
+            }
+        }
+        for (p, c) in edges_to_add {
+            self.add_edge(p, c, EdgeKind::Contains);
         }
     }
 
     pub fn resolve_references(&mut self) {
-        self.index.resolved_calls.clear();
-        self.index.resolved_type_refs.clear();
-        self.index.inheritance.clear();
+        self.index.graph.clear();
         self.index.file_dependencies.clear();
         self.resolution_cache.clear();
+
+        // 0. Restore Structure (FIX)
+        self.resolve_structure();
 
         // 1. Core imports and basic structure
         self.resolve_external_imports();
@@ -50,31 +97,27 @@ impl Indexer {
         self.resolve_literal_dependencies();
         self.resolve_shared_literals();
         self.resolve_pubsub_wildcards();
-        
+
         // 3. Inference & Magic
         self.resolve_type_sniffing();
         self.resolve_magic_proxies();
         self.resolve_fingerprints();
         self.resolve_implicit_connections();
-        
+
         // 4. Frameworks & State
         self.resolve_dependency_injection();
-        self.resolve_function_calls_with_fallback(); // Renamed in standard.rs to resolve_function_calls, need alias or rename there
+        self.resolve_function_calls();
         self.resolve_config_links();
         self.resolve_type_references();
         self.resolve_database_references();
-        self.resolve_file_dependencies();
+        self.resolve_file_dependencies(); 
         self.resolve_state_management();
         self.resolve_middleware_injection();
         self.resolve_iac_links();
-    }
-    
-    // Alias to match existing name in tests/internal usage if any
-    fn resolve_function_calls_with_fallback(&mut self) {
-        self.resolve_function_calls();
-    }
 
-    // --- Scanning Logic (Kept here as it drives the process) ---
+        // Finalize
+        self.build_reverse_graph();
+    }
 
     pub fn scan(&mut self, root: &Path) {
         let root_abs = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
@@ -91,8 +134,6 @@ impl Indexer {
                 Ok(entry) => {
                     if !entry.path().is_file() { continue; }
                     let path = entry.path();
-
-                    // Manifests
                     let manifest_res = scan_manifests(path);
                     if let Some(pkg_name) = manifest_res.package_name {
                         if let Some(parent_dir) = path.parent() {
@@ -103,10 +144,8 @@ impl Indexer {
                     if !manifest_res.externals.is_empty() { self.index.external_packages.extend(manifest_res.externals); }
                     if !manifest_res.aliases.is_empty() { self.index.import_mappings.extend(manifest_res.aliases); }
 
-                    // Source Files
                     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
                     let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                    
                     let config = self.configs.get(ext)
                         .or_else(|| self.configs.get(filename))
                         .or_else(|| if filename.starts_with('.') { self.configs.get(&filename[1..]) } else { None });
@@ -139,10 +178,7 @@ impl Indexer {
                 Err(err) => eprintln!("Error walking directory: {}", err),
             }
         }
-
-        let to_remove: Vec<String> = self.index.files.keys()
-            .filter(|path_key| !seen_paths.contains(*path_key))
-            .cloned().collect();
+        let to_remove: Vec<String> = self.index.files.keys().filter(|path_key| !seen_paths.contains(*path_key)).cloned().collect();
         for path_key in to_remove { self.remove_file(&path_key); }
     }
 
@@ -167,20 +203,19 @@ impl Indexer {
                     if id_list.is_empty() { self.index.symbol_map.remove(&sym.name); }
                 }
             }
-            // Cleanup maps
             self.index.raw_calls.remove(&sym_id);
             self.index.raw_implementations.remove(&sym_id);
-            self.index.resolved_calls.remove(&sym_id);
+            self.index.graph.remove(&sym_id);
             self.index.fingerprints.remove(&sym_id);
             self.index.container_methods.remove(&sym_id);
             self.index.local_variable_types.remove(&sym_id);
-            self.index.inheritance.remove(&sym_id);
             self.index.symbol_config_refs.remove(&sym_id);
             self.index.raw_type_refs.remove(&sym_id);
-            self.index.resolved_type_refs.remove(&sym_id);
             self.index.raw_decorators.remove(&sym_id);
+            self.index.raw_action_dispatches.remove(&sym_id);
+            self.index.raw_action_handlers.remove(&sym_id);
         }
-        
+
         for def_list in self.index.config_definitions.values_mut() {
             def_list.retain(|id| !ids_to_remove.contains(id));
         }
@@ -191,7 +226,7 @@ impl Indexer {
     }
 
     fn update_file(&mut self, path_key: &str, path_obj: &Path, content: &str, hash: [u8; 32], config: &LanguageConfig, is_path_test: bool) {
-        let file_id = match self.index.files.get(path_key) {
+         let file_id = match self.index.files.get(path_key) {
             Some(node) => node.id,
             None => { let id = self.index.next_file_id; self.index.next_file_id += 1; id }
         };
@@ -229,7 +264,6 @@ impl Indexer {
                 file_symbol_ids.push(symbol_id);
                 if func.name != "anonymous" { self.index.symbol_map.entry(func.name.clone()).or_default().push(symbol_id); }
                 
-                // Populate maps
                 if !func.config_keys.is_empty() { self.index.symbol_config_refs.insert(symbol_id, func.config_keys); }
                 if !func.calls.is_empty() { self.index.raw_calls.insert(symbol_id, func.calls); }
                 if !func.fingerprints.is_empty() { self.index.fingerprints.insert(symbol_id, func.fingerprints); }
@@ -240,11 +274,6 @@ impl Indexer {
                 if !func.handled_actions.is_empty() { self.index.raw_action_handlers.insert(symbol_id, func.handled_actions); }
             }
 
-            // Post-analysis linking (Containers, Config defs, Implicit routes)
-            // ... (Logic from original update_file for container/member linking kept here or moved to helpers if huge)
-            // For brevity, assuming the Container/Member linking logic stays here or is extracted similarly.
-            // Copied standard logic:
-            
             let is_data = matches!(config.lang_enum, crate::analysis::language::SupportedLanguage::Yaml | crate::analysis::language::SupportedLanguage::Json | crate::analysis::language::SupportedLanguage::Toml | crate::analysis::language::SupportedLanguage::Dotenv);
             if is_data {
                 for &sid in &file_symbol_ids {
@@ -270,18 +299,23 @@ impl Indexer {
                             if let Some(node) = self.index.symbols.get_mut(&s_id) { 
                                 node.parent_id = Some(c_id); 
                             } 
+                            self.add_edge(c_id, s_id, EdgeKind::Contains);
                         }
                     }
                 }
                 if !members.is_empty() { self.index.container_methods.insert(c_id, members); }
             }
             
-            // Orphans to module
             let module_id = file_symbol_ids.iter().find(|&&id| self.index.symbols[&id].kind == SymbolKind::Module).cloned();
             if let Some(mid) = module_id {
                 for &id in &file_symbol_ids {
                     if id != mid {
-                         if let Some(sym) = self.index.symbols.get_mut(&id) { if sym.parent_id.is_none() { sym.parent_id = Some(mid); } }
+                         if let Some(sym) = self.index.symbols.get_mut(&id) { 
+                             if sym.parent_id.is_none() { 
+                                 sym.parent_id = Some(mid); 
+                                 self.add_edge(mid, id, EdgeKind::Contains); 
+                             } 
+                         }
                     }
                 }
             }

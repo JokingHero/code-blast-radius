@@ -1,5 +1,6 @@
 mod common;
 use common::TestWorkspace;
+use rfc_engine::models::EdgeKind;
 use rfc_engine::resolution::Indexer;
 use rfc_engine::query::traversal::find_related_symbols;
 
@@ -59,12 +60,14 @@ fn test_redux_switch_case_linking() {
     assert!(dispatched.contains(&"AUTH/LOGIN_SUCCESS".to_string()));
 
     // 3. Check Resolution (The Linkage)
-    let resolved = indexer.index.resolved_calls.get(&caller_id).expect("Dispatch call should be resolved");
-    assert!(resolved.contains(&handler_id), "handleLogin should be semantically linked to authReducer");
+    let edges = indexer.index.graph.get(&caller_id).unwrap();
+    let is_linked = edges.iter().any(|e| e.target_id == handler_id && (e.kind == EdgeKind::Dispatches || e.kind == EdgeKind::Calls));
+    
+    assert!(is_linked, "handleLogin should be semantically linked to authReducer");
 
     // 4. Check Context Slice (End-to-End)
     // If I ask for "handleLogin", I should get "authReducer" in the result
-    let related = find_related_symbols(&indexer.index, "handleLogin").unwrap();
+    let related = find_related_symbols(&indexer, "handleLogin").unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -108,38 +111,39 @@ fn test_redux_object_map_linking() {
 
     let saga_id = indexer.index.symbol_map.get("createTodoSaga").unwrap()[0];
 
-    // We expect to find the specific arrow function inside todoHandlers, 
-    // OR the container variable depending on how the tree-sitter ownership logic resolved it.
-    // In our analyzer logic: 
-    // Since `todoHandlers` is a variable declaration, the object keys might be attached to `todoHandlers` 
-    // or (if we parsed arrow functions as definitions) to the anonymous arrow function symbols.
-    // Let's verify via `resolved_calls`.
-
-    let resolved = indexer.index.resolved_calls.get(&saga_id);
+    // --- NEW LOGIC START ---
+    
+    // 1. Check the graph for outgoing edges from the Saga
+    let edges = indexer.index.graph.get(&saga_id);
     
     // We expect *some* resolution. 
-    assert!(resolved.is_some(), "Saga should have resolved dependencies");
-    
-    // Let's trace what it found
-    let targets: Vec<String> = resolved.unwrap().iter()
+    assert!(edges.is_some(), "Saga should have resolved dependencies (edges)");
+    let edges = edges.unwrap();
+    assert!(!edges.is_empty(), "Saga should have at least one outgoing edge");
+
+    // 2. Resolve the target IDs from the edges
+    // The resolver adds EdgeKind::Dispatches and implicit EdgeKind::Calls
+    let resolved_target_ids: Vec<u32> = edges.iter()
+        .map(|e| e.target_id)
+        .collect();
+
+    // Debugging output to see what we matched
+    let targets: Vec<String> = resolved_target_ids.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
-
     println!("Found targets for saga: {:?}", targets);
 
-    // It should find either "anonymous" (the arrow function) or the file module, 
-    // basically establishing a link to `store/todos.js`.
-    // The most important part is that a link exists between the files/symbols.
-    assert!(!targets.is_empty(), "Should resolve link to reducer handler");
-    
-    // Verify the handler file ID is in the resolved list's file IDs
-    let target_file_ids: Vec<u32> = resolved.unwrap().iter()
-        .map(|id| indexer.index.symbols[id].file_id)
-        .collect();
-
+    // 3. Verify linkage to the reducer file
+    // We expect the graph to link to a symbol defined inside "store/todos.js"
     let reducer_file_id = indexer.index.files.values()
         .find(|f| f.path.contains("todos.js"))
-        .unwrap().id;
+        .expect("Reducer file should be indexed")
+        .id;
 
-    assert!(target_file_ids.contains(&reducer_file_id), "Saga should link to todoReducer file via action matching");
+    let links_to_reducer_file = resolved_target_ids.iter().any(|&tid| {
+        let sym = indexer.index.symbols.get(&tid).unwrap();
+        sym.file_id == reducer_file_id
+    });
+
+    assert!(links_to_reducer_file, "Saga should link to todoReducer file via action matching");
 }

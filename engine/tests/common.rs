@@ -2,10 +2,9 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::PathBuf;
 use tempfile::TempDir;
+use rfc_engine::models::{SymbolId, EdgeKind, WorkspaceIndex};
 
-// A wrapper around a temporary directory that acts as our "Workspace"
 pub struct TestWorkspace {
-    // We hold this field so the directory isn't deleted until the struct is dropped
     _temp: TempDir, 
     pub path: PathBuf,
 }
@@ -17,16 +16,38 @@ impl TestWorkspace {
         Self { _temp: temp, path }
     }
 
-    // Helper to create a file with specific content in the workspace
     pub fn create_file(&self, relative_path: &str, content: &str) {
         let file_path = self.path.join(relative_path);
-        
-        // Ensure parent directories exist (e.g., if path is "src/main.rs")
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).expect("Failed to create parent dirs");
         }
-
         let mut file = File::create(&file_path).expect("Failed to create file");
         file.write_all(content.as_bytes()).expect("Failed to write content");
+    }
+}
+
+// --- NEW HELPERS ---
+
+#[allow(dead_code)]
+pub fn get_calls(index: &WorkspaceIndex, source_id: SymbolId) -> Vec<SymbolId> {
+    if let Some(edges) = index.graph.get(&source_id) {
+        edges.iter()
+            .filter(|e| e.kind == EdgeKind::Calls)
+            .map(|e| e.target_id)
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
+#[allow(dead_code)]
+pub fn get_type_refs(index: &WorkspaceIndex, source_id: SymbolId) -> Vec<SymbolId> {
+    if let Some(edges) = index.graph.get(&source_id) {
+        edges.iter()
+            .filter(|e| e.kind == EdgeKind::TypeReference)
+            .map(|e| e.target_id)
+            .collect()
+    } else {
+        Vec::new()
     }
 }

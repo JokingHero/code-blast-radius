@@ -29,7 +29,7 @@ fn test_data_structure_dependency() {
     indexer.resolve_references();
 
     // Case 1: Search for the Function -> Should see the Type
-    let related_func = find_related_symbols(&indexer.index, "sendEmail").unwrap();
+    let related_func = find_related_symbols(&indexer, "sendEmail").unwrap();
     let names_func: Vec<String> = related_func.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -37,7 +37,7 @@ fn test_data_structure_dependency() {
     assert!(names_func.contains(&"User".to_string()), "Function context should include the Types it uses as arguments");
 
     // Case 2: Search for the Type -> Should see the Function (Impact Analysis)
-    let related_type = find_related_symbols(&indexer.index, "User").unwrap();
+    let related_type = find_related_symbols(&indexer, "User").unwrap();
     let names_type: Vec<String> = related_type.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -68,7 +68,7 @@ def process_user(u: User) -> None:
     indexer.resolve_references();
 
     // 3. Search for 'process_user' -> Context should contain 'User'
-    let related = find_related_symbols(&indexer.index, "process_user").expect("Should find symbol");
+    let related = find_related_symbols(&indexer, "process_user").expect("Should find symbol");
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();

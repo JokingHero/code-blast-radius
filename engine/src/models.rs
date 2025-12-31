@@ -108,75 +108,85 @@ pub struct SymbolNode {
     pub routes: Vec<String>,
 }
 
+// 1. Define the specific nature of the relationship
+#[derive(Archive, Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[archive(check_bytes)]
+pub enum EdgeKind {
+    // Structural
+    Contains,      // Parent -> Child (e.g. Class -> Method)
+    Defines,       // File -> Module
+    
+    // Logic
+    Calls,         // Function -> Function
+    
+    // Type System
+    Inherits,      // Child Class -> Parent Class
+    Implements,    // Class -> Interface (Renamed from Implement for consistency)
+    TypeReference, // Function -> Type (arg/return), Variable -> Type
+    
+    // Meta / Frameworks
+    Imports,       // Module -> Module (File dependency) (Renamed from Import)
+    Constructs,    // Function -> Class (new Foo())
+    Injects,       // DI Container -> Service
+    Configures,    // Config Key -> Symbol
+    
+    // Event/State
+    Dispatches,    // Function -> Redux Action / Event
+    Handles,       // Redux Reducer / Listener -> Action
+    
+    // Generic Fallback
+    Related, 
+}
+
+// 2. The Edge definition
+#[derive(Archive, Deserialize, Serialize, Debug, Clone)]
+#[archive(check_bytes)]
+pub struct Edge {
+    pub target_id: SymbolId,
+    pub kind: EdgeKind,
+}
+
 #[derive(Archive, Deserialize, Serialize, Debug, Default)]
 #[archive(check_bytes)]
 pub struct WorkspaceIndex {
+    // Metadata & Identifiers
     pub next_file_id: u32,
     pub next_symbol_id: u32,
-    pub roots: Vec<String>, // Track which folders are indexed
+    pub roots: Vec<String>,
+    
+    // Primary Data Stores
     pub files: HashMap<String, FileNode>,
     pub symbols: HashMap<SymbolId, SymbolNode>,
-    pub symbol_map: HashMap<String, Vec<SymbolId>>,
+
+    // The Unified Graph (Adjacency List)
+    // Maps Source Symbol -> List of Outgoing Edges
+    pub graph: HashMap<SymbolId, Vec<Edge>>,
+
+    // Lookups & Maps (For fast access during resolution)
+    pub symbol_map: HashMap<String, Vec<SymbolId>>, // Name -> [IDs]
     pub file_imports: HashMap<FileId, Vec<ImportNode>>,
     pub file_exports: HashMap<FileId, Vec<ExportNode>>, 
-    // Mapping of Container (Class/Interface) -> Set of method names it owns
+    pub implicit_routes: HashMap<String, SymbolId>, // Route -> Symbol
+    pub import_mappings: HashMap<String, String>,   // Alias -> Path
+    pub package_path_map: HashMap<String, String>,  // Package -> Path
+    pub external_symbols: HashSet<String>,
+    pub external_packages: HashSet<String>,
+
+    // Raw/Intermediate Data (Used during resolution phase)
     pub container_methods: HashMap<SymbolId, HashSet<String>>,
-    // Mapping of Function -> (Variable Name -> Set of Methods called on it)
-    // Example: "reset_func_id" -> { "device": ["stop", "start"] }
     pub fingerprints: HashMap<SymbolId, HashMap<String, Vec<String>>>,
-     // Mapping of FunctionSymbolID -> (VariableName -> TypeName)
-    // e.g., "main_id" -> { "user": "User" }
     pub local_variable_types: HashMap<SymbolId, HashMap<String, String>>,
-    
-    // Explicit Calls
     pub raw_calls: HashMap<SymbolId, Vec<String>>,
-    pub resolved_calls: HashMap<SymbolId, Vec<SymbolId>>, 
-
-    // Inheritance Graph (Parent Symbol ID -> List of Child Symbol IDs)
-    pub inheritance: HashMap<SymbolId, Vec<SymbolId>>,
-
-    // Implicit File Dependencies (File ID -> List of File IDs)
-    pub file_dependencies: HashMap<FileId, Vec<FileId>>,
-
-    // Temporary storage for linking phase (Map<FileId, ...>)
     pub raw_literals: HashMap<FileId, Vec<String>>,
-    // Temporary storage for implementations (SymbolId -> Vec<ParentName>)
     pub raw_implementations: HashMap<SymbolId, Vec<String>>, 
-
-    // Mapping of SymbolId -> List of Config Keys it uses
     pub symbol_config_refs: HashMap<SymbolId, Vec<String>>,
-    
-    // Mapping of Config Key -> List of Locations where it's defined (e.g., .env, config.json)
     pub config_definitions: HashMap<String, Vec<SymbolId>>, 
-
-    pub external_symbols: HashSet<String>, // Track known external modules used
-    pub external_packages: HashSet<String>, // List of detected external libraries (e.g., "react", "serde", "numpy")
-
-    // Mapping of SymbolId -> List of SymbolIds (The types this symbol depends on)
-    // e.g. fn process(u: User) -> "process" depends on "User"
-    pub resolved_type_refs: HashMap<SymbolId, Vec<SymbolId>>, 
-    // Temporary storage for linking phase
     pub raw_type_refs: HashMap<SymbolId, Vec<String>>,
-    // Mapping of SymbolId -> List of Decorator names used on it
     pub raw_decorators: HashMap<SymbolId, Vec<String>>,
-    
-    // Mapping of Route String -> SymbolId (pointing to the Module or specific Function/Class)
-    // e.g., "/api/login" -> SymbolId(10) (which points to LoginController or the file module)
-    pub implicit_routes: HashMap<String, SymbolId>, 
-
-    // Store raw alias mappings, e.g., "@/*" -> "src/*"
-    pub import_mappings: HashMap<String, String>, 
-
-     // Mapping: SymbolId (Function) -> List of Action Strings it dispatches
     pub raw_action_dispatches: HashMap<SymbolId, Vec<String>>,
-    
-    // Mapping: SymbolId (Function/Reducer) -> List of Action Strings it handles
     pub raw_action_handlers: HashMap<SymbolId, Vec<String>>,
-
-    // Mapping of FileId -> List of Middleware Symbol Names/Strings used in this file
-    // e.g. app.ts -> ["AuthMiddleware", "Logger"]
     pub raw_middleware_usage: HashMap<FileId, Vec<String>>,
 
-    // Maps "@my-app/ui" -> "packages/ui" (relative to root)
-    pub package_path_map: HashMap<String, String>, 
+    // Legacy/Cache fields (maintained for backward compat or specific caches)
+    pub file_dependencies: HashMap<FileId, Vec<FileId>>,
 }

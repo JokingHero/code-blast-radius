@@ -34,6 +34,10 @@ impl Indexer {
         
         let mut s = Self::new();
         s.index = index;
+        
+        // Rebuild the reverse graph from the persisted forward graph
+        s.build_reverse_graph();
+        
         Ok(s)
     }
 }

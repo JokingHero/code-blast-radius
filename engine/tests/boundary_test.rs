@@ -2,6 +2,8 @@ mod common;
 use common::TestWorkspace;
 use rfc_engine::resolution::Indexer;
 
+use crate::common::get_calls;
+
 #[test]
 fn test_external_stub_generation() {
     let workspace = TestWorkspace::new();
@@ -36,7 +38,7 @@ fn test_external_stub_generation() {
 
     // 5. Verify Call Resolution
     let fetch_id = indexer.index.symbol_map.get("fetchData").unwrap()[0];
-    let resolved = indexer.index.resolved_calls.get(&fetch_id).expect("Should resolve calls in fetchData");
+    let resolved = get_calls(&indexer.index, fetch_id);
 
     // Get the ID of the 'get' it resolved to
     assert!(!resolved.is_empty());

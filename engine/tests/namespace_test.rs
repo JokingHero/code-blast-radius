@@ -2,6 +2,8 @@ mod common;
 use common::TestWorkspace;
 use rfc_engine::resolution::Indexer;
 
+use crate::common::get_calls;
+
 #[test]
 fn test_namespace_import_resolution() {
     let workspace = TestWorkspace::new();
@@ -44,7 +46,7 @@ fn test_namespace_import_resolution() {
     let add_id = add_ids[0];
     
     // Get resolved calls from runCalculation
-    let resolved = indexer.index.resolved_calls.get(&run_id).expect("Should have resolved calls for runCalculation");
+    let resolved = get_calls(&indexer.index, run_id);
 
     // Assert linkage
     assert!(resolved.contains(&add_id), "Namespace call MathLib.add() failed to resolve to add()");
@@ -77,7 +79,7 @@ fn test_namespace_resolution_deep_scope() {
     let start_id = indexer.index.symbol_map.get("start").unwrap()[0];
     let log_id = indexer.index.symbol_map.get("log").unwrap()[0];
 
-    let resolved = indexer.index.resolved_calls.get(&start_id).expect("Should resolve calls in start()");
+    let resolved = get_calls(&indexer.index, start_id);
     
     assert!(resolved.contains(&log_id), "Deeply nested method failed to resolve module-level namespace import");
 }

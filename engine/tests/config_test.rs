@@ -42,7 +42,7 @@ db_url: "postgres://localhost:5432"
 
     // Verification B: Semantic Cluster (The "Golden Path")
     // When searching for 'getAiClient', it should pull in the 'api_key' definition from config.yaml
-    let related_ai = find_related_symbols(&indexer.index, "getAiClient").unwrap();
+    let related_ai = find_related_symbols(&indexer, "getAiClient").unwrap();
     let names_ai: Vec<String> = related_ai.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -51,7 +51,7 @@ db_url: "postgres://localhost:5432"
     assert!(names_ai.contains(&"api_key".to_string()), "Context for getAiClient must include its config definition");
 
     // Verification C: config.get() link
-    let related_db = find_related_symbols(&indexer.index, "connect").unwrap();
+    let related_db = find_related_symbols(&indexer, "connect").unwrap();
     let names_db: Vec<String> = related_db.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -80,7 +80,7 @@ fn test_config_linkage_json_and_dotenv() {
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let related = find_related_symbols(&indexer.index, "start").unwrap();
+    let related = find_related_symbols(&indexer, "start").unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();

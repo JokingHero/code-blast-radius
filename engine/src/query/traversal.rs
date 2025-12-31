@@ -1,13 +1,5 @@
-use std::collections::{HashMap, HashSet, VecDeque};
-
-use crate::models::{SymbolId, SymbolKind, WorkspaceIndex};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum TraversalMode {
-    Downstream,
-    Upstream,
-    Both,
-}
+use std::collections::{HashSet, VecDeque, HashMap};
+use crate::models::{Edge, EdgeKind, SymbolId, SymbolKind, WorkspaceIndex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SliceDirection {
@@ -16,74 +8,150 @@ pub enum SliceDirection {
     Both,
 }
 
-pub fn find_call_chain_ids(
-    index: &WorkspaceIndex,
-    target_name: &str,
-    direction: SliceDirection
-) -> Option<Vec<SymbolId>> {
-    let targets = index.symbol_map.get(target_name)?;
-    if targets.is_empty() {
-        return None;
+pub struct GraphWalker<'a> {
+    index: &'a WorkspaceIndex,
+    reverse_graph: &'a HashMap<SymbolId, Vec<Edge>>,
+}
+
+impl<'a> GraphWalker<'a> {
+    pub fn new(index: &'a WorkspaceIndex, reverse_graph: &'a HashMap<SymbolId, Vec<Edge>>) -> Self {
+        Self { index, reverse_graph }
     }
 
-    let mut predecessors: HashMap<SymbolId, SymbolId> = HashMap::new();
-    let mut queue: VecDeque<SymbolId> = VecDeque::new();
-    let mut visited: HashSet<SymbolId> = HashSet::new();
+    pub fn walk_deep(&self, start_ids: &[SymbolId]) -> Vec<SymbolId> {
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::new();
+        let mut results = Vec::new();
 
-    for &id in targets {
-        queue.push_back(id);
-        visited.insert(id);
-    }
-
-    while let Some(current_id) = queue.pop_front() {
-        if direction == SliceDirection::Upstream || direction == SliceDirection::Both {
-            for (caller_id, callees) in &index.resolved_calls {
-                if callees.contains(&current_id) && !visited.contains(caller_id) {
-                    visited.insert(*caller_id);
-                    predecessors.insert(*caller_id, current_id);
-                    queue.push_back(*caller_id);
-                }
-            }
+        for &id in start_ids {
+            visited.insert(id);
+            queue.push_back(id);
+            results.push(id);
         }
 
-        if direction == SliceDirection::Downstream || direction == SliceDirection::Both {
-            if let Some(callees) = index.resolved_calls.get(&current_id) {
-                for &callee_id in callees {
-                    if !visited.contains(&callee_id) {
-                        visited.insert(callee_id);
-                        predecessors.insert(callee_id, current_id);
-                        queue.push_back(callee_id);
+        while let Some(current) = queue.pop_front() {
+            let current_sym = self.index.symbols.get(&current);
+            let is_external = current_sym.map_or(false, |s| s.is_external);
+            let is_module = current_sym.map_or(false, |s| s.kind == SymbolKind::Module);
+
+            // 1. Go Downstream (Source -> Target)
+            if let Some(edges) = self.index.graph.get(&current) {
+                for edge in edges {
+                    // LOGIC CHECK: Sibling Pollution
+                    // If we are at a File (Module), we generally do NOT want to grab every 
+                    // single function in that file unless there is a specific call/reference.
+                    // We skip structural `Contains` edges going down from a Module.
+                    if is_module && edge.kind == EdgeKind::Contains {
+                        continue;
+                    }
+
+                    if self.should_follow_downstream(edge.kind) && visited.insert(edge.target_id) {
+                        results.push(edge.target_id);
+                        queue.push_back(edge.target_id);
+                    }
+                }
+            }
+
+            // 2. Go Upstream (Target -> Source)
+            // SAFETY: Do not traverse upstream from External symbols (e.g. don't index all of React just because I use it)
+            if !is_external {
+                if let Some(edges) = self.reverse_graph.get(&current) {
+                    for edge in edges {
+                        if self.should_follow_upstream(edge.kind) && visited.insert(edge.target_id) {
+                            results.push(edge.target_id);
+                            queue.push_back(edge.target_id);
+                        }
                     }
                 }
             }
         }
+        
+        // Sort for deterministic output
+        results.sort_by(|a, b| {
+            let sym_a = self.index.symbols.get(a).unwrap();
+            let sym_b = self.index.symbols.get(b).unwrap();
+            sym_a.file_id.cmp(&sym_b.file_id).then(sym_a.range_start.cmp(&sym_b.range_start))
+        });
 
-        if let Some(children) = index.inheritance.get(&current_id) {
-            for &child_id in children {
-                if !visited.contains(&child_id) {
-                    visited.insert(child_id);
-                    predecessors.insert(child_id, current_id);
-                    queue.push_back(child_id);
-                }
-            }
+        results
+    }
+
+    fn should_follow_downstream(&self, kind: EdgeKind) -> bool {
+        match kind {
+            // Logic & Flow
+            EdgeKind::Calls => true, 
+            EdgeKind::Dispatches => true, 
+            EdgeKind::Constructs => true,
+            
+            // Type System
+            EdgeKind::TypeReference => true,
+            EdgeKind::Inherits => true,
+            EdgeKind::Implements => true, 
+            
+            // Structure & DI
+            EdgeKind::Contains => true, // (Filtered conditionally for Modules above)
+            EdgeKind::Injects => true,
+            EdgeKind::Configures => true, 
+            
+            // Meta
+            EdgeKind::Defines => false, // File -> Module (Keep 1:1)
+            EdgeKind::Imports => false, // Don't traverse file imports deeply downstream
+            EdgeKind::Handles => false, // Reducer handles Action (Usually upstream logic)
+            EdgeKind::Related => true,
         }
     }
 
-    let mut final_list: Vec<SymbolId> = visited.into_iter().collect();
-    final_list.sort_by_key(|id| {
-        let mut depth = 0;
-        let mut curr = *id;
-        while let Some(&p) = predecessors.get(&curr) {
-            depth += 1;
-            curr = p;
-        }
-        depth
-    });
+    fn should_follow_upstream(&self, kind: EdgeKind) -> bool {
+        match kind {
+            // "Who calls me?"
+            EdgeKind::Calls => true,     
+            EdgeKind::Constructs => true,
 
-    if direction == SliceDirection::Downstream {
-        final_list.reverse();
+            // "Who implements/inherits me?"
+            EdgeKind::Inherits => true,  
+            EdgeKind::Implements => true, 
+            
+            // "Who uses me as a type?"
+            EdgeKind::TypeReference => true,
+            
+            // "Who contains me?" (Module/Class)
+            EdgeKind::Contains => true,
+            
+            // "Who injects me?"
+            EdgeKind::Injects => true,
+
+            // "Who dispatches this action?" (If I am the handler)
+            // "Who handles this action?" (If I am the dispatcher - though usually handled by downstream)
+            EdgeKind::Dispatches => true, 
+            EdgeKind::Handles => true,   
+            
+            // Config
+            EdgeKind::Configures => true, 
+
+            // Explicitly ignored
+            EdgeKind::Defines => false,
+            EdgeKind::Imports => false, // Don't traverse upstream imports (Impact Analysis handles this separately)
+            EdgeKind::Related => true,
+        }
     }
-    Some(final_list)
+}
+
+pub fn find_call_chain_ids(
+    _index: &WorkspaceIndex,
+    _target_name: &str,
+    _direction: SliceDirection
+) -> Option<Vec<SymbolId>> {
+    None 
+}
+
+pub fn find_related_symbols(indexer: &crate::resolution::Indexer, target_name: &str) -> Option<Vec<SymbolId>> {
+    let targets = indexer.index.symbol_map.get(target_name)?;
+    if targets.is_empty() {
+        return None;
+    }
+
+    let walker = GraphWalker::new(&indexer.index, &indexer.reverse_graph);
+    Some(walker.walk_deep(targets))
 }
 
 pub fn generate_context_from_ids(
@@ -151,8 +219,6 @@ pub fn generate_context_from_ids(
                 if let Some(docs) = &sym.doc_comment {
                     context.push_str(&format!("// {}\n", docs));
                 }
-
-                context.push_str("// (Source code not available for external libraries)\n");
                 context.push_str("\n\n");
                 continue;
             }
@@ -199,133 +265,4 @@ pub fn generate_context_from_ids(
     }
 
     context
-}
-
-pub fn find_related_symbols(index: &WorkspaceIndex, target_name: &str) -> Option<Vec<SymbolId>> {
-    let targets = index.symbol_map.get(target_name)?;
-    if targets.is_empty() {
-        return None;
-    }
-
-    let mut queue: VecDeque<(SymbolId, TraversalMode)> = VecDeque::new();
-    let mut visited: HashSet<(SymbolId, TraversalMode)> = HashSet::new();
-    let mut result_set: HashSet<SymbolId> = HashSet::new();
-
-    for &id in targets {
-        queue.push_back((id, TraversalMode::Both));
-        visited.insert((id, TraversalMode::Both));
-        result_set.insert(id);
-    }
-
-    while let Some((current_id, mode)) = queue.pop_front() {
-        // 1. DOWNSTREAM (Function -> Types it uses, or Function -> Calls)
-        if mode == TraversalMode::Both || mode == TraversalMode::Downstream {
-            if let Some(callees) = index.resolved_calls.get(&current_id) {
-                for &callee_id in callees {
-                    let c_name = index.symbols
-                        .get(&callee_id)
-                        .map(|s| s.name.clone())
-                        .unwrap_or_default();
-                    if c_name.contains("order.service") || c_name.contains("Order") {
-                        let p_name = index.symbols
-                            .get(&current_id)
-                            .map(|s| s.name.clone())
-                            .unwrap_or_default();
-                        println!("DEBUG LEAK: {} -> {} (Call)", p_name, c_name);
-                    }
-                    if !visited.contains(&(callee_id, TraversalMode::Downstream)) {
-                        visited.insert((callee_id, TraversalMode::Downstream));
-                        result_set.insert(callee_id);
-                        queue.push_back((callee_id, TraversalMode::Downstream));
-                    }
-                }
-            }
-            // Follow Type References
-            if let Some(type_ids) = index.resolved_type_refs.get(&current_id) {
-                for &tid in type_ids {
-                    if !visited.contains(&(tid, TraversalMode::Downstream)) {
-                        visited.insert((tid, TraversalMode::Downstream));
-                        result_set.insert(tid);
-                        queue.push_back((tid, TraversalMode::Downstream));
-                    }
-                }
-            }
-        }
-
-        // 2. UPSTREAM (Function <- Callers, or Type <- Function using it)
-        if mode == TraversalMode::Both || mode == TraversalMode::Upstream {
-            for (caller_id, callees) in &index.resolved_calls {
-                if callees.contains(&current_id) {
-                    if !visited.contains(&(*caller_id, TraversalMode::Upstream)) {
-                        visited.insert((*caller_id, TraversalMode::Upstream));
-                        result_set.insert(*caller_id);
-                        queue.push_back((*caller_id, TraversalMode::Upstream));
-                    }
-                }
-            }
-            // Find functions that use this Type
-            for (func_id, used_types) in &index.resolved_type_refs {
-                if used_types.contains(&current_id) {
-                    if !visited.contains(&(*func_id, TraversalMode::Upstream)) {
-                        visited.insert((*func_id, TraversalMode::Upstream));
-                        result_set.insert(*func_id);
-                        queue.push_back((*func_id, TraversalMode::Upstream));
-                    }
-                }
-            }
-        }
-
-        // 3. STRUCTURAL
-        if let Some(children) = index.inheritance.get(&current_id) {
-            for &child_id in children {
-                if !visited.contains(&(child_id, mode)) {
-                    visited.insert((child_id, mode));
-                    result_set.insert(child_id);
-                    queue.push_back((child_id, mode));
-                }
-            }
-        }
-
-        for (parent_id, children) in &index.inheritance {
-            if children.contains(&current_id) {
-                if !visited.contains(&(*parent_id, mode)) {
-                    visited.insert((*parent_id, mode));
-                    result_set.insert(*parent_id);
-                    queue.push_back((*parent_id, mode));
-                }
-            }
-        }
-
-        // 4. CONTAINMENT
-        if let Some(sym) = index.symbols.get(&current_id) {
-            if let Some(p_id) = sym.parent_id {
-                if !visited.contains(&(p_id, mode)) {
-                    visited.insert((p_id, mode));
-                    result_set.insert(p_id);
-                    queue.push_back((p_id, mode));
-                }
-            }
-            // Exclude "module" to prevent irrelevant siblings in the file from being pulled in.
-            if sym.kind == SymbolKind::Container {
-                for (&s_id, s_node) in &index.symbols {
-                    if s_node.parent_id == Some(current_id) {
-                        if !visited.contains(&(s_id, mode)) {
-                            visited.insert((s_id, mode));
-                            result_set.insert(s_id);
-                            queue.push_back((s_id, mode));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let mut final_list: Vec<SymbolId> = result_set.into_iter().collect();
-    final_list.sort_by(|a, b| {
-        let sym_a = index.symbols.get(a).unwrap();
-        let sym_b = index.symbols.get(b).unwrap();
-        sym_a.file_id.cmp(&sym_b.file_id).then(sym_a.range_start.cmp(&sym_b.range_start))
-    });
-
-    Some(final_list)
 }

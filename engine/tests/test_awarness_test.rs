@@ -92,7 +92,7 @@ fn test_context_filtering_logic() {
 
     // 1. Find related symbols for "multiply"
     // This will find "multiply" (target) and "test_multiply" (upstream caller)
-    let related_ids = find_related_symbols(&indexer.index, "multiply").expect("Should find symbols");
+    let related_ids = find_related_symbols(&indexer, "multiply").expect("Should find symbols");
 
     // 2. Generate context WITH tests (default/false)
     let context_with_tests = generate_context_from_ids(&indexer.index, &related_ids, true, false);

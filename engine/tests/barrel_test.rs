@@ -1,5 +1,5 @@
 mod common;
-use common::TestWorkspace;
+use common::{TestWorkspace, get_calls};
 use rfc_engine::resolution::Indexer;
 
 #[test]
@@ -30,7 +30,8 @@ fn test_diamond_export_resolution() {
     let leaf_id = indexer.index.symbol_map.get("leafFunc").unwrap()[0];
     let run_id = indexer.index.symbol_map.get("run").unwrap()[0];
 
-    let resolutions = indexer.index.resolved_calls.get(&run_id).unwrap();
+    // Check resolutions
+    let resolutions = get_calls(&indexer.index, run_id);
     
     // Assert both calls in 'run' resolved to the same leaf implementation
     assert!(resolutions.contains(&leaf_id));
@@ -64,13 +65,18 @@ fn test_named_export_priority() {
     indexer.resolve_references();
 
     let run_id = indexer.index.symbol_map.get("run").unwrap()[0];
-    let correct_id = indexer.index.symbols.iter()
-        .find(|(_, s)| s.name == "target" && indexer.index.files.get(&indexer.index.files.values().find(|f| f.id == s.file_id).unwrap().path).unwrap().path.contains("correct.ts"))
-        .unwrap().0;
-
-    let resolutions = indexer.index.resolved_calls.get(&run_id).unwrap();
     
-    assert!(resolutions.contains(correct_id), "Named export should take priority over wildcard re-export");
+    // Find the correct target ID based on file path
+    let correct_id = indexer.index.symbols.values()
+        .find(|s| s.name == "target" && {
+            let path = &indexer.index.files.values().find(|f| f.id == s.file_id).unwrap().path;
+            path.contains("correct.ts")
+        })
+        .unwrap().id;
+
+    let resolutions = get_calls(&indexer.index, run_id);
+    
+    assert!(resolutions.contains(&correct_id), "Named export should take priority over wildcard re-export");
 }
 
 #[test]
@@ -78,6 +84,8 @@ fn test_deep_cycle_detection() {
     let workspace = TestWorkspace::new();
 
     // A -> B -> C -> A (The Long Loop)
+    // No actual definitions, just cycling exports. 
+    // 'ghost' is never defined, so resolution should fail gracefully (return empty), not stack overflow.
     workspace.create_file("a.ts", "export * from './b';");
     workspace.create_file("b.ts", "export * from './c';");
     workspace.create_file("c.ts", "export * from './a';");
@@ -94,9 +102,11 @@ fn test_deep_cycle_detection() {
     indexer.resolve_references();
 
     let run_id = indexer.index.symbol_map.get("run").unwrap()[0];
-    let resolutions = indexer.index.resolved_calls.get(&run_id);
     
-    assert!(resolutions.is_none() || resolutions.unwrap().is_empty(), "Circular resolution should fail gracefully");
+    let resolutions = get_calls(&indexer.index, run_id);
+    
+    // Correct assertion for this test:
+    assert!(resolutions.is_empty(), "Circular resolution should fail gracefully and return no results");
 }
 
 #[test]
@@ -123,7 +133,9 @@ fn test_mixed_barrel_and_local() {
     indexer.resolve_references();
 
     let run_id = indexer.index.symbol_map.get("run").unwrap()[0];
-    let resolutions = indexer.index.resolved_calls.get(&run_id).unwrap();
+    
+    let resolutions = get_calls(&indexer.index, run_id);
 
+    // This assertion failed previously because it was inside the wrong test function
     assert_eq!(resolutions.len(), 2, "Should find both the local and the remote function through the barrel");
 }

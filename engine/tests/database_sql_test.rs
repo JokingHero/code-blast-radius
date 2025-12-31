@@ -31,7 +31,7 @@ fn test_sql_schema_linking() {
     indexer.resolve_references();
 
     // 3. Context Slice
-    let related = find_related_symbols(&indexer.index, "findUser").unwrap();
+    let related = find_related_symbols(&indexer, "findUser").unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -67,7 +67,7 @@ fn test_prisma_linking() {
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let related = find_related_symbols(&indexer.index, "getOrders").unwrap();
+    let related = find_related_symbols(&indexer, "getOrders").unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();

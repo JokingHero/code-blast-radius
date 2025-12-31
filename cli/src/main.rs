@@ -39,7 +39,7 @@ fn main() {
     // --- Context Generation ---
     if let Some(func_name) = cli.function_name {
         // Find Symbols
-        if let Some(mut symbol_ids) = find_related_symbols(&indexer.index, &func_name) {
+        if let Some(mut symbol_ids) = find_related_symbols(&indexer, &func_name) {
             
             // Apply filtering here in main before generating output
             if cli.no_tests {

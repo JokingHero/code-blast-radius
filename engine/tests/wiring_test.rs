@@ -43,7 +43,7 @@ fn test_typescript_nestjs_injection() {
     indexer.resolve_references();
 
     // 4. Trace Context
-    let related = find_related_symbols(&indexer.index, "CatsService").unwrap();
+    let related = find_related_symbols(&indexer, "CatsService").unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -86,7 +86,7 @@ fn test_java_spring_injection() {
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let related = find_related_symbols(&indexer.index, "UserController").unwrap();
+     let related = find_related_symbols(&indexer, "UserController").unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
