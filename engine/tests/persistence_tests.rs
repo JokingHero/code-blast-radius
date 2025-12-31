@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::indexer::Indexer;
+use rfc_engine::resolution::Indexer;
 
 fn has_func(index: &rfc_engine::models::WorkspaceIndex, name: &str) -> bool {
     index.symbol_map.contains_key(name)

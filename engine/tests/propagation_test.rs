@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::indexer::Indexer;
+use rfc_engine::resolution::Indexer;
 
 #[test]
 fn test_const_propagation_import() {

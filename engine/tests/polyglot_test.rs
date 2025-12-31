@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::indexer::Indexer;
+use rfc_engine::resolution::Indexer;
 
 #[test]
 fn test_strategy_1_and_3_cli_path_linking() {

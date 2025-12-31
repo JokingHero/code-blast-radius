@@ -1,5 +1,5 @@
 pub mod models;
-pub mod indexer;
+pub mod resolution;
 pub mod analysis;
 pub mod manifest;
 pub mod topic;

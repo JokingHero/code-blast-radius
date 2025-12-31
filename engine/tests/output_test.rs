@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::indexer::Indexer;
+use rfc_engine::resolution::Indexer;
 use rfc_engine::query::output::generate_context_output;
 
 #[test]
