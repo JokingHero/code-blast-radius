@@ -2,7 +2,7 @@ use clap::Parser;
 use std::path::PathBuf;
 use std::process;
 use rfc_engine::indexer::Indexer;
-use rfc_engine::analyzer::find_related_symbols;
+use rfc_engine::query::traversal::find_related_symbols;
 use rfc_engine::query::output::generate_context_output;
 
 #[derive(Parser, Debug)]

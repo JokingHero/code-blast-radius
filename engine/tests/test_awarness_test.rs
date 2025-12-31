@@ -1,7 +1,7 @@
 mod common;
 use common::TestWorkspace;
 use rfc_engine::indexer::Indexer;
-use rfc_engine::analyzer::{find_related_symbols, generate_context_from_ids};
+use rfc_engine::query::traversal::{find_related_symbols, generate_context_from_ids};
 
 #[test]
 fn test_path_based_test_detection() {

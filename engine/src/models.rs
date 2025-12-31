@@ -1,6 +1,43 @@
 use rkyv::{Archive, Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+// --- Analysis Structs (Used during extraction phase) ---
+
+#[derive(Debug, Clone)]
+pub struct FunctionInfo {
+    pub name: String,
+    pub kind: String, // Carries the detected type (macro, function, container)
+    pub is_anonymous: bool,
+    pub range_start: usize,
+    pub range_end: usize,
+    pub source_code: String,
+    pub documentation: Option<String>,
+    pub calls: Vec<String>,
+    pub type_refs: Vec<String>,
+    pub decorators: Vec<String>,
+    pub dispatched_actions: Vec<String>,
+    pub handled_actions: Vec<String>,
+    pub fingerprints: HashMap<String, Vec<String>>,
+    pub return_type: Option<String>,
+    pub local_types: HashMap<String, String>,
+    pub local_assigns: HashMap<String, String>,
+    pub config_keys: Vec<String>,
+    pub routes: Vec<String>,
+}
+
+pub struct FileAnalysis {
+    pub functions: Vec<FunctionInfo>,
+    pub imports: Vec<ImportNode>,
+    pub exports: Vec<ExportNode>,
+    pub literals: Vec<String>,
+    pub implementations: Vec<(String, String)>,
+    pub global_vars: HashMap<String, String>,
+    pub middleware_usage: Vec<String>,
+    pub defined_routes: Vec<String>,
+}
+
+// --- Persistence Structs (Used for Indexing/Linking) ---
+
 pub type FileId = u32;
 pub type SymbolId = u32;
 

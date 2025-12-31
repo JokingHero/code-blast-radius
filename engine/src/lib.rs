@@ -1,4 +1,3 @@
-pub mod analyzer;
 pub mod models;
 pub mod indexer;
 pub mod analysis;

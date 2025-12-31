@@ -1,6 +1,6 @@
 use crate::manifest::scan_manifests;
 use crate::models::{ WorkspaceIndex, FileNode, SymbolNode, SymbolId, FileId };
-use crate::analyzer::analyze_source;
+use crate::analysis::analyze_source;
 use crate::analysis::language::{ get_language_configs, LanguageConfig };
 use crate::topic::matches_topic;
 use std::path::{ Path };

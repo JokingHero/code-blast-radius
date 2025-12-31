@@ -1,7 +1,7 @@
 mod common;
 use common::TestWorkspace;
 use rfc_engine::indexer::Indexer;
-use rfc_engine::analyzer::find_related_symbols;
+use rfc_engine::query::traversal::find_related_symbols;
 
 #[test]
 fn test_scenario_monorepo_nest_angular_prisma() {
