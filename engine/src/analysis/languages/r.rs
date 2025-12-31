@@ -1,4 +1,4 @@
-use crate::language::{LanguageConfig, SupportedLanguage};
+use crate::analysis::language::{LanguageConfig, SupportedLanguage};
 
 pub const R_CONFIG: LanguageConfig = LanguageConfig {
     lang_enum: SupportedLanguage::R,

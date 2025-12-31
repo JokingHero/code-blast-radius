@@ -1,5 +1,5 @@
 use tree_sitter::Language;
-use crate::languages; 
+use crate::analysis::languages;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SupportedLanguage {

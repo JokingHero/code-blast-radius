@@ -1,7 +1,7 @@
 use crate::manifest::scan_manifests;
-use crate::schema::{ WorkspaceIndex, FileNode, SymbolNode, SymbolId, FileId };
+use crate::models::{ WorkspaceIndex, FileNode, SymbolNode, SymbolId, FileId };
 use crate::analyzer::analyze_source;
-use crate::language::{ get_language_configs, LanguageConfig };
+use crate::analysis::language::{ get_language_configs, LanguageConfig };
 use crate::topic::matches_topic;
 use std::path::{ Path };
 use std::fs::{ self, File };
@@ -491,10 +491,10 @@ impl Indexer {
                 // --- Config Data Linking ---
                 let is_data_file = matches!(
                     config.lang_enum,
-                    crate::language::SupportedLanguage::Yaml |
-                        crate::language::SupportedLanguage::Json |
-                        crate::language::SupportedLanguage::Toml |
-                        crate::language::SupportedLanguage::Dotenv
+                    crate::analysis::language::SupportedLanguage::Yaml |
+                        crate::analysis::language::SupportedLanguage::Json |
+                        crate::analysis::language::SupportedLanguage::Toml |
+                        crate::analysis::language::SupportedLanguage::Dotenv
                 );
                 if is_data_file {
                     for &sid in &file_symbol_ids {

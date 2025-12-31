@@ -2,8 +2,8 @@ use std::collections::{ HashMap, HashSet, VecDeque };
 use std::path::Path;
 use tree_sitter::{ Parser, Query, QueryCursor, StreamingIterator };
 
-use crate::language::{ LanguageConfig, SupportedLanguage, get_language };
-use crate::schema::{ ImportNode, ExportNode, WorkspaceIndex, SymbolId };
+use crate::analysis::language::{ LanguageConfig, SupportedLanguage, get_language };
+use crate::models::{ ImportNode, ExportNode, WorkspaceIndex, SymbolId };
 
 #[derive(Debug, Clone)]
 pub struct FunctionInfo {

@@ -1,8 +1,7 @@
 pub mod analyzer;
-pub mod language;
-pub mod schema;
+pub mod models;
 pub mod indexer;
-pub mod languages;
+pub mod analysis;
 pub mod manifest;
 pub mod topic;
-pub mod output;
+pub mod query;

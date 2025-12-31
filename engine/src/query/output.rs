@@ -1,5 +1,5 @@
 use serde::Serialize;
-use crate::schema::{WorkspaceIndex, FileId};
+use crate::models::{WorkspaceIndex, FileId};
 use std::collections::HashMap;
 
 #[derive(Serialize)]

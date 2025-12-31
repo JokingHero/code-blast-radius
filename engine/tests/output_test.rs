@@ -1,7 +1,7 @@
 mod common;
 use common::TestWorkspace;
 use rfc_engine::indexer::Indexer;
-use rfc_engine::output::generate_context_output;
+use rfc_engine::query::output::generate_context_output;
 
 #[test]
 fn test_output_json_structure_and_merging() {

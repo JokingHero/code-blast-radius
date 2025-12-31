@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process;
 use rfc_engine::indexer::Indexer;
 use rfc_engine::analyzer::find_related_symbols;
-use rfc_engine::output::generate_context_output;
+use rfc_engine::query::output::generate_context_output;
 
 #[derive(Parser, Debug)]
 #[command(name = "cfb", version, about = "Context Management")]

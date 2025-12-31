@@ -1,4 +1,4 @@
-use rfc_engine::{language::{SupportedLanguage, get_language}};
+use rfc_engine::{analysis::language::{SupportedLanguage, get_language}};
 use tree_sitter::{Parser};
 
 #[test]
