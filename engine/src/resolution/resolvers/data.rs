@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use crate::resolution::Indexer;
-use crate::models::{FileId, SymbolId};
+use crate::models::{FileId, SymbolId, SymbolKind};
 
 impl Indexer {
     pub(crate) fn resolve_database_references(&mut self) {
@@ -16,7 +16,7 @@ impl Indexer {
 
         let mut new_links = Vec::new();
         for (file_id, literals) in &self.index.raw_literals {
-            let module_sym_id = self.index.symbols.values().find(|s| s.file_id == *file_id && s.kind == "module").map(|s| s.id);
+            let module_sym_id = self.index.symbols.values().find(|s| s.file_id == *file_id && s.kind == SymbolKind::Module).map(|s| s.id);
             if let Some(mod_id) = module_sym_id {
                 for lit in literals {
                     let clean_lit = lit.trim_matches(|c| c == '"' || c == '\'' || c == '`');
@@ -66,7 +66,7 @@ impl Indexer {
     pub(crate) fn resolve_file_dependencies(&mut self) {
         let mut file_to_module_sym: HashMap<FileId, SymbolId> = HashMap::new();
         for sym in self.index.symbols.values() {
-            if sym.kind == "module" { file_to_module_sym.insert(sym.file_id, sym.id); }
+            if sym.kind == SymbolKind::Module { file_to_module_sym.insert(sym.file_id, sym.id); }
         }
 
         let fids: Vec<FileId> = self.index.file_imports.keys().cloned().collect();
@@ -100,11 +100,11 @@ impl Indexer {
     
     pub(crate) fn resolve_namespace_imports(&mut self) {
         let file_mod_map: HashMap<FileId, String> = self.index.symbols.values()
-            .filter(|s| s.kind == "module").map(|s| (s.file_id, s.name.clone())).collect();
+            .filter(|s| s.kind == SymbolKind::Module).map(|s| (s.file_id, s.name.clone())).collect();
 
         let file_ids: Vec<FileId> = self.index.file_imports.keys().cloned().collect();
         for fid in file_ids {
-            let mod_sym_id = self.index.symbols.values().find(|s| s.file_id == fid && s.kind == "module").map(|s| s.id);
+            let mod_sym_id = self.index.symbols.values().find(|s| s.file_id == fid && s.kind == SymbolKind::Module).map(|s| s.id);
             if let Some(scope_id) = mod_sym_id {
                 let imports = self.index.file_imports.get(&fid).cloned().unwrap_or_default();
                 for imp in imports {
@@ -220,7 +220,7 @@ impl Indexer {
         }
         let mut s3_definers = Vec::new();
         for sym in self.index.symbols.values() {
-            if sym.kind == "resource" && sym.name.contains("aws_s3_bucket") { s3_definers.push(sym.file_id); }
+            if sym.kind == SymbolKind::Resource && sym.name.contains("aws_s3_bucket") { s3_definers.push(sym.file_id); }
         }
         for user_id in &aws_s3_users {
             for def_id in &s3_definers {

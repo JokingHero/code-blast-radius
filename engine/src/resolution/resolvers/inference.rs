@@ -1,5 +1,5 @@
 use crate::resolution::Indexer;
-use crate::models::SymbolId;
+use crate::models::{SymbolId, SymbolKind};
 
 impl Indexer {
     pub(crate) fn resolve_type_sniffing(&mut self) {
@@ -80,7 +80,7 @@ impl Indexer {
                 // Structural Candidates
                 let mut candidates = Vec::new();
                 for (&cont_id, cont_meths) in &self.index.container_methods {
-                    if self.index.symbols[&cont_id].kind == "module" { continue; }
+                    if self.index.symbols[&cont_id].kind == SymbolKind::Module { continue; }
                     if meths.iter().all(|m| cont_meths.contains(m)) {
                         candidates.push(cont_id);
                     }

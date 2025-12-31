@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use crate::resolution::Indexer;
-use crate::models::{SymbolId, FileId};
+use crate::models::{FileId, SymbolId, SymbolKind};
 use crate::topic::matches_topic;
 
 impl Indexer {
@@ -81,7 +81,7 @@ impl Indexer {
                              if let Some(ids) = self.index.symbol_map.get(clean) {
                                  type_class_id = ids.iter().find(|&&id| {
                                      let s = &self.index.symbols[&id];
-                                     s.kind == "container" || s.kind == "class"
+                                     s.kind == SymbolKind::Container
                                  }).cloned();
                              }
                             break;

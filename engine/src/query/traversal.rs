@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::{models::{SymbolId, WorkspaceIndex}};
+use crate::models::{SymbolId, SymbolKind, WorkspaceIndex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum TraversalMode {
@@ -306,7 +306,7 @@ pub fn find_related_symbols(index: &WorkspaceIndex, target_name: &str) -> Option
                 }
             }
             // Exclude "module" to prevent irrelevant siblings in the file from being pulled in.
-            if sym.kind == "container" {
+            if sym.kind == SymbolKind::Container {
                 for (&s_id, s_node) in &index.symbols {
                     if s_node.parent_id == Some(current_id) {
                         if !visited.contains(&(s_id, mode)) {

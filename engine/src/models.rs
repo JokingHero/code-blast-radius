@@ -3,10 +3,26 @@ use std::collections::{HashMap, HashSet};
 
 // --- Analysis Structs (Used during extraction phase) ---
 
+#[derive(Archive, Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[archive(check_bytes)]
+pub enum SymbolKind {
+    Module,
+    Function,
+    Method,
+    Container,      // Classes, Interfaces, Structs, Impls
+    Macro,
+    MacroGenerated,
+    Variable,       // const x = ...
+    External,       // Imported from libraries
+    Resource,       // Infrastructure (Terraform/Cloud)
+    Test,           // Explicit test functions
+    Unknown,
+}
+
 #[derive(Debug, Clone)]
 pub struct FunctionInfo {
     pub name: String,
-    pub kind: String, // Carries the detected type (macro, function, container)
+    pub kind: SymbolKind,
     pub is_anonymous: bool,
     pub range_start: usize,
     pub range_end: usize,
@@ -80,7 +96,7 @@ pub struct SymbolNode {
     pub file_id: FileId,
     pub parent_id: Option<SymbolId>,
     pub name: String,
-    pub kind: String, 
+    pub kind: SymbolKind,
     pub range_start: usize,
     pub range_end: usize,
     pub doc_comment: Option<String>,

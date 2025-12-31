@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
 use crate::analysis::language::LanguageConfig;
-use crate::models::FunctionInfo;
+use crate::models::{FunctionInfo, SymbolKind};
 
 /// Represents a potential variable definition that carries type or assignment info.
 /// These are extracted during the definition pass but distributed to their owners
@@ -38,7 +38,7 @@ pub fn extract_definitions(
     // Initialize the module-level container
     let module_info = FunctionInfo {
         name: format!("(module) {}", module_name),
-        kind: "module".to_string(),
+        kind: SymbolKind::Module,
         is_anonymous: false,
         range_start: root_node.start_byte(),
         range_end: root_node.end_byte(),
@@ -131,20 +131,24 @@ pub fn extract_definitions(
             
             // Determine the "Kind" of definition
             let kind = if let Some(k) = kind_opt {
-                k
+                match k.as_str() {
+                    "resource" | "data" => SymbolKind::Resource,
+                    "variable" | "output" | "provider" => SymbolKind::Variable,
+                    _ => SymbolKind::Function, // Fallback for captured strings
+                }
             } else if node_kind == "macro_definition" {
-                "macro".to_string()
+                SymbolKind::Macro
             } else if node_kind == "macro_invocation" {
-                "macro_generated".to_string()
+                SymbolKind::MacroGenerated
             } else if
                 node_kind.contains("class") ||
                 node_kind.contains("interface") ||
                 node_kind.contains("struct") ||
                 node_kind.contains("impl")
             {
-                "container".to_string()
+                SymbolKind::Container
             } else {
-                "function".to_string()
+                SymbolKind::Function
             };
 
             functions.push(FunctionInfo {

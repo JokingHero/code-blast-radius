@@ -1,5 +1,5 @@
 use crate::resolution::Indexer;
-use crate::models::SymbolNode;
+use crate::models::{SymbolKind, SymbolNode};
 
 impl Indexer {
     pub(crate) fn resolve_external_imports(&mut self) {
@@ -27,7 +27,7 @@ impl Indexer {
                             file_id: 0,
                             parent_id: None,
                             name: sym_name.clone(),
-                            kind: "external".to_string(),
+                            kind: SymbolKind::External,
                             range_start: 0,
                             range_end: 0,
                             doc_comment: Some(format!("External import from package `{}`", pkg_name)),

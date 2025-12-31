@@ -3,7 +3,7 @@ pub mod utils;
 pub mod resolvers;
 
 use crate::manifest::scan_manifests;
-use crate::models::{WorkspaceIndex, FileNode, SymbolNode, SymbolId, FileId};
+use crate::models::{FileId, FileNode, SymbolId, SymbolKind, SymbolNode, WorkspaceIndex};
 use crate::analysis::analyze_source;
 use crate::analysis::language::{get_language_configs, LanguageConfig};
 use std::path::Path;
@@ -212,13 +212,13 @@ impl Indexer {
                 let symbol_id = self.index.next_symbol_id;
                 self.index.next_symbol_id += 1;
                 
-                let is_inline_test = !func.kind.contains("module") && (
+                let is_inline_test = func.kind != SymbolKind::Module && (
                     func.source_code.contains("it(") || func.name.contains("test") || func.decorators.iter().any(|d| d.contains("test"))
                 );
 
                 self.index.symbols.insert(symbol_id, SymbolNode {
                     id: symbol_id, file_id, parent_id: None,
-                    name: func.name.clone(), kind: func.kind.clone(),
+                    name: func.name.clone(), kind: func.kind,
                     range_start: func.range_start, range_end: func.range_end,
                     doc_comment: func.documentation, return_type: func.return_type,
                     is_test: is_path_test || is_inline_test,
@@ -254,25 +254,30 @@ impl Indexer {
             }
 
             let container_ids: Vec<SymbolId> = file_symbol_ids.iter().filter(|&&id| {
-                let s = &self.index.symbols[&id]; s.kind == "container" || s.kind == "module"
+                let s = &self.index.symbols[&id]; 
+                s.kind == SymbolKind::Container || s.kind == SymbolKind::Module
             }).cloned().collect();
 
             for c_id in container_ids {
-                let (cs, ce, c_kind) = { let c = &self.index.symbols[&c_id]; (c.range_start, c.range_end, c.kind.clone()) };
+                let (cs, ce, c_kind) = { let c = &self.index.symbols[&c_id]; (c.range_start, c.range_end, c.kind) };
                 let mut members = HashSet::new();
                 for &s_id in &file_symbol_ids {
                     if s_id == c_id { continue; }
                     let is_member = { let s = &self.index.symbols[&s_id]; s.range_start >= cs && s.range_end <= ce };
                     if is_member {
                         members.insert(self.index.symbols[&s_id].name.clone());
-                        if c_kind != "module" { if let Some(node) = self.index.symbols.get_mut(&s_id) { node.parent_id = Some(c_id); } }
+                        if c_kind != SymbolKind::Module { 
+                            if let Some(node) = self.index.symbols.get_mut(&s_id) { 
+                                node.parent_id = Some(c_id); 
+                            } 
+                        }
                     }
                 }
                 if !members.is_empty() { self.index.container_methods.insert(c_id, members); }
             }
             
             // Orphans to module
-            let module_id = file_symbol_ids.iter().find(|&&id| self.index.symbols[&id].kind == "module").cloned();
+            let module_id = file_symbol_ids.iter().find(|&&id| self.index.symbols[&id].kind == SymbolKind::Module).cloned();
             if let Some(mid) = module_id {
                 for &id in &file_symbol_ids {
                     if id != mid {
@@ -290,7 +295,7 @@ impl Indexer {
             }
 
             if let Some(route) = utils::detect_framework_route(path_obj) {
-                 if let Some(mid) = file_symbol_ids.iter().find(|&&id| self.index.symbols[&id].kind == "module") {
+                 if let Some(mid) = file_symbol_ids.iter().find(|&&id| self.index.symbols[&id].kind == SymbolKind::Module) {
                      self.index.implicit_routes.insert(route, *mid);
                  }
             }

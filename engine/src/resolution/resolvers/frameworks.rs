@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use crate::resolution::Indexer;
 use crate::analysis::language::LanguageConfig;
-use crate::models::{SymbolId, FileId};
+use crate::models::{FileId, SymbolId, SymbolKind};
 
 impl Indexer {
     pub(crate) fn resolve_implicit_routes(&mut self) {
@@ -42,7 +42,7 @@ impl Indexer {
             if !deps.contains(&tgt_file_id) { deps.push(tgt_file_id); }
 
             let src_mod = self.index.symbols.values()
-                .find(|s| s.file_id == src_file_id && s.kind == "module")
+                .find(|s| s.file_id == src_file_id && s.kind == SymbolKind::Module)
                 .map(|s| s.id);
 
             if let Some(s) = src_mod {
@@ -150,7 +150,7 @@ impl Indexer {
                     if middleware_ids.iter().any(|&mid| self.index.symbols[&mid].file_id == imported_file_id) { continue; }
 
                     let target_mod_id = self.index.symbols.values()
-                        .find(|s| s.file_id == imported_file_id && s.kind == "module")
+                        .find(|s| s.file_id == imported_file_id && s.kind == SymbolKind::Module)
                         .map(|s| s.id);
 
                     if let Some(target_id) = target_mod_id {

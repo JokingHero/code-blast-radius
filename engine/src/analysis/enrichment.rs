@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
 use crate::analysis::language::LanguageConfig;
-use crate::models::FunctionInfo;
+use crate::models::{FunctionInfo, SymbolKind};
 use crate::analysis::definitions::VariableHint;
 
 /// Helper to determine which function "owns" a specific byte range.
@@ -43,7 +43,7 @@ pub fn enrich_functions(
     let class_indices: Vec<usize> = functions
         .iter()
         .enumerate()
-        .filter(|(_, f)| f.kind == "container")
+        .filter(|(_, f)| f.kind == SymbolKind::Container)
         .map(|(i, _)| i)
         .collect();
 
