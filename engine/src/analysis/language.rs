@@ -5,6 +5,7 @@ use crate::analysis::languages;
 pub enum SupportedLanguage {
     Rust, TypeScript, Python, Java, JavaScript, Bash, Html,
     Julia, R, Json, Yaml, Toml, Dotenv, Sql, Prisma, Hcl,
+    Go, CSharp, Php, Ruby, C, Cpp,
 }
 
 pub fn get_language(lang: SupportedLanguage) -> Language {
@@ -24,6 +25,12 @@ pub fn get_language(lang: SupportedLanguage) -> Language {
         SupportedLanguage::Sql => tree_sitter_sequel::LANGUAGE.into(),
         SupportedLanguage::Prisma => tree_sitter_prisma_io::LANGUAGE.into(),
         SupportedLanguage::Hcl => tree_sitter_hcl::LANGUAGE.into(),
+        SupportedLanguage::Go => tree_sitter_go::LANGUAGE.into(),
+        SupportedLanguage::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
+        SupportedLanguage::Php => tree_sitter_php::LANGUAGE_PHP.into(),
+        SupportedLanguage::Ruby => tree_sitter_ruby::LANGUAGE.into(),
+        SupportedLanguage::C => tree_sitter_c::LANGUAGE.into(),
+        SupportedLanguage::Cpp => tree_sitter_cpp::LANGUAGE.into(),
     }
 }
 
@@ -151,5 +158,11 @@ pub fn get_language_configs() -> Vec<LanguageConfig> {
         languages::sql::config(),
         languages::prisma::config(),
         languages::hcl::config(),
+        languages::go::config(),
+        languages::c_sharp::config(),
+        languages::php::config(),
+        languages::ruby::config(),
+        languages::c::config(),
+        languages::cpp::config(),
     ]
 }
