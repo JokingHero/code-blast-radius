@@ -1,5 +1,6 @@
 mod common;
 use common::TestWorkspace;
+use rfc_engine::models::StagingArea;
 use rfc_engine::resolution::Indexer;
 use rfc_engine::query::traversal::find_related_symbols;
 
@@ -33,8 +34,9 @@ fn test_redux_constant_propagation() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // 3. Verify linkage
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "doLogin").unwrap();
@@ -73,8 +75,9 @@ fn test_vuex_commit_support() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // 3. Verify linkage
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "increment").expect("...");
@@ -114,8 +117,9 @@ fn test_mixed_dispatch_variable() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "run").unwrap();
     

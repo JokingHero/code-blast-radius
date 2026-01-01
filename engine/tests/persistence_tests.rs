@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::{models::StagingArea, resolution::Indexer};
 
 fn has_func(index: &rfc_engine::models::WorkspaceIndex, name: &str) -> bool {
     index.symbols.values().any(|s| s.name == name)
@@ -15,20 +15,19 @@ fn test_persistence_lifecycle() {
         function add(a, b) { return a + b; }
     "#);
 
-    // 1. Run 1: Initial Scan & Save
+    // Run 1
     {
         let mut indexer = Indexer::new();
-        indexer.scan(&workspace.path);
-        indexer.resolve_references(); // Good practice to resolve before save
-        assert!(has_func(&indexer.index, "add"), "Initial scan failed to find 'add'");
+        let mut staging = rfc_engine::models::StagingArea::default();
+        indexer.scan(&workspace.path, &mut staging);
+        indexer.resolve_references(&mut staging);
         indexer.save(&index_file).expect("Failed to save index");
     }
 
-    // 2. Run 2: Load from Disk
+    // Run 2
     {
-        let loaded_indexer = Indexer::load_from_file(&index_file)
-            .expect("Failed to load index");
-        assert!(has_func(&loaded_indexer.index, "add"), "Loaded index missing 'add' function");
+        let loaded_indexer = Indexer::load_from_file(&index_file).expect("Failed to load");
+        assert!(has_func(&loaded_indexer.index, "add"), "Loaded index missing 'add'");
     }
 }
 
@@ -41,7 +40,8 @@ fn test_incremental_updates() {
     workspace.create_file("logic.py", "def init_system():\n    pass");
     {
         let mut indexer = Indexer::new();
-        indexer.scan(&workspace.path);
+        let mut staging = StagingArea::default(); // 1. Create staging
+        indexer.scan(&workspace.path, &mut staging);
         indexer.save(&index_file).unwrap();
     }
 
@@ -55,7 +55,9 @@ fn test_incremental_updates() {
         assert!(has_func(&indexer.index, "init_system"));
         assert!(!has_func(&indexer.index, "helper"));
 
-        indexer.scan(&workspace.path);
+        // 2. Create a FRESH staging area for the update scan
+        let mut staging = StagingArea::default(); 
+        indexer.scan(&workspace.path, &mut staging);
 
         assert!(has_func(&indexer.index, "helper"), "Incremental scan missed new file");
         assert!(has_func(&indexer.index, "init_system_v2"), "Incremental scan missed modified function");

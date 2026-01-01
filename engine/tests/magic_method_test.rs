@@ -1,5 +1,6 @@
 mod common;
 use common::TestWorkspace;
+use rfc_engine::models::StagingArea;
 use rfc_engine::resolution::Indexer;
 use rfc_engine::query::traversal::find_related_symbols;
 
@@ -34,8 +35,9 @@ fn test_python_getattr_proxy() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // 3. Verify Linkage
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "run_workflow").unwrap();

@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::{models::StagingArea, resolution::Indexer};
 use std::fs;
 
 #[test]
@@ -13,7 +13,8 @@ fn test_ghost_data_removal() {
 
     {
         let mut indexer = Indexer::new();
-        indexer.scan(&workspace.path);
+        let mut staging = StagingArea::default(); 
+        indexer.scan(&workspace.path, &mut staging);
         indexer.save(&index_file).unwrap();
         
         // Check symbol existence directly in index
@@ -25,7 +26,8 @@ fn test_ghost_data_removal() {
 
     {
         let mut indexer = Indexer::load_from_file(&index_file).unwrap();
-        indexer.scan(&workspace.path);
+        let mut staging = StagingArea::default(); 
+        indexer.scan(&workspace.path, &mut staging);
         
         assert!(indexer.index.symbols.values().any(|f| f.name == "new_function"), "New function not found");
         assert!(!indexer.index.symbols.values().any(|f| f.name == "old_function"), "Ghost Data: old_function still exists after rename!");
@@ -36,7 +38,8 @@ fn test_ghost_data_removal() {
 
     {
         let mut indexer = Indexer::load_from_file(&index_file).unwrap();
-        indexer.scan(&workspace.path);
+        let mut staging = StagingArea::default(); 
+    indexer.scan(&workspace.path, &mut staging);
         
         assert!(!indexer.index.symbols.values().any(|f| f.name == "new_function"), "Ghost Data: function still exists after file deletion!");
         assert!(indexer.index.symbols.is_empty(), "Graph should be empty");

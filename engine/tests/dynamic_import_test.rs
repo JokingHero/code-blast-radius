@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::{models::StagingArea, resolution::Indexer};
 
 #[test]
 fn test_ts_dynamic_import_with_variable() {
@@ -24,8 +24,9 @@ fn test_ts_dynamic_import_with_variable() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let loader_id = indexer.index.files.values()
         .find(|f| f.path.contains("loader.ts"))
@@ -54,8 +55,9 @@ fn test_js_require_with_variable() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let app_id = indexer.index.files.values().find(|f| f.path.contains("app.js")).unwrap().id;
     let lib_id = indexer.index.files.values().find(|f| f.path.contains("lib.js")).unwrap().id;
@@ -84,8 +86,9 @@ fn test_python_importlib_variable() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let main_id = indexer.index.files.values().find(|f| f.path.contains("main.py")).unwrap().id;
     let plugin_id = indexer.index.files.values().find(|f| f.path.contains("payment.py")).unwrap().id;
@@ -107,8 +110,9 @@ fn test_ts_dynamic_import_literal() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let main_id = indexer.index.files.values().find(|f| f.path.contains("main.ts")).unwrap().id;
     let utils_id = indexer.index.files.values().find(|f| f.path.contains("utils.ts")).unwrap().id;

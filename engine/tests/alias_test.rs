@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::{models::StagingArea, resolution::Indexer};
 
 #[test]
 fn test_tsconfig_path_alias() {
@@ -27,8 +27,9 @@ fn test_tsconfig_path_alias() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let main_id = indexer.index.files.values().find(|f| f.path.contains("main.ts")).unwrap().id;
     let math_id = indexer.index.files.values().find(|f| f.path.contains("math.ts")).unwrap().id;
@@ -56,8 +57,9 @@ fn test_rust_crate_alias() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let main_id = indexer.index.files.values().find(|f| f.path.contains("main.rs")).unwrap().id;
     let helper_id = indexer.index.files.values().find(|f| f.path.contains("helper.rs")).unwrap().id;
@@ -84,8 +86,9 @@ fn test_fuzzy_fallback_resolution() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let app_id = indexer.index.files.values().find(|f| f.path.contains("app.py")).unwrap().id;
     let logic_id = indexer.index.files.values().find(|f| f.path.contains("logic.py")).unwrap().id;

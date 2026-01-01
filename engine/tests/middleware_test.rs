@@ -1,5 +1,6 @@
 mod common;
 use common::TestWorkspace;
+use rfc_engine::models::StagingArea;
 use rfc_engine::resolution::Indexer;
 use rfc_engine::query::traversal::find_related_symbols;
 
@@ -39,8 +40,9 @@ fn test_express_middleware_context() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // 4. Verification
     // If I search for "getUser", I must see "AuthMiddleware" in the context,
@@ -107,8 +109,9 @@ MIDDLEWARE = [
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "my_view").unwrap();
     let names: Vec<String> = related.iter()

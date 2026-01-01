@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::{models::StagingArea, resolution::Indexer};
 
 #[test]
 fn test_strategy_1_and_3_cli_path_linking() {
@@ -22,8 +22,9 @@ fn test_strategy_1_and_3_cli_path_linking() {
     workspace.create_file("raw_data.json", r#"{ "id": 100 }"#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // Helpers to get IDs
     let sh_id = indexer.index.files.values().find(|f| f.path.contains("pipeline.sh")).unwrap().id;
@@ -50,8 +51,9 @@ fn test_strategy_1_config_file_loading() {
     workspace.create_file("config/settings.json", r#"{ "port": 8080 }"#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let js_id = indexer.index.files.values().find(|f| f.path.contains("server.js")).unwrap().id;
     let json_id = indexer.index.files.values().find(|f| f.path.contains("settings.json")).unwrap().id;
@@ -78,8 +80,9 @@ fn test_strategy_2_shared_routes() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // --- Assertions for HTTP Route ---
     let ts_id = indexer.index.files.values().find(|f| f.path.contains("api.ts")).unwrap().id;
@@ -106,8 +109,9 @@ fn test_strategy_2_ipc_supported_langs() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let js_id = indexer.index.files.values().find(|f| f.path.contains("producer.js")).unwrap().id;
     let rs_id = indexer.index.files.values().find(|f| f.path.contains("consumer.rs")).unwrap().id;

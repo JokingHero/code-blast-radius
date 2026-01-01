@@ -1,5 +1,6 @@
 mod common;
 use common::TestWorkspace;
+use rfc_engine::models::StagingArea;
 use rfc_engine::resolution::Indexer;
 use rfc_engine::query::output::generate_context_output;
 
@@ -30,7 +31,8 @@ fn test_output_json_structure_and_merging() {
 
     // 2. Index the file
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
+    let mut staging = StagingArea::default(); 
+    indexer.scan(&workspace.path, &mut staging);
     
     // 3. Get Symbol IDs
     let id_a = indexer.lookup.symbol_map.get("funcA").expect("funcA missing")[0];
@@ -93,7 +95,8 @@ fn test_output_multi_file() {
     workspace.create_file("main.ts", "import { help } from './utils'; function main() { help(); }");
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
+    let mut staging = StagingArea::default(); 
+    indexer.scan(&workspace.path, &mut staging);
     
     let id_main = indexer.lookup.symbol_map.get("main").unwrap()[0];
     let id_help = indexer.lookup.symbol_map.get("help").unwrap()[0];

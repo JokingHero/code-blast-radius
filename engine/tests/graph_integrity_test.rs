@@ -1,7 +1,7 @@
 mod common;
 use common::TestWorkspace;
 use rfc_engine::resolution::Indexer;
-use rfc_engine::models::{EdgeKind, SymbolKind};
+use rfc_engine::models::{EdgeKind, StagingArea, SymbolKind};
 
 #[test]
 fn test_graph_structural_integrity() {
@@ -16,8 +16,9 @@ fn test_graph_structural_integrity() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let graph = &indexer.index.graph;
 

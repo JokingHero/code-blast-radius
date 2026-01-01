@@ -1,5 +1,6 @@
 mod common;
 use common::TestWorkspace;
+use rfc_engine::models::StagingArea;
 use rfc_engine::resolution::Indexer;
 use rfc_engine::query::traversal::find_related_symbols;
 
@@ -33,8 +34,9 @@ db_url: "postgres://localhost:5432"
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // Verification A: Check if 'api_key' in YAML is a recognized config definition
     assert!(indexer.lookup.config_definitions.contains_key("api_key"), "api_key should be indexed from YAML");
@@ -77,8 +79,9 @@ fn test_config_linkage_json_and_dotenv() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "start").unwrap();
     let names: Vec<String> = related.iter()

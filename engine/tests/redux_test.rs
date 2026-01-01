@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::models::EdgeKind;
+use rfc_engine::models::{EdgeKind, StagingArea};
 use rfc_engine::resolution::Indexer;
 use rfc_engine::query::traversal::find_related_symbols;
 
@@ -37,8 +37,9 @@ fn test_redux_switch_case_linking() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // --- Assertions ---
 
@@ -51,12 +52,12 @@ fn test_redux_switch_case_linking() {
 
     // 2. Check Extraction (White-box testing the index)
     // The handler should have recorded the action string
-    let handled = indexer.staging.raw_action_handlers.get(&handler_id).expect("Reducer should capture handled actions");
+    let handled = staging.raw_action_handlers.get(&handler_id).expect("Reducer should capture handled actions");
     assert!(handled.contains(&"AUTH/LOGIN_SUCCESS".to_string()));
     assert!(handled.contains(&"AUTH/LOGOUT".to_string()));
 
     // The dispatcher should have recorded the action string
-    let dispatched = indexer.staging.raw_action_dispatches.get(&caller_id).expect("Component should capture dispatched actions");
+    let dispatched = staging.raw_action_dispatches.get(&caller_id).expect("Component should capture dispatched actions");
     assert!(dispatched.contains(&"AUTH/LOGIN_SUCCESS".to_string()));
 
     // 3. Check Resolution (The Linkage)
@@ -106,8 +107,9 @@ fn test_redux_object_map_linking() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let saga_id = indexer.lookup.symbol_map.get("createTodoSaga").unwrap()[0];
 

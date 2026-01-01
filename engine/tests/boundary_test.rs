@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::{models::StagingArea, resolution::Indexer};
 
 use crate::common::get_calls;
 
@@ -30,8 +30,9 @@ fn test_external_stub_generation() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // 4. Verify External Package Detection
     assert!(indexer.lookup.external_packages.contains("axios"), "Should detect axios in package.json");
@@ -65,7 +66,9 @@ fn test_ignore_file_respect() {
     workspace.create_file("node_modules/bad_lib.ts", "function hidden() {}");
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // Should find main.ts
     assert!(indexer.index.files.keys().any(|k| k.contains("src/main.ts")));

@@ -1,6 +1,6 @@
 mod common;
 use common::{TestWorkspace, get_calls};
-use rfc_engine::resolution::Indexer;
+use rfc_engine::{models::StagingArea, resolution::Indexer};
 
 #[test]
 fn test_diamond_export_resolution() {
@@ -24,8 +24,9 @@ fn test_diamond_export_resolution() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let leaf_id = indexer.lookup.symbol_map.get("leafFunc").unwrap()[0];
     let run_id = indexer.lookup.symbol_map.get("run").unwrap()[0];
@@ -61,8 +62,9 @@ fn test_named_export_priority() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let run_id = indexer.lookup.symbol_map.get("run").unwrap()[0];
     
@@ -96,10 +98,9 @@ fn test_deep_cycle_detection() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    
-    // This must not hang or stack overflow
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let run_id = indexer.lookup.symbol_map.get("run").unwrap()[0];
     
@@ -129,8 +130,9 @@ fn test_mixed_barrel_and_local() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let run_id = indexer.lookup.symbol_map.get("run").unwrap()[0];
     

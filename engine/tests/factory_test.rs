@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::{models::StagingArea, resolution::Indexer};
 
 #[test]
 fn test_ts_factories() {
@@ -33,8 +33,9 @@ fn test_ts_factories() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     assert!(indexer.lookup.symbol_map.contains_key("useStore"), "Zustand create() pattern missed");
     assert!(indexer.lookup.symbol_map.contains_key("User"), "Mongoose model() pattern missed");

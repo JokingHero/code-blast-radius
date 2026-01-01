@@ -1,5 +1,6 @@
 mod common;
 use common::TestWorkspace;
+use rfc_engine::models::StagingArea;
 use rfc_engine::resolution::Indexer;
 use rfc_engine::query::traversal::{find_related_symbols, generate_context_from_ids};
 
@@ -16,7 +17,8 @@ fn test_path_based_test_detection() {
     workspace.create_file("__tests__/internal.ts", "function internal_test() {}");
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
+    let mut staging = StagingArea::default(); 
+    indexer.scan(&workspace.path, &mut staging);
 
     // Verify FileNode flags
     let files = &indexer.index.files;
@@ -52,7 +54,8 @@ fn test_inline_symbol_test_detection() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
+    let mut staging = StagingArea::default(); 
+    indexer.scan(&workspace.path, &mut staging);
 
     let get_sym = |name: &str| {
         let id = indexer.lookup.symbol_map.get(name).unwrap()[0];
@@ -87,8 +90,9 @@ fn test_context_filtering_logic() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // 1. Find related symbols for "multiply"
     // This will find "multiply" (target) and "test_multiply" (upstream caller)
@@ -116,7 +120,8 @@ fn test_python_test_detection() {
     workspace.create_file("test_logic.py", "def test_add(): assert add(1, 1) == 2");
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
+    let mut staging = StagingArea::default(); 
+    indexer.scan(&workspace.path, &mut staging);
     
     // Use stricter matching to ensure we don't accidentally grab "test_logic.py"
     // when looking for "logic.py"

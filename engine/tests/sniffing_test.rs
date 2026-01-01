@@ -1,5 +1,6 @@
 mod common;
 use common::TestWorkspace;
+use rfc_engine::models::StagingArea;
 use rfc_engine::resolution::Indexer;
 use rfc_engine::query::traversal::find_related_symbols;
 
@@ -32,8 +33,9 @@ fn test_return_type_bridge_sniffing() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // Verification Logic:
     // Searching for "connect" should ideally find "startApp" as a related symbol 
@@ -73,8 +75,9 @@ fn test_explicit_type_sniffing() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let write_ids = indexer.lookup.symbol_map.get("writeFile").expect("Should find 'writeFile'");
     let write_id = write_ids[0];
@@ -108,8 +111,9 @@ fn test_chained_inference_no_bloat() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // Ensure 'service' is NOT a symbol (no bloat)
     if let Some(ids) = indexer.lookup.symbol_map.get("service") {

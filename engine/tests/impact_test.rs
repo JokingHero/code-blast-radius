@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::{models::StagingArea, resolution::Indexer};
 
 #[test]
 fn test_file_impact_analysis() {
@@ -17,8 +17,9 @@ fn test_file_impact_analysis() {
     workspace.create_file("styles.css", "body { color: red; }");
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // 4. Run Impact Analysis on utils.ts
     let target = workspace.path.join("utils.ts");

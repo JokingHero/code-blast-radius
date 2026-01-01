@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::{models::StagingArea, resolution::Indexer};
 
 use crate::common::get_calls;
 
@@ -33,8 +33,9 @@ fn test_namespace_import_resolution() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // 3. Verification
     // We expect the 'runCalculation' symbol to have a resolved call to 'add'.
@@ -73,8 +74,9 @@ fn test_namespace_resolution_deep_scope() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let start_id = indexer.lookup.symbol_map.get("start").unwrap()[0];
     let log_id = indexer.lookup.symbol_map.get("log").unwrap()[0];

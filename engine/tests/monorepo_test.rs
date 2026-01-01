@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::{models::StagingArea, resolution::Indexer};
 
 #[test]
 fn test_monorepo_package_subpath_resolution() {
@@ -28,8 +28,9 @@ fn test_monorepo_package_subpath_resolution() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     // --- Assertions ---
 
@@ -69,8 +70,9 @@ fn test_monorepo_package_root_resolution() {
     "#);
 
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
-    indexer.resolve_references();
+    let mut staging = StagingArea::default();
+    indexer.scan(&workspace.path, &mut staging);
+    indexer.resolve_references(&mut staging);
 
     let server_id = indexer.index.files.values().find(|f| f.path.contains("server.ts")).unwrap().id;
     let index_id = indexer.index.files.values().find(|f| f.path.contains("index.ts")).unwrap().id;
@@ -94,7 +96,8 @@ fn test_cargo_workspace_mapping() {
 
     // 2. Run scan
     let mut indexer = Indexer::new();
-    indexer.scan(&workspace.path);
+    let mut staging = StagingArea::default(); 
+    indexer.scan(&workspace.path, &mut staging);
     
     // 3. Verify Mapping
     // We mainly want to ensure the logic in manifest.rs correctly extracted the name
