@@ -1,6 +1,6 @@
 use std::collections::{ HashMap, HashSet };
 use crate::models::{ FileId, SymbolId, SymbolKind, EdgeKind, WorkspaceIndex, StagingArea, SymbolIndex };
-use crate::resolution::resolvers::{core, add_edge, link_modules};
+use crate::resolution::resolvers::{core, add_edge, link_modules, constants};
 
 pub fn resolve_database_references(
     index: &mut WorkspaceIndex,
@@ -27,7 +27,7 @@ pub fn resolve_database_references(
 
         if let Some(mod_id) = module_sym_id {
             for lit in literals {
-                let clean_lit = lit.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                let clean_lit = lit.trim_matches(constants::QUOTE_CHARS);
                 let words: Vec<&str> = clean_lit
                     .split(|c: char| !c.is_alphanumeric() && c != '_')
                     .collect();

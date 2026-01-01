@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use crate::models::{ FileId, SymbolId, SymbolKind, EdgeKind, WorkspaceIndex, StagingArea, SymbolIndex };
 use crate::analysis::language::LanguageConfig;
-use crate::resolution::resolvers::{core, add_edge, link_modules};
+use crate::resolution::resolvers::{core, add_edge, link_modules, constants};
 
 pub fn resolve_implicit_routes(index: &mut WorkspaceIndex, staging: &StagingArea, lookup: &SymbolIndex) {
     // ... (This function remains unchanged) ...
@@ -14,7 +14,7 @@ pub fn resolve_implicit_routes(index: &mut WorkspaceIndex, staging: &StagingArea
         
     for (src_file_id, literals) in &staging.raw_literals {
         for lit in literals {
-            let clean_lit = lit.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+            let clean_lit = lit.trim_matches(constants::QUOTE_CHARS);
 
             if let Some(&target_sym_id) = lookup.implicit_routes.get(clean_lit) {
                 if index.symbols[&target_sym_id].file_id != *src_file_id {
@@ -111,7 +111,10 @@ pub fn resolve_dependency_injection(
     let mut injection_points = Vec::new();
     for (scope_id, var_types) in &staging.local_variable_types {
         if let Some(scope_sym) = index.symbols.get(scope_id) {
-            let link_source_id = if scope_sym.name == "constructor" || scope_sym.name == "__init__" {
+            let config = file_configs.get(&scope_sym.file_id);
+            let is_constructor = config.map_or(false, |c| c.heuristics.constructor_names.contains(&scope_sym.name.as_str()));
+            
+            let link_source_id = if is_constructor {
                 scope_sym.parent_id.unwrap_or(*scope_id)
             } else {
                 *scope_id

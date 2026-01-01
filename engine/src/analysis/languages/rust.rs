@@ -161,5 +161,7 @@ pub fn config() -> LanguageConfig {
             )
         )
     "#)
+    .constructor_names(&["new", "with_capacity", "default"])
+    .project_config_files(&["Cargo.toml"])
     .build()
 }

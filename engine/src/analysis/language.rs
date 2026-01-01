@@ -52,6 +52,8 @@ pub struct QueryConfig {
 pub struct HeuristicConfig {
     pub di_decorators: &'static [&'static str],
     pub magic_methods: &'static [&'static str],
+    pub constructor_names: &'static [&'static str],
+    pub project_config_files: &'static [&'static str],
 }
 
 /// The main configuration struct, now cleaner and grouped.
@@ -108,6 +110,16 @@ impl LanguageConfigBuilder {
 
     pub fn magic_methods(mut self, m: &'static [&'static str]) -> Self {
         self.heuristics.magic_methods = m;
+        self
+    }
+
+    pub fn constructor_names(mut self, c: &'static [&'static str]) -> Self {
+        self.heuristics.constructor_names = c;
+        self
+    }
+
+    pub fn project_config_files(mut self, f: &'static [&'static str]) -> Self {
+        self.heuristics.project_config_files = f;
         self
     }
 

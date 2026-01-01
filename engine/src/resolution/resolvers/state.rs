@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use crate::models::{FileId, SymbolId, SymbolKind, EdgeKind, WorkspaceIndex, StagingArea, SymbolIndex};
-use crate::resolution::resolvers::{core, add_edge, link_modules};
+use crate::resolution::resolvers::{core, add_edge, link_modules, constants};
 use crate::topic::matches_topic;
 use crate::analysis::language::LanguageConfig;
 
@@ -30,19 +30,31 @@ pub fn resolve_state_management(index: &mut WorkspaceIndex, staging: &StagingAre
     }
 }
 
-pub fn resolve_pubsub_wildcards(index: &mut WorkspaceIndex, staging: &StagingArea) {
+pub fn resolve_pubsub_wildcards(
+    index: &mut WorkspaceIndex,
+    staging: &StagingArea,
+    configs: &HashMap<String, LanguageConfig>
+) {
     let mut patterns: Vec<(FileId, String)> = Vec::new();
     let mut candidates: Vec<(FileId, String)> = Vec::new();
     let config_file_ids: HashSet<FileId> = index.files.iter()
-        .filter(|(path, _)| { let p = path.to_lowercase(); p.ends_with("tsconfig.json") || p.ends_with("package.json") })
+        .filter(|(path, _)| {
+            let p = path.to_lowercase();
+            let ext = Path::new(&p).extension().and_then(|s| s.to_str()).unwrap_or("");
+            if let Some(config) = configs.get(ext) {
+                config.heuristics.project_config_files.iter().any(|&f| p.ends_with(f))
+            } else {
+                p.ends_with("tsconfig.json") || p.ends_with("package.json")
+            }
+        })
         .map(|(_, node)| node.id).collect();
 
     for (file_id, literals) in &staging.raw_literals {
         if config_file_ids.contains(file_id) { continue; }
         for lit in literals {
-            if lit.len() < 3 || (!lit.contains('.') && !lit.contains('/') && !lit.contains(':')) { continue; }
-            let clean = lit.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_string();
-            if clean.contains('*') || clean.contains('#') || clean.contains('>') {
+            if lit.len() < 3 || !lit.contains(constants::PATH_SEPARATORS) { continue; }
+            let clean = lit.trim_matches(constants::QUOTE_CHARS).to_string();
+            if clean.contains(constants::WILDCARD_CHARS) {
                 patterns.push((*file_id, clean));
             } else {
                 candidates.push((*file_id, clean));
@@ -140,7 +152,7 @@ pub fn resolve_decorators(
     for (caller_id, dec_names) in &staging.raw_decorators {
         let caller_file_id = index.symbols[caller_id].file_id;
         for dec_name in dec_names {
-            let clean = dec_name.split('(').next().unwrap_or(&dec_name).trim();
+            let clean = dec_name.split('(').next().unwrap_or(&dec_name).trim().trim_matches(constants::QUOTE_CHARS);
             if let Some(target_id) = core::resolve_single_call(index, lookup, cache, caller_file_id, clean) {
                 add_edge(index, *caller_id, target_id, EdgeKind::Calls); 
             } else if let Some(candidates) = lookup.symbol_map.get(clean) {

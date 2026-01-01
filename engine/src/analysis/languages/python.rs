@@ -181,5 +181,7 @@ pub fn config() -> LanguageConfig {
     "#)
     .di_decorators(&["dataclass", "Component", "Service"])
     .magic_methods(&["__getattr__", "__getattribute__"])
+    .constructor_names(&["__init__"])
+    .project_config_files(&["pyproject.toml", "requirements.txt", "setup.py", ".env"])
     .build()
 }

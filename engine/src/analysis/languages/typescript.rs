@@ -322,5 +322,8 @@ pub fn config() -> LanguageConfig {
             (#match? @fn "^(Controller|Get|Post|Put|Delete|Patch)$")
         )
     "#)
-    .di_decorators(&["Injectable", "Component", "Directive", "Pipe", "Service"]).build()
+    .di_decorators(&["Injectable", "Component", "Directive", "Pipe", "Service"])
+    .constructor_names(&["constructor"])
+    .project_config_files(&["tsconfig.json", "package.json"])
+    .build()
 }

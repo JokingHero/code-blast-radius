@@ -4,6 +4,7 @@ pub mod inference;
 pub mod frameworks;
 pub mod state;
 pub mod data;
+pub mod constants;
 
 use crate::models::{Edge, EdgeKind, SymbolId, WorkspaceIndex, SymbolKind};
 

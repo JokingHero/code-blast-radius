@@ -215,5 +215,7 @@ pub fn config() -> LanguageConfig {
             (#match? @method "^(get|post|put|delete|patch|options|head|all)$")
         )
     "#)
+    .constructor_names(&["constructor"])
+    .project_config_files(&["package.json", "jsconfig.json"])
     .build()
 }

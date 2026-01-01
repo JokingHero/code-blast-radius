@@ -44,7 +44,7 @@ impl ResolutionPipeline {
         // 2. Data and Literals
         resolvers::data::resolve_literal_dependencies(index, staging, lookup);
         resolvers::data::resolve_shared_literals(index, staging);
-        resolvers::state::resolve_pubsub_wildcards(index, staging);
+        resolvers::state::resolve_pubsub_wildcards(index, staging, configs);
 
         // 3. Inference & Magic
         resolvers::inference::resolve_type_sniffing(index, staging, lookup);
