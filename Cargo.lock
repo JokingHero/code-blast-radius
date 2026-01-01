@@ -179,6 +179,7 @@ dependencies = [
 name = "cfb"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
  "rfc-engine",
  "serde",
