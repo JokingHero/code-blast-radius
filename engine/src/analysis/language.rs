@@ -1,4 +1,5 @@
-use tree_sitter::Language;
+use tree_sitter::{Language, Query};
+use std::sync::Arc;
 use crate::analysis::languages;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -54,6 +55,25 @@ pub struct QueryConfig {
     pub route_defs: Option<&'static str>,
 }
 
+/// Holds compiled Tree-Sitter queries for a language.
+#[derive(Clone, Default)]
+pub struct CompiledQueries {
+    pub defs: Option<Arc<Query>>,
+    pub calls: Option<Arc<Query>>,
+    pub docs: Option<Arc<Query>>,
+    pub imports: Option<Arc<Query>>,
+    pub exports: Option<Arc<Query>>,
+    pub literals: Option<Arc<Query>>,
+    pub implements: Option<Arc<Query>>,
+    pub config: Option<Arc<Query>>,
+    pub vals: Option<Arc<Query>>,
+    pub types: Option<Arc<Query>>,
+    pub decorators: Option<Arc<Query>>,
+    pub actions: Option<Arc<Query>>,
+    pub middleware: Option<Arc<Query>>,
+    pub route_defs: Option<Arc<Query>>,
+}
+
 /// Groups heuristic lists for framework analysis.
 #[derive(Default, Clone)]
 pub struct HeuristicConfig {
@@ -69,6 +89,7 @@ pub struct LanguageConfig {
     pub lang: SupportedLanguage,
     pub file_extensions: &'static [&'static str],
     pub queries: QueryConfig,
+    pub compiled_queries: CompiledQueries,
     pub heuristics: HeuristicConfig,
 }
 
@@ -131,10 +152,37 @@ impl LanguageConfigBuilder {
     }
 
     pub fn build(self) -> LanguageConfig {
+        let language = get_language(self.lang);
+        let mut compiled = CompiledQueries::default();
+
+        macro_rules! compile_query {
+            ($field:ident) => {
+                if let Some(q_str) = self.queries.$field {
+                    compiled.$field = Query::new(&language, q_str).ok().map(Arc::new);
+                }
+            };
+        }
+
+        compile_query!(defs);
+        compile_query!(calls);
+        compile_query!(docs);
+        compile_query!(imports);
+        compile_query!(exports);
+        compile_query!(literals);
+        compile_query!(implements);
+        compile_query!(config);
+        compile_query!(vals);
+        compile_query!(types);
+        compile_query!(decorators);
+        compile_query!(actions);
+        compile_query!(middleware);
+        compile_query!(route_defs);
+
         LanguageConfig {
             lang: self.lang,
             file_extensions: self.file_extensions,
             queries: self.queries,
+            compiled_queries: compiled,
             heuristics: self.heuristics,
         }
     }

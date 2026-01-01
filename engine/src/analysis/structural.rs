@@ -35,139 +35,136 @@ pub fn extract_structure(
     let mut defined_routes = Vec::new();
 
     // --- 1. Imports ---
-    if let Some(q_str) = config.queries.imports {
-        if let Ok(q) = Query::new(language, q_str) {
-            let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, root_node, source);
-            while let Some(m) = matches.next() {
-                let mut src = String::new();
-                let mut name = String::new();
-                let mut alias = None;
-                for cap in m.captures {
-                    let text = cap.node.utf8_text(source).unwrap_or("").to_string();
-                    let capture_name = q.capture_names()[cap.index as usize];
-                    if capture_name == "import.source" {
-                        if let Some(resolved) = constants.get(&text) {
-                            src = resolved.clone();
-                        } else {
-                            src = text.replace(['"', '\''], "");
+    // --- 1. Imports ---
+    if let Some(ref q) = config.compiled_queries.imports {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(q, root_node, source);
+        while let Some(m) = matches.next() {
+            let mut src = String::new();
+            let mut name = String::new();
+            let mut alias = None;
+            for cap in m.captures {
+                let text = cap.node.utf8_text(source).unwrap_or("").to_string();
+                let capture_name = q.capture_names()[cap.index as usize];
+                if capture_name == "import.source" {
+                    if let Some(resolved) = constants.get(&text) {
+                        src = resolved.clone();
+                    } else {
+                        src = text.replace(['"', '\''], "");
+                    }
+                } else if capture_name == "import.dynamic" {
+                    if let Some(resolved) = constants.get(&text) {
+                        src = resolved.clone();
+                        src = src.replace(['"', '\'', '`'], "");
+                    }
+                } else if capture_name == "import.name" {
+                    name = text;
+                } else if capture_name == "import.alias" {
+                    name = "*".to_string();
+                    alias = Some(text);
+                }
+            }
+            if !src.is_empty() {
+                if config.lang == SupportedLanguage::Python {
+                    if src.contains('.') && !src.starts_with("./") && !src.starts_with("../") {
+                        if src != "." && src != ".." {
+                            src = src.replace('.', "/");
                         }
-                    } else if capture_name == "import.dynamic" {
-                        if let Some(resolved) = constants.get(&text) {
-                            src = resolved.clone();
-                            src = src.replace(['"', '\'', '`'], "");
-                        }
-                    } else if capture_name == "import.name" {
-                        name = text;
-                    } else if capture_name == "import.alias" {
-                        name = "*".to_string();
-                        alias = Some(text);
                     }
                 }
-                if !src.is_empty() {
-                    if config.lang == SupportedLanguage::Python {
-                        if src.contains('.') && !src.starts_with("./") && !src.starts_with("../") {
-                            if src != "." && src != ".." {
-                                src = src.replace('.', "/");
-                            }
-                        }
-                    }
-                    imports.push(ImportNode { name, source: src, alias });
-                }
+                imports.push(ImportNode { name, source: src, alias });
             }
         }
     }
 
     // --- 2. Exports ---
-    if let Some(q_str) = config.queries.exports {
-        if let Ok(q) = Query::new(language, q_str) {
-            let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, root_node, source);
-            while let Some(m) = matches.next() {
-                let mut src = String::new();
-                let mut name = None;
-                for cap in m.captures {
-                    let text = cap.node.utf8_text(source).unwrap_or("").to_string();
-                    let capture_name = q.capture_names()[cap.index as usize];
-                    if capture_name == "export.source" {
-                        if let Some(resolved) = constants.get(&text) {
-                            src = resolved.clone();
-                        } else {
-                            src = text.replace(['"', '\''], "");
-                        }
-                    } else if capture_name == "export.name" {
-                        name = Some(text);
+    // --- 2. Exports ---
+    if let Some(ref q) = config.compiled_queries.exports {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(q, root_node, source);
+        while let Some(m) = matches.next() {
+            let mut src = String::new();
+            let mut name = None;
+            for cap in m.captures {
+                let text = cap.node.utf8_text(source).unwrap_or("").to_string();
+                let capture_name = q.capture_names()[cap.index as usize];
+                if capture_name == "export.source" {
+                    if let Some(resolved) = constants.get(&text) {
+                        src = resolved.clone();
+                    } else {
+                        src = text.replace(['"', '\''], "");
                     }
+                } else if capture_name == "export.name" {
+                    name = Some(text);
                 }
-                if !src.is_empty() {
-                    exports.push(ExportNode { name, source: src });
-                }
+            }
+            if !src.is_empty() {
+                exports.push(ExportNode { name, source: src });
             }
         }
     }
 
     // --- 3. Literals & Template Expansion ---
-    if let Some(q_str) = config.queries.literals {
-        if let Ok(q) = Query::new(language, q_str) {
-            let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, root_node, source);
+    // --- 3. Literals & Template Expansion ---
+    if let Some(ref q) = config.compiled_queries.literals {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(q, root_node, source);
 
-            while let Some(m) = matches.next() {
-                for cap in m.captures {
-                    let node = cap.node;
-                    let node_kind = node.kind();
+        while let Some(m) = matches.next() {
+            for cap in m.captures {
+                let node = cap.node;
+                let node_kind = node.kind();
 
-                    if node_kind == "template_string" || node_kind == "string" {
-                        let mut synthetic = String::new();
-                        let mut is_complex = false;
+                if node_kind == "template_string" || node_kind == "string" {
+                    let mut synthetic = String::new();
+                    let mut is_complex = false;
 
-                        let mut cursor = node.walk();
-                        for child in node.children(&mut cursor) {
-                            let k = child.kind();
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        let k = child.kind();
 
-                            if k == "string_fragment" || k == "string_content" {
-                                synthetic.push_str(&child.utf8_text(source).unwrap_or(""));
-                            } else if k == "template_substitution" || k == "interpolation" {
-                                is_complex = true;
-                                let mut found_const = false;
+                        if k == "string_fragment" || k == "string_content" {
+                            synthetic.push_str(&child.utf8_text(source).unwrap_or(""));
+                        } else if k == "template_substitution" || k == "interpolation" {
+                            is_complex = true;
+                            let mut found_const = false;
 
-                                let mut sub_cursor = child.walk();
-                                for sub_child in child.children(&mut sub_cursor) {
-                                    if sub_child.kind() == "identifier" {
-                                        let var_name = sub_child
-                                            .utf8_text(source)
-                                            .unwrap_or("");
-                                        if let Some(val) = constants.get(var_name) {
-                                            let raw_val = val.trim_matches(
-                                                |c| c == '"' || c == '\'' || c == '`'
-                                            );
-                                            synthetic.push_str(raw_val);
-                                            found_const = true;
-                                        }
-                                        break;
+                            let mut sub_cursor = child.walk();
+                            for sub_child in child.children(&mut sub_cursor) {
+                                if sub_child.kind() == "identifier" {
+                                    let var_name = sub_child
+                                        .utf8_text(source)
+                                        .unwrap_or("");
+                                    if let Some(val) = constants.get(var_name) {
+                                        let raw_val = val.trim_matches(
+                                            |c| c == '"' || c == '\'' || c == '`'
+                                        );
+                                        synthetic.push_str(raw_val);
+                                        found_const = true;
                                     }
-                                }
-
-                                if !found_const {
-                                    synthetic.push('*');
+                                    break;
                                 }
                             }
-                        }
 
-                        if is_complex && !synthetic.is_empty() {
-                            literals.push(synthetic.clone());
+                            if !found_const {
+                                synthetic.push('*');
+                            }
                         }
                     }
 
-                    let text = node
-                        .utf8_text(source)
-                        .unwrap_or("")
-                        .trim_matches(|c| c == '"' || c == '\'' || c == '`')
-                        .to_string();
-
-                    if text.len() > 1 {
-                        literals.push(text);
+                    if is_complex && !synthetic.is_empty() {
+                        literals.push(synthetic.clone());
                     }
+                }
+
+                let text = node
+                    .utf8_text(source)
+                    .unwrap_or("")
+                    .trim_matches(|c| c == '"' || c == '\'' || c == '`')
+                    .to_string();
+
+                if text.len() > 1 {
+                    literals.push(text);
                 }
             }
         }
@@ -179,62 +176,56 @@ pub fn extract_structure(
     }
 
     // --- 4. Implementations ---
-    if let Some(q_str) = config.queries.implements {
-        if let Ok(q) = Query::new(language, q_str) {
-            let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, root_node, source);
-            while let Some(m) = matches.next() {
-                let mut child = String::new();
-                let mut parent = String::new();
-                for cap in m.captures {
-                    let name = q.capture_names()[cap.index as usize];
-                    let text = cap.node.utf8_text(source).unwrap_or("").to_string();
-                    if name == "impl.child" {
-                        child = text;
-                    } else if name == "impl.parent" {
-                        parent = text;
-                    }
+    // --- 4. Implementations ---
+    if let Some(ref q) = config.compiled_queries.implements {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(q, root_node, source);
+        while let Some(m) = matches.next() {
+            let mut child = String::new();
+            let mut parent = String::new();
+            for cap in m.captures {
+                let name = q.capture_names()[cap.index as usize];
+                let text = cap.node.utf8_text(source).unwrap_or("").to_string();
+                if name == "impl.child" {
+                    child = text;
+                } else if name == "impl.parent" {
+                    parent = text;
                 }
-                if !child.is_empty() && !parent.is_empty() {
-                    implementations.push((child, parent));
-                }
+            }
+            if !child.is_empty() && !parent.is_empty() {
+                implementations.push((child, parent));
             }
         }
     }
     
     // --- 5. Explicit Route Definitions ---
-    if let Some(q_str) = config.queries.route_defs {
-        if let Ok(q) = Query::new(language, q_str) {
-            let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, root_node, source);
+    // --- 5. Explicit Route Definitions ---
+    if let Some(ref q) = config.compiled_queries.route_defs {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(q, root_node, source);
 
-            while let Some(m) = matches.next() {
-                for cap in m.captures {
-                    let text = cap.node
-                        .utf8_text(source)
-                        .unwrap_or("")
-                        .trim_matches(|c| c == '"' || c == '\'' || c == '`');
+        while let Some(m) = matches.next() {
+            for cap in m.captures {
+                let text = cap.node
+                    .utf8_text(source)
+                    .unwrap_or("")
+                    .trim_matches(|c| c == '"' || c == '\'' || c == '`');
 
-                    let route = if text.starts_with('/') {
-                        text.to_string()
-                    } else {
-                        format!("/{}", text)
-                    };
+                let route = if text.starts_with('/') {
+                    text.to_string()
+                } else {
+                    format!("/{}", text)
+                };
 
-                    if route.len() > 1 {
-                        defined_routes.push(route);
-                    }
+                if route.len() > 1 {
+                    defined_routes.push(route);
                 }
             }
         }
     }
 
     // --- 6. Middleware Usage ---
-    let middleware_query = config.queries.middleware.and_then(|q_str| {
-        Query::new(language, q_str).ok()
-    });
-
-    if let Some(ref q) = middleware_query {
+    if let Some(ref q) = config.compiled_queries.middleware {
         let mut mw_cursor = QueryCursor::new();
         let mut mw_matches = mw_cursor.matches(q, root_node, source);
 

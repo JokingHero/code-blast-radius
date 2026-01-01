@@ -142,27 +142,25 @@ fn pass_variable_hints(context: &mut EnrichmentContext, hints: Vec<VariableHint>
 }
 
 fn pass_config_keys(context: &mut EnrichmentContext) {
-    if let Some(q_str) = context.config.queries.config {
-        if let Ok(q) = Query::new(context.language, q_str) {
-            let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, context.root_node, context.source);
-            
-            while let Some(query_match) = matches.next() {
-                for capture in query_match.captures {
-                    if q.capture_names()[capture.index as usize] == "config.key" {
-                        let text = capture.node
-                            .utf8_text(context.source)
-                            .unwrap_or("")
-                            .trim_matches(|c| c == '"' || c == '\'' || c == '`')
-                            .to_string();
+    if let Some(ref q) = context.config.compiled_queries.config {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(q, context.root_node, context.source);
+        
+        while let Some(query_match) = matches.next() {
+            for capture in query_match.captures {
+                if q.capture_names()[capture.index as usize] == "config.key" {
+                    let text = capture.node
+                        .utf8_text(context.source)
+                        .unwrap_or("")
+                        .trim_matches(|c| c == '"' || c == '\'' || c == '`')
+                        .to_string();
 
-                        if !text.is_empty() {
-                            let range = capture.node.byte_range();
-                            if let Some(idx) = context.find_owner(range.start, range.end) {
-                                context.functions[idx].config_keys.push(text);
-                            } else {
-                                context.module_info.config_keys.push(text);
-                            }
+                    if !text.is_empty() {
+                        let range = capture.node.byte_range();
+                        if let Some(idx) = context.find_owner(range.start, range.end) {
+                            context.functions[idx].config_keys.push(text);
+                        } else {
+                            context.module_info.config_keys.push(text);
                         }
                     }
                 }
@@ -172,25 +170,23 @@ fn pass_config_keys(context: &mut EnrichmentContext) {
 }
 
 fn pass_decorators(context: &mut EnrichmentContext) {
-    if let Some(q_str) = context.config.queries.decorators {
-        if let Ok(q) = Query::new(context.language, q_str) {
-            let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, context.root_node, context.source);
-            
-            while let Some(query_match) = matches.next() {
-                for capture in query_match.captures {
-                    let text = capture.node.utf8_text(context.source).unwrap_or("").to_string();
-                    let clean_name = text
-                        .trim_matches(|c| c == '@' || c == '#' || c == '[' || c == ']' || c == '(' || c == ')')
-                        .to_string();
+    if let Some(ref q) = context.config.compiled_queries.decorators {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(q, context.root_node, context.source);
+        
+        while let Some(query_match) = matches.next() {
+            for capture in query_match.captures {
+                let text = capture.node.utf8_text(context.source).unwrap_or("").to_string();
+                let clean_name = text
+                    .trim_matches(|c| c == '@' || c == '#' || c == '[' || c == ']' || c == '(' || c == ')')
+                    .to_string();
 
-                    if !clean_name.is_empty() {
-                        let range = capture.node.byte_range();
-                        if let Some(idx) = context.find_owner_or_neighbor(range.start, range.end) {
-                            context.functions[idx].decorators.push(clean_name);
-                        } else {
-                            context.module_info.decorators.push(clean_name);
-                        }
+                if !clean_name.is_empty() {
+                    let range = capture.node.byte_range();
+                    if let Some(idx) = context.find_owner_or_neighbor(range.start, range.end) {
+                        context.functions[idx].decorators.push(clean_name);
+                    } else {
+                        context.module_info.decorators.push(clean_name);
                     }
                 }
             }
@@ -199,55 +195,53 @@ fn pass_decorators(context: &mut EnrichmentContext) {
 }
 
 fn pass_calls(context: &mut EnrichmentContext) {
-    if let Some(q_str) = context.config.queries.calls {
-        if let Ok(q) = Query::new(context.language, q_str) {
-            let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, context.root_node, context.source);
-            
-            while let Some(query_match) = matches.next() {
-                let mut method_name = None;
-                let mut receiver_name = None;
-                let mut dynamic_receiver = None;
-                let mut call_range = None;
+    if let Some(ref q) = context.config.compiled_queries.calls {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(q, context.root_node, context.source);
+        
+        while let Some(query_match) = matches.next() {
+            let mut method_name = None;
+            let mut receiver_name = None;
+            let mut dynamic_receiver = None;
+            let mut call_range = None;
 
-                for capture in query_match.captures {
-                    let t = capture.node.utf8_text(context.source).unwrap_or("").to_string();
-                    let cap_name = q.capture_names()[capture.index as usize];
+            for capture in query_match.captures {
+                let t = capture.node.utf8_text(context.source).unwrap_or("").to_string();
+                let cap_name = q.capture_names()[capture.index as usize];
 
-                    if cap_name == "call.name" {
-                        method_name = Some(t);
-                        call_range = Some(capture.node.byte_range());
-                    } else if cap_name == "call.receiver" {
-                        receiver_name = Some(t);
-                    } else if cap_name == "call.dynamic_dispatch" {
-                        dynamic_receiver = Some(t);
-                        call_range = Some(capture.node.byte_range());
+                if cap_name == "call.name" {
+                    method_name = Some(t);
+                    call_range = Some(capture.node.byte_range());
+                } else if cap_name == "call.receiver" {
+                    receiver_name = Some(t);
+                } else if cap_name == "call.dynamic_dispatch" {
+                    dynamic_receiver = Some(t);
+                    call_range = Some(capture.node.byte_range());
+                }
+            }
+
+            if let (Some(m), Some(range)) = (method_name, call_range.clone()) {
+                if let Some(idx) = context.find_owner(range.start, range.end) {
+                    let func = &mut context.functions[idx];
+                    if receiver_name.is_none() {
+                        func.calls.push(m.clone());
+                    }
+                    if let Some(r) = receiver_name {
+                        func.fingerprints.entry(r).or_default().push(m);
+                    }
+                } else {
+                    if receiver_name.is_none() {
+                        context.module_info.calls.push(m.clone());
+                    }
+                    if let Some(r) = receiver_name {
+                        context.module_info.fingerprints.entry(r).or_default().push(m);
                     }
                 }
-
-                if let (Some(m), Some(range)) = (method_name, call_range.clone()) {
-                    if let Some(idx) = context.find_owner(range.start, range.end) {
-                        let func = &mut context.functions[idx];
-                        if receiver_name.is_none() {
-                            func.calls.push(m.clone());
-                        }
-                        if let Some(r) = receiver_name {
-                            func.fingerprints.entry(r).or_default().push(m);
-                        }
-                    } else {
-                        if receiver_name.is_none() {
-                            context.module_info.calls.push(m.clone());
-                        }
-                        if let Some(r) = receiver_name {
-                            context.module_info.fingerprints.entry(r).or_default().push(m);
-                        }
-                    }
-                } else if let (Some(dr), Some(range)) = (dynamic_receiver, call_range) {
-                    if let Some(idx) = context.find_owner(range.start, range.end) {
-                        context.functions[idx].fingerprints.entry(dr).or_default().push("*".to_string());
-                    } else {
-                        context.module_info.fingerprints.entry(dr).or_default().push("*".to_string());
-                    }
+            } else if let (Some(dr), Some(range)) = (dynamic_receiver, call_range) {
+                if let Some(idx) = context.find_owner(range.start, range.end) {
+                    context.functions[idx].fingerprints.entry(dr).or_default().push("*".to_string());
+                } else {
+                    context.module_info.fingerprints.entry(dr).or_default().push("*".to_string());
                 }
             }
         }
@@ -255,21 +249,19 @@ fn pass_calls(context: &mut EnrichmentContext) {
 }
 
 fn pass_type_refs(context: &mut EnrichmentContext) {
-    if let Some(q_str) = context.config.queries.types {
-        if let Ok(q) = Query::new(context.language, q_str) {
-            let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, context.root_node, context.source);
-            
-            while let Some(query_match) = matches.next() {
-                for capture in query_match.captures {
-                    let type_name = capture.node.utf8_text(context.source).unwrap_or("").to_string();
-                    if !type_name.is_empty() {
-                        let range = capture.node.byte_range();
-                        if let Some(idx) = context.find_owner(range.start, range.end) {
-                            context.functions[idx].type_refs.push(type_name);
-                        } else {
-                            context.module_info.type_refs.push(type_name);
-                        }
+    if let Some(ref q) = context.config.compiled_queries.types {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(q, context.root_node, context.source);
+        
+        while let Some(query_match) = matches.next() {
+            for capture in query_match.captures {
+                let type_name = capture.node.utf8_text(context.source).unwrap_or("").to_string();
+                if !type_name.is_empty() {
+                    let range = capture.node.byte_range();
+                    if let Some(idx) = context.find_owner(range.start, range.end) {
+                        context.functions[idx].type_refs.push(type_name);
+                    } else {
+                        context.module_info.type_refs.push(type_name);
                     }
                 }
             }
@@ -278,47 +270,45 @@ fn pass_type_refs(context: &mut EnrichmentContext) {
 }
 
 fn pass_actions(context: &mut EnrichmentContext) {
-    if let Some(q_str) = context.config.queries.actions {
-        if let Ok(q) = Query::new(context.language, q_str) {
-            let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, context.root_node, context.source);
-            
-            while let Some(query_match) = matches.next() {
-                for capture in query_match.captures {
-                    let raw_text = capture.node.utf8_text(context.source).unwrap_or("").to_string();
-                    
-                    // Resolve constant if possible
-                    let resolved_text = if let Some(val) = context.constants.get(&raw_text) {
-                        val.clone()
-                    } else {
-                        raw_text
-                    };
+    if let Some(ref q) = context.config.compiled_queries.actions {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(q, context.root_node, context.source);
+        
+        while let Some(query_match) = matches.next() {
+            for capture in query_match.captures {
+                let raw_text = capture.node.utf8_text(context.source).unwrap_or("").to_string();
+                
+                // Resolve constant if possible
+                let resolved_text = if let Some(val) = context.constants.get(&raw_text) {
+                    val.clone()
+                } else {
+                    raw_text
+                };
 
-                    let text = resolved_text
-                        .trim_matches(|c| c == '"' || c == '\'' || c == '`')
-                        .to_string();
-                    
-                    let capture_name = q.capture_names()[capture.index as usize];
-                    let range = capture.node.byte_range();
+                let text = resolved_text
+                    .trim_matches(|c| c == '"' || c == '\'' || c == '`')
+                    .to_string();
+                
+                let capture_name = q.capture_names()[capture.index as usize];
+                let range = capture.node.byte_range();
 
-                    // Actions often use the neighbor heuristic (e.g. decorators handling events)
-                    // but dispatching is usually inside the function.
-                    if let Some(idx) = context.find_owner(range.start, range.end) {
-                        if capture_name == "action.dispatch" {
-                            context.functions[idx].dispatched_actions.push(text);
-                        } else if capture_name == "action.handle" {
-                            context.functions[idx].handled_actions.push(text);
-                        }
-                    } else if let Some(idx) = context.find_owner_or_neighbor(range.start, range.end) {
-                        if capture_name == "action.handle" {
-                            context.functions[idx].handled_actions.push(text);
-                        }
-                    } else {
-                        if capture_name == "action.dispatch" {
-                            context.module_info.dispatched_actions.push(text);
-                        } else if capture_name == "action.handle" {
-                            context.module_info.handled_actions.push(text);
-                        }
+                // Actions often use the neighbor heuristic (e.g. decorators handling events)
+                // but dispatching is usually inside the function.
+                if let Some(idx) = context.find_owner(range.start, range.end) {
+                    if capture_name == "action.dispatch" {
+                        context.functions[idx].dispatched_actions.push(text);
+                    } else if capture_name == "action.handle" {
+                        context.functions[idx].handled_actions.push(text);
+                    }
+                } else if let Some(idx) = context.find_owner_or_neighbor(range.start, range.end) {
+                    if capture_name == "action.handle" {
+                        context.functions[idx].handled_actions.push(text);
+                    }
+                } else {
+                    if capture_name == "action.dispatch" {
+                        context.module_info.dispatched_actions.push(text);
+                    } else if capture_name == "action.handle" {
+                        context.module_info.handled_actions.push(text);
                     }
                 }
             }
@@ -327,31 +317,29 @@ fn pass_actions(context: &mut EnrichmentContext) {
 }
 
 fn pass_routes(context: &mut EnrichmentContext) {
-    if let Some(q_str) = context.config.queries.route_defs {
-        if let Ok(q) = Query::new(context.language, q_str) {
-            let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, context.root_node, context.source);
-            
-            while let Some(query_match) = matches.next() {
-                for capture in query_match.captures {
-                    let text = capture.node
-                        .utf8_text(context.source)
-                        .unwrap_or("")
-                        .trim_matches(|c| c == '"' || c == '\'' || c == '`');
+    if let Some(ref q) = context.config.compiled_queries.route_defs {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(q, context.root_node, context.source);
+        
+        while let Some(query_match) = matches.next() {
+            for capture in query_match.captures {
+                let text = capture.node
+                    .utf8_text(context.source)
+                    .unwrap_or("")
+                    .trim_matches(|c| c == '"' || c == '\'' || c == '`');
 
-                    let route = if text.starts_with('/') {
-                        text.to_string()
+                let route = if text.starts_with('/') {
+                    text.to_string()
+                } else {
+                    format!("/{}", text)
+                };
+
+                if route.len() > 1 {
+                    let range = capture.node.byte_range();
+                    if let Some(idx) = context.find_owner_or_neighbor(range.start, range.end) {
+                        context.functions[idx].routes.push(route);
                     } else {
-                        format!("/{}", text)
-                    };
-
-                    if route.len() > 1 {
-                        let range = capture.node.byte_range();
-                        if let Some(idx) = context.find_owner_or_neighbor(range.start, range.end) {
-                            context.functions[idx].routes.push(route);
-                        } else {
-                            context.module_info.routes.push(route);
-                        }
+                        context.module_info.routes.push(route);
                     }
                 }
             }
@@ -360,31 +348,29 @@ fn pass_routes(context: &mut EnrichmentContext) {
 }
 
 fn pass_documentation(context: &mut EnrichmentContext) {
-    if let Some(q_str) = context.config.queries.docs {
-        if let Ok(q) = Query::new(context.language, q_str) {
-            let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, context.root_node, context.source);
-            
-            while let Some(query_match) = matches.next() {
-                // Find the definition node to match ranges
-                let d_def = query_match.captures
-                    .iter()
-                    .find(|c| q.capture_names()[c.index as usize] == "function.definition")
-                    .map(|c| c.node);
+    if let Some(ref q) = context.config.compiled_queries.docs {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(q, context.root_node, context.source);
+        
+        while let Some(query_match) = matches.next() {
+            // Find the definition node to match ranges
+            let d_def = query_match.captures
+                .iter()
+                .find(|c| q.capture_names()[c.index as usize] == "function.definition")
+                .map(|c| c.node);
 
-                if let Some(d_node) = d_def {
-                    for func in context.functions.iter_mut() {
-                        if func.range_start == d_node.start_byte() {
-                            func.documentation = Some(
-                                query_match.captures
-                                    .iter()
-                                    .filter(|c| q.capture_names()[c.index as usize] == "function.docs")
-                                    .map(|c| c.node.utf8_text(context.source).unwrap_or("").to_string())
-                                    .collect::<Vec<_>>()
-                                    .join("\n")
-                            );
-                            break;
-                        }
+            if let Some(d_node) = d_def {
+                for func in context.functions.iter_mut() {
+                    if func.range_start == d_node.start_byte() {
+                        func.documentation = Some(
+                            query_match.captures
+                                .iter()
+                                .filter(|c| q.capture_names()[c.index as usize] == "function.docs")
+                                .map(|c| c.node.utf8_text(context.source).unwrap_or("").to_string())
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        );
+                        break;
                     }
                 }
             }

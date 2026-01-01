@@ -11,30 +11,28 @@ pub fn extract_local_constants(
     let mut constants: HashMap<String, String> = HashMap::new();
 
     // Access: config.queries.vals
-    if let Some(query_str) = config.queries.vals {
-        if let Ok(q) = Query::new(language, query_str) {
-            let mut cursor = QueryCursor::new();
-            let mut matches = cursor.matches(&q, root_node, source);
-            while let Some(m) = matches.next() {
-                let mut name = String::new();
-                let mut val = String::new();
+    if let Some(ref q) = config.compiled_queries.vals {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(q, root_node, source);
+        while let Some(m) = matches.next() {
+            let mut name = String::new();
+            let mut val = String::new();
 
-                for cap in m.captures {
-                    let text = cap.node.utf8_text(source).unwrap_or("").to_string();
-                    let capture_name = q.capture_names()[cap.index as usize];
+            for cap in m.captures {
+                let text = cap.node.utf8_text(source).unwrap_or("").to_string();
+                let capture_name = q.capture_names()[cap.index as usize];
 
-                    if capture_name == "val.name" {
-                        name = text;
-                    } else if capture_name == "val.value" {
-                        val = text
-                            .trim_matches(|c| c == '"' || c == '\'' || c == '`')
-                            .to_string();
-                    }
+                if capture_name == "val.name" {
+                    name = text;
+                } else if capture_name == "val.value" {
+                    val = text
+                        .trim_matches(|c| c == '"' || c == '\'' || c == '`')
+                        .to_string();
                 }
+            }
 
-                if !name.is_empty() && !val.is_empty() {
-                    constants.insert(name, val);
-                }
+            if !name.is_empty() && !val.is_empty() {
+                constants.insert(name, val);
             }
         }
     }

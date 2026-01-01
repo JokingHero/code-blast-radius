@@ -57,21 +57,17 @@ pub fn extract_definitions(
         routes: Vec::new(),
     };
 
-    let defs_query_str = config.queries.defs.unwrap_or("");     
-    if defs_query_str.is_empty() {
-         return Ok(DefinitionsResult {
+    let defs_query = match config.compiled_queries.defs {
+        Some(ref q) => q,
+        None => return Ok(DefinitionsResult {
             functions,
             module_info,
             variable_hints,
-        });
-    }
-
-    let defs_query = Query::new(language, defs_query_str).map_err(|e| 
-        format!("Invalid defs query: {}", e)
-    )?;
+        }),
+    };
 
     let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&defs_query, root_node, source);
+    let mut matches = cursor.matches(defs_query, root_node, source);
 
     while let Some(query_match) = matches.next() {
         let mut def_node = None;
