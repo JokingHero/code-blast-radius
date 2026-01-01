@@ -3,52 +3,58 @@ use std::io::Write;
 use std::path::Path;
 use memmap2::MmapOptions;
 use rkyv::{to_bytes, check_archived_root};
-use crate::models::{WorkspaceIndex, StagingArea, SymbolIndex};
-use super::Indexer;
+use anyhow::{Result, Context};
+use crate::models::WorkspaceIndex;
 
-impl Indexer {
-    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
-        // Only save the Persistent Graph (WorkspaceIndex)
-        // Staging (raw calls) and Lookup (caches) are discarded
-        let bytes = to_bytes::<_, 4096>(&self.index).map_err(|e|
+/// Handles the serialization and deserialization of the Knowledge Graph.
+/// It knows nothing about "Resolution", "Staging", or "Lookups".
+pub struct PersistenceManager;
+
+impl PersistenceManager {
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Serializes the WorkspaceIndex to the specified path using rkyv.
+    pub fn save_index(&self, index: &WorkspaceIndex, path: &Path) -> Result<()> {
+        let bytes = to_bytes::<_, 4096>(index).map_err(|e|
             anyhow::anyhow!("Serialization failed: {}", e)
         )?;
-        let mut file = File::create(path)?;
-        file.write_all(&bytes)?;
+        
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let mut file = File::create(path).context("Failed to create index file")?;
+        file.write_all(&bytes).context("Failed to write index bytes")?;
         Ok(())
     }
 
-    pub fn load_from_file(path: &Path) -> anyhow::Result<Self> {
+    /// Loads the WorkspaceIndex from the specified path.
+    /// Returns a raw WorkspaceIndex. It does NOT rebuild lookups (that is the domain logic's job).
+    pub fn load_index(&self, path: &Path) -> Result<WorkspaceIndex> {
         if !path.exists() {
-            return Ok(Self::new());
+            // If file doesn't exist, return a default empty index
+            return Ok(WorkspaceIndex::default());
         }
-        let file = File::open(path)?;
+
+        let file = File::open(path).context("Failed to open index file")?;
+        
+        // Safety: Mmap is unsafe because external processes modifying the file
+        // can cause UB. In this tool's context, it's generally acceptable.
         let mmap = unsafe { MmapOptions::new().map(&file)? };
         
         if let Err(e) = check_archived_root::<WorkspaceIndex>(&mmap[..]) {
-            eprintln!("Index corrupted: {}", e);
-            return Ok(Self::new());
+            // If corrupted, return default rather than crashing, but log the error context
+            eprintln!("Index corrupted or version mismatch: {}", e);
+            return Ok(WorkspaceIndex::default());
         }
         
         let index: WorkspaceIndex = unsafe {
             rkyv::from_bytes_unchecked(&mmap[..]).map_err(|e| anyhow::anyhow!(e))?
         };
         
-        // Rebuild Lookup Index (Symbol Map)
-        // Since we don't save the map, we must reconstruct it for CLI queries to work
-        let mut lookup = SymbolIndex::default();
-        for sym in index.symbols.values() {
-             lookup.symbol_map.entry(sym.name.clone()).or_default().push(sym.id);
-        }
-
-        let mut s = Self::new();
-        s.index = index;
-        s.lookup = lookup;
-        s.staging = StagingArea::default(); // Staging is always empty on load
-        
-        // Rebuild the reverse graph from the persisted forward graph
-        s.build_reverse_graph();
-        
-        Ok(s)
+        Ok(index)
     }
 }

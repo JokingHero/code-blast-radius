@@ -4,19 +4,13 @@ pub mod resolvers;
 
 use crate::manifest::scan_manifests;
 use crate::models::{
-    Edge,
-    EdgeKind,
-    FileId,
-    FileNode,
-    SymbolId,
-    SymbolKind,
-    SymbolNode,
-    WorkspaceIndex,
-    StagingArea,
-    SymbolIndex
+    Edge, EdgeKind, FileNode, FileId, SymbolId, SymbolNode, SymbolKind,
+    WorkspaceIndex, StagingArea, SymbolIndex
 };
 use crate::analysis::analyze_source;
 use crate::analysis::language::{ get_language_configs, LanguageConfig };
+use crate::resolution::persistence::PersistenceManager; // Import the new manager
+
 use std::path::Path;
 use std::fs;
 use std::collections::{ HashMap, HashSet };
@@ -55,7 +49,56 @@ impl Indexer {
         }
     }
 
-    /// Helper to add an edge to the graph (used during Scan phase)
+    /// Saves the current index to disk.
+    /// Delegates purely to PersistenceManager.
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        let manager = PersistenceManager::new();
+        manager.save_index(&self.index, path)
+    }
+
+    /// Loads index from disk and reconstructs runtime lookups.
+    pub fn load_from_file(path: &Path) -> anyhow::Result<Self> {
+        let manager = PersistenceManager::new();
+        
+        // 1. Load the raw data (SRP: PersistenceManager handles IO)
+        let index = manager.load_index(path)?;
+
+        // 2. Initialize the Indexer with this data
+        let mut indexer = Self::new();
+        indexer.index = index;
+
+        // 3. Rebuild the runtime-only data (SRP: Indexer knows how to structure its lookups)
+        indexer.rebuild_derived_indices();
+        
+        Ok(indexer)
+    }
+
+    /// Internal helper to rebuild SymbolIndex and ReverseGraph from a raw WorkspaceIndex.
+    /// This logic was previously hidden inside the load function.
+    fn rebuild_derived_indices(&mut self) {
+        // Rebuild Symbol Map (Name -> IDs)
+        self.lookup.symbol_map.clear();
+        for sym in self.index.symbols.values() {
+             self.lookup.symbol_map.entry(sym.name.clone()).or_default().push(sym.id);
+        }
+
+        // Rebuild File Imports/Exports lookups
+        // (Note: In the previous code, file_imports/exports were not explicitly saved in WorkspaceIndex 
+        // but were part of SymbolIndex. If SymbolIndex isn't persisted in WorkspaceIndex, 
+        // we can't fully rebuild these without re-scanning. 
+        // *Correction based on current models.rs*: SymbolIndex is NOT persisted. 
+        // WorkspaceIndex only has `files`, `symbols`, `graph`.
+        // Therefore, loading from disk currently gives us a graph, but loses specific Import/Export nodes 
+        // unless we re-scan. 
+        // *However*, for the purpose of the CLI Context slice (find_related_symbols), 
+        // we primarily need `symbol_map` and `reverse_graph`.
+        
+        // Rebuild Reverse Graph
+        self.build_reverse_graph();
+    }
+
+    // ... [Rest of the existing methods: add_edge, build_reverse_graph, resolve_structure, resolve_references, scan, etc.] ...
+    
     pub fn add_edge(&mut self, source: SymbolId, target: SymbolId, kind: EdgeKind) {
         if source == target { return; }
         let edges = self.index.graph.entry(source).or_default();
@@ -76,9 +119,11 @@ impl Indexer {
             }
         }
     }
-
-    /// Rebuilds structural edges (Contains) based on symbol parent_id field.
+    
+    // ... [Keep resolve_structure, resolve_references, scan, update_file, etc. exactly as they were] ...
+    
     fn resolve_structure(&mut self) {
+        // ... existing implementation ...
         let mut edges_to_add = Vec::new();
         for sym in self.index.symbols.values() {
             if let Some(pid) = sym.parent_id {
@@ -90,49 +135,49 @@ impl Indexer {
         }
     }
 
-    /// The main resolution pipeline.
-    /// Uses split borrowing to avoid cloning raw data.
     pub fn resolve_references(&mut self) {
-        self.index.graph.clear();
-        self.index.file_dependencies.clear();
-        self.resolution_cache.clear();
-
-        // 0. Restore Structure
-        self.resolve_structure();
-
-        // 1. Core imports and basic structure
-        resolvers::standard::resolve_external_imports(&mut self.index, &mut self.lookup);
-        resolvers::state::resolve_decorators(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache);
-        resolvers::frameworks::resolve_implicit_routes(&mut self.index, &self.staging, &self.lookup);
-        resolvers::data::resolve_namespace_imports(&mut self.index, &mut self.staging, &self.lookup);
-
-        // 2. Data and Literals
-        resolvers::data::resolve_literal_dependencies(&mut self.index, &self.staging, &self.lookup);
-        resolvers::data::resolve_shared_literals(&mut self.index, &self.staging);
-        resolvers::state::resolve_pubsub_wildcards(&mut self.index, &self.staging);
-
-        // 3. Inference & Magic
-        resolvers::inference::resolve_type_sniffing(&mut self.index, &self.staging, &self.lookup);
-        resolvers::state::resolve_magic_proxies(&mut self.index, &self.staging, &self.lookup, &self.configs);
-        resolvers::inference::resolve_fingerprints(&mut self.index, &self.staging, &self.lookup);
-        resolvers::inference::resolve_implicit_connections(&mut self.index, &self.staging, &self.lookup);
-
-        // 4. Frameworks & State
-        resolvers::frameworks::resolve_dependency_injection(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache, &self.configs);
-        resolvers::standard::resolve_function_calls(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache);
-        resolvers::data::resolve_config_links(&mut self.index, &self.staging, &self.lookup);
-        resolvers::standard::resolve_type_references(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache);
-        resolvers::data::resolve_database_references(&mut self.index, &self.staging);
-        resolvers::data::resolve_file_dependencies(&mut self.index, &self.lookup); 
-        resolvers::state::resolve_state_management(&mut self.index, &self.staging);
-        resolvers::frameworks::resolve_middleware_injection(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache);
-        resolvers::data::resolve_iac_links(&mut self.index, &self.staging, &self.lookup);
-
-        // Finalize
-        self.build_reverse_graph();
+         // ... existing implementation ...
+         self.index.graph.clear();
+         self.index.file_dependencies.clear();
+         self.resolution_cache.clear();
+ 
+         // 0. Restore Structure
+         self.resolve_structure();
+ 
+         // 1. Core imports and basic structure
+         resolvers::standard::resolve_external_imports(&mut self.index, &mut self.lookup);
+         resolvers::state::resolve_decorators(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache);
+         resolvers::frameworks::resolve_implicit_routes(&mut self.index, &self.staging, &self.lookup);
+         resolvers::data::resolve_namespace_imports(&mut self.index, &mut self.staging, &self.lookup);
+ 
+         // 2. Data and Literals
+         resolvers::data::resolve_literal_dependencies(&mut self.index, &self.staging, &self.lookup);
+         resolvers::data::resolve_shared_literals(&mut self.index, &self.staging);
+         resolvers::state::resolve_pubsub_wildcards(&mut self.index, &self.staging);
+ 
+         // 3. Inference & Magic
+         resolvers::inference::resolve_type_sniffing(&mut self.index, &self.staging, &self.lookup);
+         resolvers::state::resolve_magic_proxies(&mut self.index, &self.staging, &self.lookup, &self.configs);
+         resolvers::inference::resolve_fingerprints(&mut self.index, &self.staging, &self.lookup);
+         resolvers::inference::resolve_implicit_connections(&mut self.index, &self.staging, &self.lookup);
+ 
+         // 4. Frameworks & State
+         resolvers::frameworks::resolve_dependency_injection(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache, &self.configs);
+         resolvers::standard::resolve_function_calls(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache);
+         resolvers::data::resolve_config_links(&mut self.index, &self.staging, &self.lookup);
+         resolvers::standard::resolve_type_references(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache);
+         resolvers::data::resolve_database_references(&mut self.index, &self.staging);
+         resolvers::data::resolve_file_dependencies(&mut self.index, &self.lookup); 
+         resolvers::state::resolve_state_management(&mut self.index, &self.staging);
+         resolvers::frameworks::resolve_middleware_injection(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache);
+         resolvers::data::resolve_iac_links(&mut self.index, &self.staging, &self.lookup);
+ 
+         // Finalize
+         self.build_reverse_graph();
     }
 
     pub fn scan(&mut self, root: &Path) {
+        // ... existing implementation (copy exact code from previous file) ...
         let root_abs = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         let root_string = root_abs.to_string_lossy().to_string();
         if !self.index.roots.contains(&root_string) {
@@ -149,7 +194,6 @@ impl Indexer {
                     let path = entry.path();
                     let manifest_res = scan_manifests(path);
                     
-                    // Populate Lookups from Manifests
                     if let Some(pkg_name) = manifest_res.package_name {
                         if let Some(parent_dir) = path.parent() {
                             let dir_key = utils::to_index_path(parent_dir);
@@ -198,6 +242,7 @@ impl Indexer {
     }
 
     fn remove_file(&mut self, path_key: &str) {
+         // ... existing implementation ...
         if let Some(node) = self.index.files.remove(path_key) {
             self.clear_file_symbols(node.id);
             self.index.file_dependencies.remove(&node.id);
@@ -208,6 +253,7 @@ impl Indexer {
     }
 
     fn clear_file_symbols(&mut self, file_id: FileId) {
+         // ... existing implementation ...
         let ids_to_remove: Vec<SymbolId> = self.index.symbols.values()
             .filter(|s| s.file_id == file_id).map(|s| s.id).collect();
 
@@ -249,6 +295,7 @@ impl Indexer {
     }
 
     fn update_file(&mut self, path_key: &str, path_obj: &Path, content: &str, hash: [u8; 32], config: &LanguageConfig, is_path_test: bool) {
+         // ... existing implementation ...
          let file_id = match self.index.files.get(path_key) {
             Some(node) => node.id,
             None => { let id = self.index.next_file_id; self.index.next_file_id += 1; id }
