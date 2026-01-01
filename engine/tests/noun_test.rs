@@ -1,7 +1,7 @@
 mod common;
 use common::TestWorkspace;
 use rfc_engine::models::StagingArea;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
 use rfc_engine::query::traversal::find_related_symbols;
 
 #[test]
@@ -26,9 +26,8 @@ fn test_data_structure_dependency() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     // Case 1: Search for the Function -> Should see the Type
     let related_func = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "sendEmail").unwrap();
@@ -66,9 +65,8 @@ def process_user(u: User) -> None:
 "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     // 3. Search for 'process_user' -> Context should contain 'User'
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "process_user").expect("Should find symbol");

@@ -1,7 +1,7 @@
 mod common;
 use common::TestWorkspace;
 use rfc_engine::models::{EdgeKind, StagingArea};
-use rfc_engine::resolution::Indexer;
+use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
 use rfc_engine::query::traversal::find_related_symbols;
 
 #[test]
@@ -37,9 +37,10 @@ fn test_redux_switch_case_linking() {
     "#);
 
     let mut indexer = Indexer::new();
+    let mut pipeline = Pipeline::new();
     let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+    pipeline.resolve(&mut indexer, &mut staging);
 
     // --- Assertions ---
 
@@ -107,9 +108,10 @@ fn test_redux_object_map_linking() {
     "#);
 
     let mut indexer = Indexer::new();
+    let mut pipeline = Pipeline::new();
     let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+    pipeline.resolve(&mut indexer, &mut staging);
 
     let saga_id = indexer.lookup.symbol_map.get("createTodoSaga").unwrap()[0];
 

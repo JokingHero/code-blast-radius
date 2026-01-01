@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::{models::StagingArea, resolution::Indexer};
+use rfc_engine::{models::StagingArea, resolution::{Indexer, pipeline::Pipeline}};
 
 #[test]
 fn test_environment_bridge() {
@@ -34,9 +34,8 @@ fn test_environment_bridge() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     let js_id = indexer.index.files.values()
         .find(|f| f.path.contains("uploader.js")).unwrap().id;
@@ -68,9 +67,8 @@ fn test_cloud_resource_heuristic() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     let ts_id = indexer.index.files.values()
         .find(|f| f.path.contains("storage.ts")).unwrap().id;

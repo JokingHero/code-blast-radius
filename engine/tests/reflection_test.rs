@@ -1,7 +1,7 @@
 mod common;
 use common::TestWorkspace;
 use rfc_engine::models::StagingArea;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
 use rfc_engine::query::traversal::find_related_symbols;
 
 #[test]
@@ -32,9 +32,8 @@ def handle_request(action: str):
 "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "handle_request").unwrap();
     let names: Vec<String> = related.iter()

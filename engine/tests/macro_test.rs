@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::{models::StagingArea, resolution::Indexer};
+use rfc_engine::{models::StagingArea, resolution::{Indexer, pipeline::Pipeline}};
 
 #[test]
 fn test_rust_macro_definitions() {
@@ -28,9 +28,8 @@ fn test_rust_macro_definitions() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     // Assert macro definition found
     assert!(indexer.lookup.symbol_map.contains_key("create_handler"));
@@ -52,8 +51,9 @@ fn test_rust_macro_definitions_with_visibility() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default(); 
-    indexer.scan(&workspace.path, &mut staging);
+    let pipeline = Pipeline::new();
+    let mut staging = StagingArea::default();
+    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
 
     // Assert 'MyStruct' is found
     assert!(indexer.lookup.symbol_map.contains_key("MyStruct"), "Failed to extract MyStruct from 'pub MyStruct'");

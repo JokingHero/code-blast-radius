@@ -2,8 +2,7 @@ use clap::Parser;
 use std::path::PathBuf;
 use std::process;
 use anyhow::{Context, Result};
-use rfc_engine::resolution::Indexer;
-use rfc_engine::models::StagingArea;
+use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
 use rfc_engine::query::traversal::find_related_symbols;
 use rfc_engine::query::output::generate_context_output;
 
@@ -44,14 +43,9 @@ fn run() -> Result<()> {
     let index_path = cli.path.join(".index");
     let mut indexer = Indexer::load_from_file(&index_path).unwrap_or_else(|_| Indexer::new());
     
-    // Create the transient staging area
-    let mut staging = StagingArea::default();
-    
-    // Pass it to scan
-    indexer.scan(&cli.path, &mut staging);
-    
-    // Pass it to resolution
-    indexer.resolve_references(&mut staging);
+    // Use the new Pipeline orchestrator
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &cli.path);
     
     indexer.save(&index_path).context("Failed to save index")?;
 

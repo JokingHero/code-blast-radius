@@ -1,7 +1,7 @@
 mod common;
 use common::{TestWorkspace, get_type_refs};
 use rfc_engine::models::StagingArea;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
 use rfc_engine::query::traversal::find_related_symbols;
 
 #[test]
@@ -37,9 +37,8 @@ fn test_polymorphism_and_specificity() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     let circle_id = indexer.lookup.symbol_map.get("Circle").unwrap()[0];
     let square_id = indexer.lookup.symbol_map.get("Square").unwrap()[0];
@@ -90,9 +89,8 @@ fn test_shared_interface_duck_typing() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     let run_id = indexer.lookup.symbol_map.get("run").unwrap()[0];
     let interface_id = indexer.lookup.symbol_map.get("ILogger").unwrap()[0];

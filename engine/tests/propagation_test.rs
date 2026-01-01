@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::{models::StagingArea, resolution::Indexer};
+use rfc_engine::{models::StagingArea, resolution::{Indexer, pipeline::Pipeline}};
 
 #[test]
 fn test_const_propagation_import() {
@@ -21,9 +21,8 @@ fn test_const_propagation_import() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     let main_id = indexer.index.files.values().find(|f| f.path.contains("main.ts")).unwrap().id;
     let utils_id = indexer.index.files.values().find(|f| f.path.contains("utils.ts")).unwrap().id;
@@ -50,9 +49,8 @@ fn test_const_propagation_shared_route() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     let server_id = indexer.index.files.values().find(|f| f.path.contains("server.py")).unwrap().id;
     let client_id = indexer.index.files.values().find(|f| f.path.contains("client.ts")).unwrap().id;
@@ -81,9 +79,8 @@ fn test_template_string_constant_propagation() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     let back_id = indexer.index.files.values().find(|f| f.path.contains("users.py")).unwrap().id;
     let front_id = indexer.index.files.values().find(|f| f.path.contains("api.ts")).unwrap().id;

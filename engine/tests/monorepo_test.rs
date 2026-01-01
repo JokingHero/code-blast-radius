@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::{models::StagingArea, resolution::Indexer};
+use rfc_engine::{models::StagingArea, resolution::{Indexer, pipeline::Pipeline}};
 
 #[test]
 fn test_monorepo_package_subpath_resolution() {
@@ -28,9 +28,8 @@ fn test_monorepo_package_subpath_resolution() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     // --- Assertions ---
 
@@ -70,9 +69,8 @@ fn test_monorepo_package_root_resolution() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     let server_id = indexer.index.files.values().find(|f| f.path.contains("server.ts")).unwrap().id;
     let index_id = indexer.index.files.values().find(|f| f.path.contains("index.ts")).unwrap().id;
@@ -96,8 +94,9 @@ fn test_cargo_workspace_mapping() {
 
     // 2. Run scan
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default(); 
-    indexer.scan(&workspace.path, &mut staging);
+    let pipeline = Pipeline::new();
+    let mut staging = StagingArea::default();
+    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
     
     // 3. Verify Mapping
     // We mainly want to ensure the logic in manifest.rs correctly extracted the name

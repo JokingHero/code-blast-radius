@@ -1,7 +1,7 @@
 mod common;
 use common::TestWorkspace;
 use rfc_engine::models::StagingArea;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
 use rfc_engine::query::traversal::find_related_symbols;
 
 #[test]
@@ -28,9 +28,8 @@ fn test_sql_schema_linking() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     // 3. Context Slice
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "findUser").unwrap();
@@ -66,9 +65,8 @@ fn test_prisma_linking() {
     "#);
 
    let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "getOrders").unwrap();
     let names: Vec<String> = related.iter()

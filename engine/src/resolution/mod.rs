@@ -5,11 +5,9 @@ pub mod scanner;
 pub mod pipeline;
 
 use crate::models::{
-    Edge, EdgeKind, SymbolId, WorkspaceIndex, StagingArea, SymbolIndex
+    Edge, EdgeKind, SymbolId, WorkspaceIndex, SymbolIndex
 };
 use crate::resolution::persistence::PersistenceManager;
-use crate::resolution::scanner::FileScanner;
-use crate::resolution::pipeline::ResolutionPipeline;
 
 use std::path::Path;
 use std::collections::HashMap;
@@ -20,9 +18,6 @@ pub struct Indexer {
     // The Lookups (Rebuildable)
     pub lookup: SymbolIndex,
     
-    // Components
-    pub scanner: FileScanner,
-    
     // Runtime-only Reverse Graph (Target -> [Sources])
     pub reverse_graph: HashMap<SymbolId, Vec<Edge>>,
 }
@@ -32,7 +27,6 @@ impl Indexer {
         Self {
             index: WorkspaceIndex::default(),
             lookup: SymbolIndex::default(),
-            scanner: FileScanner::new(),
             reverse_graph: HashMap::new(),
         }
     }
@@ -78,22 +72,6 @@ impl Indexer {
         }
     }
 
-    pub fn resolve_references(&mut self, staging: &mut StagingArea) {
-        let mut pipeline = ResolutionPipeline::new();
-        pipeline.run(
-            &mut self.index, 
-            staging, 
-            &mut self.lookup, 
-            &self.scanner.configs
-        );
-
-        // Finalize: Rebuild reverse graph for queries
-        self.build_reverse_graph();
-    }
-
-    pub fn scan(&mut self, root: &Path, staging: &mut StagingArea) {
-        self.scanner.scan(root, &mut self.index, staging, &mut self.lookup);
-    }
 
     pub fn get_impacted_files(&self, target_path: &Path) -> Vec<String> {
         let target_key = utils::to_index_path(target_path);

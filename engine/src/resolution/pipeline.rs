@@ -7,9 +7,51 @@ use crate::analysis::language::LanguageConfig;
 use crate::resolution::resolvers;
 use crate::resolution::resolvers::add_edge;
 
+use crate::resolution::scanner::FileScanner;
+use crate::resolution::Indexer;
+
 pub struct ResolutionPipeline {
     // Internal state needed only during resolution
     cache: HashMap<(FileId, String), Option<SymbolId>>,
+}
+
+/// Pipeline is the orchestrator for scanning and resolution.
+/// It owns the scanner and the resolution pipeline, and manages the transient StagingArea.
+pub struct Pipeline {
+    pub scanner: FileScanner,
+    pub resolver: ResolutionPipeline,
+}
+
+impl Pipeline {
+    pub fn new() -> Self {
+        Self {
+            scanner: FileScanner::new(),
+            resolver: ResolutionPipeline::new(),
+        }
+    }
+
+    /// Convenience method to run the full pipeline.
+    pub fn run(&mut self, indexer: &mut Indexer, path: &std::path::Path) {
+        let mut staging = StagingArea::default();
+        self.scan(indexer, path, &mut staging);
+        self.resolve(indexer, &mut staging);
+    }
+
+    /// Perform only the scanning phase.
+    pub fn scan(&self, indexer: &mut Indexer, path: &std::path::Path, staging: &mut StagingArea) {
+        self.scanner.scan(path, &mut indexer.index, staging, &mut indexer.lookup);
+    }
+
+    /// Perform only the resolution phase.
+    pub fn resolve(&mut self, indexer: &mut Indexer, staging: &mut StagingArea) {
+        self.resolver.run(
+            &mut indexer.index,
+            staging,
+            &mut indexer.lookup,
+            &self.scanner.configs
+        );
+        indexer.build_reverse_graph();
+    }
 }
 
 impl ResolutionPipeline {

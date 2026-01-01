@@ -1,7 +1,7 @@
 mod common;
 use common::TestWorkspace;
 use rfc_engine::models::StagingArea;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
 use rfc_engine::query::traversal::find_related_symbols;
 use std::collections::HashSet;
 
@@ -170,9 +170,8 @@ fn test_monorepo_vertical_isolation() {
     // 4. EXECUTION
     // ==========================================
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     // We query the Frontend Component for Users
     let related_ids = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "UserProfileComponent")

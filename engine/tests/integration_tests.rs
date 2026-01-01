@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
 use rfc_engine::query::traversal::find_related_symbols; 
 use rfc_engine::models::StagingArea;
 
@@ -26,10 +26,8 @@ fn test_typescript_call_chain() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     // Verify functions exist
     assert!(has_func(&indexer.index, "add"), "Function 'add' not found");
@@ -74,9 +72,9 @@ fn test_rust_docs_extraction() {
     "#);
 
     let mut indexer = Indexer::new();
-    // Must create staging even if not resolving references, as scan needs it
+    let pipeline = Pipeline::new();
     let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
+    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
 
     let id = indexer.lookup.symbol_map.get("my_rust_func").unwrap()[0];
     let sym = indexer.index.symbols.get(&id).unwrap();
@@ -93,9 +91,9 @@ fn test_polyglot_folder() {
     workspace.create_file("app.js", "function js_func() {}");
 
     let mut indexer = Indexer::new();
-    // Update signature here too
+    let pipeline = Pipeline::new();
     let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
+    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
 
     assert!(has_func(&indexer.index, "py_func"));
     assert!(has_func(&indexer.index, "js_func"));

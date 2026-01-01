@@ -1,7 +1,7 @@
 mod common;
 use common::TestWorkspace;
 use rfc_engine::models::StagingArea;
-use rfc_engine::resolution::Indexer;
+use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
 use rfc_engine::query::traversal::find_related_symbols;
 
 #[test]
@@ -27,9 +27,8 @@ fn test_node_event_emitter() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "createUser").unwrap();
     let names: Vec<String> = related.iter()
@@ -58,9 +57,8 @@ fn test_python_django_signals() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "register").unwrap();
     let names: Vec<String> = related.iter()
@@ -89,9 +87,8 @@ fn test_rust_match_handler() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut staging = StagingArea::default();
-    indexer.scan(&workspace.path, &mut staging);
-    indexer.resolve_references(&mut staging);
+    let mut pipeline = Pipeline::new();
+    pipeline.run(&mut indexer, &workspace.path);
 
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "run_event").unwrap();
     let names: Vec<String> = related.iter()
