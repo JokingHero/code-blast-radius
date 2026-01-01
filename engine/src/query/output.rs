@@ -97,7 +97,7 @@ pub fn generate_context_output(
         }
 
         // Convert Bytes to Lines
-        // FIX: Handle edge case where prefix ends with newline
+        // Handle edge case where prefix ends with newline
         let byte_to_line = |b: usize| -> usize {
             let slice = &source_code[..b.min(source_code.len())];
             let count = slice.lines().count();

@@ -5,7 +5,6 @@ use crate::analysis::language::LanguageConfig;
 use crate::resolution::resolvers::{core, add_edge, link_modules, constants};
 
 pub fn resolve_implicit_routes(index: &mut WorkspaceIndex, staging: &StagingArea, lookup: &SymbolIndex) {
-    // ... (This function remains unchanged) ...
     let mut new_links = Vec::new();
     let route_definitions: Vec<(String, SymbolId)> = lookup.implicit_routes
         .iter()
@@ -63,7 +62,7 @@ pub fn resolve_dependency_injection(
     staging: &StagingArea,
     lookup: &SymbolIndex,
     cache: &mut core::ResolutionCache,
-    // CHANGE 1: Updated signature to remove &'static
+    // Updated signature to remove &'static
     configs: &HashMap<String, LanguageConfig>
 ) {
     let mut file_configs: HashMap<FileId, &LanguageConfig> = HashMap::new();
@@ -90,7 +89,7 @@ pub fn resolve_dependency_injection(
         if let Some(config) = file_configs.get(&sym.file_id) {
             let is_provider = sym.decorators.iter().any(|d| {
                 let clean = d.trim_start_matches('@').split('(').next().unwrap_or("").trim();
-                // CHANGE 2: Access via .heuristics
+                // Access via .heuristics
                 config.heuristics.di_decorators.contains(&clean)
             });
             if is_provider {
@@ -152,7 +151,6 @@ pub fn resolve_middleware_injection(
     lookup: &SymbolIndex,
     cache: &mut core::ResolutionCache
 ) {
-    // ... (This function remains unchanged) ...
     let mut new_links = Vec::new();
 
     for (hub_file_id, middleware_names) in &staging.raw_middleware_usage {

@@ -7,7 +7,7 @@ fn test_strategy_1_and_3_cli_path_linking() {
     let workspace = TestWorkspace::new();
 
     // 1. A Bash script calling a Python script via CLI argument
-    // CHANGE: Used .json instead of .csv because .csv is not a supported language 
+    // Used .json instead of .csv because .csv is not a supported language 
     // in the indexer configuration yet, so it wouldn't be indexed.
     workspace.create_file("pipeline.sh", r#"
         #!/bin/bash

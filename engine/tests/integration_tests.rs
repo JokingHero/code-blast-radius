@@ -74,7 +74,7 @@ fn test_rust_docs_extraction() {
     "#);
 
     let mut indexer = Indexer::new();
-    // FIX: Must create staging even if not resolving references, as scan needs it
+    // Must create staging even if not resolving references, as scan needs it
     let mut staging = StagingArea::default();
     indexer.scan(&workspace.path, &mut staging);
 
@@ -93,7 +93,7 @@ fn test_polyglot_folder() {
     workspace.create_file("app.js", "function js_func() {}");
 
     let mut indexer = Indexer::new();
-    // FIX: Update signature here too
+    // Update signature here too
     let mut staging = StagingArea::default();
     indexer.scan(&workspace.path, &mut staging);
 

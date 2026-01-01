@@ -56,7 +56,6 @@ fn test_external_stub_generation() {
 fn test_ignore_file_respect() {
     let workspace = TestWorkspace::new();
     
-    // --- FIX IS HERE ---
     // The `ignore` crate defaults to respecting .gitignore only inside git repos.
     // We create a fake .git directory to enable this behavior in the temp workspace.
     std::fs::create_dir(workspace.path.join(".git")).expect("Failed to create .git dir");

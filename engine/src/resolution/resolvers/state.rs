@@ -111,7 +111,7 @@ pub fn resolve_magic_proxies(
                  let ext = Path::new(file_path).extension().and_then(|s| s.to_str()).unwrap_or("");
                  
                  if let Some(config) = configs.get(ext) {
-                    // CHANGE 1: Access via .heuristics
+                    // Access via .heuristics
                     if !config.heuristics.magic_methods.is_empty() {
                         let has_explicit = if let Some(explicit_methods) = staging.container_methods.get(&class_id) {
                             methods.iter().any(|m| explicit_methods.contains(m))
@@ -119,7 +119,7 @@ pub fn resolve_magic_proxies(
 
                         if !has_explicit {
                             if let Some(class_members) = staging.container_methods.get(&class_id) {
-                                // CHANGE 2: Access via .heuristics
+                                // Access via .heuristics
                                 for &magic_name in config.heuristics.magic_methods {
                                     if class_members.contains(magic_name) {
                                         if let Some(candidates) = lookup.symbol_map.get(magic_name) {

@@ -28,7 +28,6 @@ fn debug_html_ast() {
         Err(e) => println!("Query '{}' is INVALID for HTML: {}", bad_query, e),
     }
 
-    // This is the fix we proposed
     let good_query =
         r#"(attribute (attribute_name) @attr (#eq? @attr "id") (attribute_value) @function.name) @function.definition"#;
     let res = Query::new(&language, good_query);

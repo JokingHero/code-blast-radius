@@ -10,7 +10,7 @@ pub fn extract_local_constants(
 ) -> HashMap<String, String> {
     let mut constants: HashMap<String, String> = HashMap::new();
 
-    // Updated Access: config.queries.vals
+    // Access: config.queries.vals
     if let Some(query_str) = config.queries.vals {
         if let Ok(q) = Query::new(language, query_str) {
             let mut cursor = QueryCursor::new();
