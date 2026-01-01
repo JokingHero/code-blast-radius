@@ -146,23 +146,30 @@ pub struct Edge {
     pub kind: EdgeKind,
 }
 
-#[derive(Archive, Deserialize, Serialize, Debug, Default)]
+/// Holds raw data extracted during the scan phase. 
+/// These fields are transient in nature: they are used to infer edges 
+/// but are not strictly required for traversing the final graph.
+#[derive(Archive, Deserialize, Serialize, Debug, Default, Clone)]
 #[archive(check_bytes)]
-pub struct WorkspaceIndex {
-    // Metadata & Identifiers
-    pub next_file_id: u32,
-    pub next_symbol_id: u32,
-    pub roots: Vec<String>,
-    
-    // Primary Data Stores
-    pub files: HashMap<String, FileNode>,
-    pub symbols: HashMap<SymbolId, SymbolNode>,
+pub struct StagingArea {
+    pub container_methods: HashMap<SymbolId, HashSet<String>>,
+    pub fingerprints: HashMap<SymbolId, HashMap<String, Vec<String>>>,
+    pub local_variable_types: HashMap<SymbolId, HashMap<String, String>>,
+    pub raw_calls: HashMap<SymbolId, Vec<String>>,
+    pub raw_literals: HashMap<FileId, Vec<String>>,
+    pub raw_implementations: HashMap<SymbolId, Vec<String>>, 
+    pub symbol_config_refs: HashMap<SymbolId, Vec<String>>,
+    pub raw_type_refs: HashMap<SymbolId, Vec<String>>,
+    pub raw_decorators: HashMap<SymbolId, Vec<String>>,
+    pub raw_action_dispatches: HashMap<SymbolId, Vec<String>>,
+    pub raw_action_handlers: HashMap<SymbolId, Vec<String>>,
+    pub raw_middleware_usage: HashMap<FileId, Vec<String>>,
+}
 
-    // The Unified Graph (Adjacency List)
-    // Maps Source Symbol -> List of Outgoing Edges
-    pub graph: HashMap<SymbolId, Vec<Edge>>,
-
-    // Lookups & Maps (For fast access during resolution)
+/// Holds lookup maps for fast resolution of names, imports, and paths.
+#[derive(Archive, Deserialize, Serialize, Debug, Default, Clone)]
+#[archive(check_bytes)]
+pub struct LookupTable {
     pub symbol_map: HashMap<String, Vec<SymbolId>>, // Name -> [IDs]
     pub file_imports: HashMap<FileId, Vec<ImportNode>>,
     pub file_exports: HashMap<FileId, Vec<ExportNode>>, 
@@ -171,21 +178,32 @@ pub struct WorkspaceIndex {
     pub package_path_map: HashMap<String, String>,  // Package -> Path
     pub external_symbols: HashSet<String>,
     pub external_packages: HashSet<String>,
-
-    // Raw/Intermediate Data (Used during resolution phase)
-    pub container_methods: HashMap<SymbolId, HashSet<String>>,
-    pub fingerprints: HashMap<SymbolId, HashMap<String, Vec<String>>>,
-    pub local_variable_types: HashMap<SymbolId, HashMap<String, String>>,
-    pub raw_calls: HashMap<SymbolId, Vec<String>>,
-    pub raw_literals: HashMap<FileId, Vec<String>>,
-    pub raw_implementations: HashMap<SymbolId, Vec<String>>, 
-    pub symbol_config_refs: HashMap<SymbolId, Vec<String>>,
     pub config_definitions: HashMap<String, Vec<SymbolId>>, 
-    pub raw_type_refs: HashMap<SymbolId, Vec<String>>,
-    pub raw_decorators: HashMap<SymbolId, Vec<String>>,
-    pub raw_action_dispatches: HashMap<SymbolId, Vec<String>>,
-    pub raw_action_handlers: HashMap<SymbolId, Vec<String>>,
-    pub raw_middleware_usage: HashMap<FileId, Vec<String>>,
+}
+
+#[derive(Archive, Deserialize, Serialize, Debug, Default)]
+#[archive(check_bytes)]
+pub struct WorkspaceIndex {
+    // Metadata & Identifiers
+    pub next_file_id: u32,
+    pub next_symbol_id: u32,
+    pub roots: Vec<String>,
+    
+    // Primary Data Stores (The "Knowledge Graph")
+    pub files: HashMap<String, FileNode>,
+    pub symbols: HashMap<SymbolId, SymbolNode>,
+
+    // The Unified Graph (Adjacency List)
+    // Maps Source Symbol -> List of Outgoing Edges
+    pub graph: HashMap<SymbolId, Vec<Edge>>,
+
+    // -- Sub-Structs for Separation of Concerns --
+    
+    // Acceleration structures for O(1) lookups
+    pub lookup: LookupTable,
+
+    // Raw/Intermediate Data used during resolution logic
+    pub staging: StagingArea,
 
     // Legacy/Cache fields (maintained for backward compat or specific caches)
     pub file_dependencies: HashMap<FileId, Vec<FileId>>,

@@ -3,9 +3,9 @@ use crate::models::{ SymbolKind, SymbolNode, EdgeKind, SymbolId };
 impl Indexer {
     pub(crate) fn resolve_external_imports(&mut self) {
         let mut new_symbols = Vec::new();
-        // Safe: We iterate file_imports (immutable), collect data into new_symbols,
+        // Safe: We iterate lookup.file_imports (immutable), collect data into new_symbols,
         // and only mutate self AFTER the loop.
-        for (_file_id, imports) in &self.index.file_imports {
+        for (_file_id, imports) in &self.index.lookup.file_imports {
             for imp in imports {
                 if
                     !imp.source.starts_with("./") &&
@@ -15,7 +15,7 @@ impl Indexer {
                     let pkg_name = imp.source.clone();
                     let sym_name = imp.alias.clone().unwrap_or(imp.name.clone());
 
-                    let stub_exists = self.index.symbol_map.get(&sym_name).map_or(false, |ids| {
+                    let stub_exists = self.index.lookup.symbol_map.get(&sym_name).map_or(false, |ids| {
                         ids.iter().any(|&id| {
                             let s = &self.index.symbols[&id];
                             s.is_external && s.external_source.as_deref() == Some(pkg_name.as_str())
@@ -50,14 +50,14 @@ impl Indexer {
         }
 
         for sym in new_symbols {
-            self.index.symbol_map.entry(sym.name.clone()).or_default().push(sym.id);
+            self.index.lookup.symbol_map.entry(sym.name.clone()).or_default().push(sym.id);
             self.index.symbols.insert(sym.id, sym);
         }
     }
 
     pub(crate) fn resolve_function_calls(&mut self) {
-        // Snapshot raw calls to avoid holding borrow on self.index
-        let entries: Vec<_> = self.index.raw_calls
+        // Snapshot staging.raw_calls to avoid holding borrow on self.index
+        let entries: Vec<_> = self.index.staging.raw_calls
             .iter()
             .map(|(k, v)| (*k, v.clone()))
             .collect();
@@ -77,8 +77,8 @@ impl Indexer {
                 } else {
                     // 2. Fallback: Symbol Map Lookup
                     // FIX: Clone candidates to vector.
-                    // This drops the borrow on self.index.symbol_map immediately.
-                    let candidates: Vec<SymbolId> = self.index.symbol_map
+                    // This drops the borrow on self.index.lookup.symbol_map immediately.
+                    let candidates: Vec<SymbolId> = self.index.lookup.symbol_map
                         .get(&name)
                         .map(|v| v.clone())
                         .unwrap_or_default();
@@ -93,8 +93,8 @@ impl Indexer {
     }
 
     pub(crate) fn resolve_type_references(&mut self) {
-        // Snapshot raw type refs
-        let entries: Vec<_> = self.index.raw_type_refs
+        // Snapshot staging.raw_type_refs
+        let entries: Vec<_> = self.index.staging.raw_type_refs
             .iter()
             .map(|(k, v)| (*k, v.clone()))
             .collect();
@@ -114,7 +114,7 @@ impl Indexer {
                 } else {
                     // 2. Fallback
                     // FIX: Clone candidates to drop borrow
-                    let candidates: Vec<SymbolId> = self.index.symbol_map
+                    let candidates: Vec<SymbolId> = self.index.lookup.symbol_map
                         .get(&type_name)
                         .map(|v| v.clone())
                         .unwrap_or_default();

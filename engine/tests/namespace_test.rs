@@ -39,10 +39,10 @@ fn test_namespace_import_resolution() {
     // 3. Verification
     // We expect the 'runCalculation' symbol to have a resolved call to 'add'.
     
-    let run_ids = indexer.index.symbol_map.get("runCalculation").expect("Should find function runCalculation");
+    let run_ids = indexer.index.lookup.symbol_map.get("runCalculation").expect("Should find function runCalculation");
     let run_id = run_ids[0];
 
-    let add_ids = indexer.index.symbol_map.get("add").expect("Should find function add");
+    let add_ids = indexer.index.lookup.symbol_map.get("add").expect("Should find function add");
     let add_id = add_ids[0];
     
     // Get resolved calls from runCalculation
@@ -76,8 +76,8 @@ fn test_namespace_resolution_deep_scope() {
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let start_id = indexer.index.symbol_map.get("start").unwrap()[0];
-    let log_id = indexer.index.symbol_map.get("log").unwrap()[0];
+    let start_id = indexer.index.lookup.symbol_map.get("start").unwrap()[0];
+    let log_id = indexer.index.lookup.symbol_map.get("log").unwrap()[0];
 
     let resolved = get_calls(&indexer.index, start_id);
     

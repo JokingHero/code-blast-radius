@@ -36,7 +36,7 @@ fn test_ts_factories() {
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    assert!(indexer.index.symbol_map.contains_key("useStore"), "Zustand create() pattern missed");
-    assert!(indexer.index.symbol_map.contains_key("User"), "Mongoose model() pattern missed");
-    assert!(indexer.index.symbol_map.contains_key("Title"), "Styled components pattern missed");
+    assert!(indexer.index.lookup.symbol_map.contains_key("useStore"), "Zustand create() pattern missed");
+    assert!(indexer.index.lookup.symbol_map.contains_key("User"), "Mongoose model() pattern missed");
+    assert!(indexer.index.lookup.symbol_map.contains_key("Title"), "Styled components pattern missed");
 }

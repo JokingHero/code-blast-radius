@@ -37,8 +37,8 @@ db_url: "postgres://localhost:5432"
     indexer.resolve_references();
 
     // Verification A: Check if 'api_key' in YAML is a recognized config definition
-    assert!(indexer.index.config_definitions.contains_key("api_key"), "api_key should be indexed from YAML");
-    assert!(indexer.index.config_definitions.contains_key("db_url"), "db_url should be indexed from YAML");
+    assert!(indexer.index.lookup.config_definitions.contains_key("api_key"), "api_key should be indexed from YAML");
+    assert!(indexer.index.lookup.config_definitions.contains_key("db_url"), "db_url should be indexed from YAML");
 
     // Verification B: Semantic Cluster (The "Golden Path")
     // When searching for 'getAiClient', it should pull in the 'api_key' definition from config.yaml

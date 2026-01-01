@@ -185,7 +185,7 @@ fn test_scenario_monorepo_nest_angular_prisma() {
 
     // TEST C: Monorepo Shared Libs
     // Both sides import @shared/user.dto. Do they resolve to the same file?
-    let dto_ids = indexer.index.symbol_map.get("UserDto").expect("UserDto should be indexed");
+    let dto_ids = indexer.index.lookup.symbol_map.get("UserDto").expect("UserDto should be indexed");
     // We might have multiple symbols (one for the definition, maybe import aliases), 
     // but the definition should be in libs/shared/src/user.dto.ts
     let dto_def = dto_ids.iter().find(|&&id| {

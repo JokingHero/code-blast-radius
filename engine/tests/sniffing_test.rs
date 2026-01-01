@@ -40,7 +40,7 @@ fn test_return_type_bridge_sniffing() {
     // because "startApp" calls "db.connect()" and we know "db" is a "Database" 
     // because "getDb()" returns "Database".
 
-    let connect_ids = indexer.index.symbol_map.get("connect").expect("Should find 'connect' symbol");
+    let connect_ids = indexer.index.lookup.symbol_map.get("connect").expect("Should find 'connect' symbol");
     let _connect_id = connect_ids[0];
 
     let related = find_related_symbols(&indexer, "connect").unwrap();
@@ -76,11 +76,11 @@ fn test_explicit_type_sniffing() {
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let write_ids = indexer.index.symbol_map.get("writeFile").expect("Should find 'writeFile'");
+    let write_ids = indexer.index.lookup.symbol_map.get("writeFile").expect("Should find 'writeFile'");
     let write_id = write_ids[0];
 
     // Check if "sync" is a caller of "writeFile"
-    let sync_id = indexer.index.symbol_map.get("sync").unwrap()[0];
+    let sync_id = indexer.index.lookup.symbol_map.get("sync").unwrap()[0];
     let resolutions = get_calls(&indexer.index, sync_id);
     // Note: Implicit type sniffing now adds Call edges if it finds methods, 
     // or TypeReference edges for the variable itself. 
@@ -112,15 +112,15 @@ fn test_chained_inference_no_bloat() {
     indexer.resolve_references();
 
     // Ensure 'service' is NOT a symbol (no bloat)
-    if let Some(ids) = indexer.index.symbol_map.get("service") {
+    if let Some(ids) = indexer.index.lookup.symbol_map.get("service") {
         // It's okay if 'service' is found in other files, but not in main.ts as a top-level symbol
         let in_main = ids.iter().any(|id| indexer.index.symbols[id].name == "service");
         assert!(!in_main, "Local variable 'service' should not be a top-level symbol");
     }
 
     // Ensure the connection still works
-    let login_id = indexer.index.symbol_map.get("login").unwrap()[0];
-    let run_id = indexer.index.symbol_map.get("run").unwrap()[0];
+    let login_id = indexer.index.lookup.symbol_map.get("login").unwrap()[0];
+    let run_id = indexer.index.lookup.symbol_map.get("run").unwrap()[0];
     
     let calls = get_calls(&indexer.index, run_id);
     assert!(calls.contains(&login_id), "Should resolve call via variable assignment 'service = auth'");

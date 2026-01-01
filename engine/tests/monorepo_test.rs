@@ -36,7 +36,7 @@ fn test_monorepo_package_subpath_resolution() {
     // 1. Verify the Package Map was populated
     // The key "@my-org/ui" should point to "packages/ui" (relative or absolute depending on implementation)
     // We check existence primarily.
-    assert!(indexer.index.package_path_map.contains_key("@my-org/ui"), "Should have indexed package name from package.json");
+    assert!(indexer.index.lookup.package_path_map.contains_key("@my-org/ui"), "Should have indexed package name from package.json");
 
     // 2. Verify File Dependency Linkage
     let app_id = indexer.index.files.values()
@@ -99,6 +99,6 @@ fn test_cargo_workspace_mapping() {
     // 3. Verify Mapping
     // We mainly want to ensure the logic in manifest.rs correctly extracted the name
     // from [package] table.
-    assert!(indexer.index.package_path_map.contains_key("my-logic-crate"), 
+    assert!(indexer.index.lookup.package_path_map.contains_key("my-logic-crate"), 
         "Should have indexed crate name 'my-logic-crate' from Cargo.toml");
 }
