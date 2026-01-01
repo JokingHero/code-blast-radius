@@ -14,17 +14,16 @@ use crate::analysis::language::{get_language_configs, LanguageConfig};
 use crate::resolution::utils;
 
 pub struct FileScanner {
-    // FIX: This map stores references, matching the static definitions
-    pub configs: HashMap<String, &'static LanguageConfig>,
+    pub configs: HashMap<String, LanguageConfig>,
 }
 
 impl FileScanner {
     pub fn new() -> Self {
         let mut config_map = HashMap::new();
+        // get_language_configs now returns Vec<LanguageConfig>
         for config in get_language_configs() {
-            for ext in config.file_extensions {
-                // FIX: Insert the reference directly (config), do NOT dereference (*config)
-                config_map.insert(ext.to_string(), config);
+            for &ext in config.file_extensions {
+                config_map.insert(ext.to_string(), config.clone());
             }
         }
         Self {
@@ -73,8 +72,7 @@ impl FileScanner {
                     // Note: .cloned() creates a copy of the reference (&'static T), which is cheap
                     let config = self.configs.get(ext)
                         .or_else(|| self.configs.get(filename))
-                        .or_else(|| if filename.starts_with('.') { self.configs.get(&filename[1..]) } else { None })
-                        .cloned();
+                        .or_else(|| if filename.starts_with('.') { self.configs.get(&filename[1..]) } else { None });
 
                     // 3. File Processing
                     if let Some(config) = config {
@@ -191,7 +189,7 @@ impl FileScanner {
         path_obj: &Path,
         content: &str,
         hash: [u8; 32],
-        config: &LanguageConfig,
+        config: &LanguageConfig, 
         is_path_test: bool,
         index: &mut WorkspaceIndex,
         staging: &mut StagingArea,
@@ -251,7 +249,7 @@ impl FileScanner {
             }
 
             // Handle Config Definitions (Lookup)
-            let is_data = matches!(config.lang_enum, crate::analysis::language::SupportedLanguage::Yaml | crate::analysis::language::SupportedLanguage::Json | crate::analysis::language::SupportedLanguage::Toml | crate::analysis::language::SupportedLanguage::Dotenv);
+            let is_data = matches!(config.lang, crate::analysis::language::SupportedLanguage::Yaml | crate::analysis::language::SupportedLanguage::Json | crate::analysis::language::SupportedLanguage::Toml | crate::analysis::language::SupportedLanguage::Dotenv);
             if is_data {
                 for &sid in &file_symbol_ids {
                     let name = &index.symbols[&sid].name;

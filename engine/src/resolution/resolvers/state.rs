@@ -66,7 +66,7 @@ pub fn resolve_magic_proxies(
     index: &mut WorkspaceIndex,
     staging: &StagingArea,
     lookup: &SymbolIndex,
-    configs: &HashMap<String, &'static LanguageConfig>
+    configs: &HashMap<String, LanguageConfig>
 ) {
     let mut new_links = Vec::new();
 
@@ -74,6 +74,8 @@ pub fn resolve_magic_proxies(
         for (receiver_var, methods) in receiver_map {
             let mut type_class_id = None;
             let mut curr_scope = Some(*caller_id);
+            
+            // 1. Scope Walk (Find the variable type)
             while let Some(sid) = curr_scope {
                 if let Some(vars) = staging.local_variable_types.get(&sid) {
                     if let Some(type_name) = vars.get(receiver_var) {
@@ -90,20 +92,23 @@ pub fn resolve_magic_proxies(
                 curr_scope = index.symbols.get(&sid).and_then(|s| s.parent_id);
             }
 
+            // 2. Check Magic Methods
             if let Some(class_id) = type_class_id {
                  let file_id = index.symbols[&class_id].file_id;
                  let file_path = &index.files.values().find(|f| f.id == file_id).unwrap().path;
                  let ext = Path::new(file_path).extension().and_then(|s| s.to_str()).unwrap_or("");
                  
                  if let Some(config) = configs.get(ext) {
-                    if !config.magic_methods.is_empty() {
+                    // CHANGE 1: Access via .heuristics
+                    if !config.heuristics.magic_methods.is_empty() {
                         let has_explicit = if let Some(explicit_methods) = staging.container_methods.get(&class_id) {
                             methods.iter().any(|m| explicit_methods.contains(m))
                         } else { false };
 
                         if !has_explicit {
                             if let Some(class_members) = staging.container_methods.get(&class_id) {
-                                for &magic_name in config.magic_methods {
+                                // CHANGE 2: Access via .heuristics
+                                for &magic_name in config.heuristics.magic_methods {
                                     if class_members.contains(magic_name) {
                                         if let Some(candidates) = lookup.symbol_map.get(magic_name) {
                                             for &magic_id in candidates {

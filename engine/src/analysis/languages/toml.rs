@@ -1,28 +1,26 @@
-use crate::analysis::language::{LanguageConfig, SupportedLanguage};
+use crate::analysis::language::{LanguageConfig, LanguageConfigBuilder, SupportedLanguage};
 
-pub const TOML_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::Toml,
-    file_extensions: &["toml"],
-    // Matches key = value or [table_name]
-    query_defs: r#"
+pub fn config() -> LanguageConfig {
+    LanguageConfigBuilder::new(
+        SupportedLanguage::Toml,
+        &["toml"]
+    )
+    .defs(r#"
         [
             (pair key: (bare_key) @function.name) 
             (table (bare_key) @function.name)
         ] @function.definition
-    "#,
-    query_calls: "",
-    query_docs: "",
-    query_imports: "",
-    query_exports: "",
-    query_literals: r#"(string) @string"#,
-    query_implements: "",
-    query_config: "",
-    query_vals: "",
-    query_types: "",
-    query_decorators: "",
-    query_actions: "",
-    query_middleware: "",
-    query_route_defs: "",
-    di_decorators: &[],
-    magic_methods: &[]
-};
+    "#)
+    .literals(r#"(string) @string"#)
+    .vals(r#"
+        (pair
+            key: (bare_key) @val.name
+            value: [
+                (string) @val.value
+                (integer) @val.value
+                (boolean) @val.value
+            ]
+        )
+    "#)
+    .build()
+}

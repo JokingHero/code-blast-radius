@@ -1,9 +1,12 @@
-use crate::analysis::language::{LanguageConfig, SupportedLanguage};
+use crate::analysis::language::{LanguageConfig, LanguageConfigBuilder, SupportedLanguage};
 
-pub const HCL_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::Hcl,
-    file_extensions: &["tf", "hcl", "tfvars"],
-    query_defs: r#"
+pub fn config() -> LanguageConfig {
+    LanguageConfigBuilder::new(
+        SupportedLanguage::Hcl,
+        &["tf", "hcl", "tfvars"]
+    )
+    .defs(r#"
+        ;; Resources and Data sources have 2 labels: type and name
         (block 
             (identifier) @function.kind
             (string_lit (template_literal) @function.name)
@@ -11,44 +14,36 @@ pub const HCL_CONFIG: LanguageConfig = LanguageConfig {
             (#match? @function.kind "^(resource|data)$")
         ) @function.definition
         
+        ;; Variables, Outputs, Modules, Providers have 1 label: name
         (block 
             (identifier) @function.kind
             (string_lit (template_literal) @function.name)
             (#match? @function.kind "^(variable|output|module|provider)$")
         ) @function.definition
-    "#,
-    query_calls: "",
-    query_docs: r#"
+    "#)
+    .docs(r#"
         ((comment) @function.docs . (block) @function.definition)
-    "#,
-    query_imports: "",
-    query_exports: "",
-    // UPDATED: Capture parent nodes to ensure text extraction works reliably
-    query_literals: r#"
+    "#)
+    .literals(r#"
         [
             (string_lit) 
             (heredoc_template)
         ] @string
-    "#,
-    query_implements: "",
-    query_config: "",
-    query_vals: r#"
+    "#)
+    .vals(r#"
         (attribute
             (identifier) @val.name
             (expression (literal_value (string_lit (template_literal) @val.value)))
         )
-    "#,
-    query_types: r#"
+    "#)
+    .types(r#"
+        ;; Capture the resource type (e.g., "aws_s3_bucket") as a type reference
+        ;; This allows heuristics to link app code importing "aws_s3_bucket" to this block.
         (block 
             (identifier) @btype 
             (string_lit (template_literal) @type.ref)
             (#eq? @btype "resource")
         )
-    "#,
-    query_decorators: "",
-    query_actions: "",
-    query_middleware: "",
-    query_route_defs: "",
-    di_decorators: &[],
-    magic_methods: &[]
-};
+    "#)
+    .build()
+}

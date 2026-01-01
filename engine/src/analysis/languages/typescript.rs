@@ -1,9 +1,11 @@
-use crate::analysis::language::{LanguageConfig, SupportedLanguage};
+use crate::analysis::language::{LanguageConfig, LanguageConfigBuilder, SupportedLanguage};
 
-pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::TypeScript,
-    file_extensions: &["ts", "tsx"],
-    query_defs: r#"
+pub fn config() -> LanguageConfig {
+    LanguageConfigBuilder::new(
+        SupportedLanguage::TypeScript,
+        &["ts", "tsx"]
+    )
+    .defs(r#"
           ;; Standard Definitions
           (function_declaration 
             name: (identifier) @function.name 
@@ -90,8 +92,8 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             pattern: (identifier) @variable.name
             type: (type_annotation)? @variable.type
           )
-    "#,
-    query_calls: r#"
+    "#)
+    .calls(r#"
         [
           (call_expression 
             function: (member_expression 
@@ -109,8 +111,8 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             function: (member_expression
               property: [(property_identifier) (identifier)] @call.name))
         ]
-    "#,
-    query_docs: r#"
+    "#)
+    .docs(r#"
       (
         (comment)+ @function.docs
         .
@@ -124,8 +126,8 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
           (variable_declaration)
         ] @function.definition
       )
-    "#,
-    query_imports: r#"
+    "#)
+    .imports(r#"
         [
           (import_statement
               (import_clause
@@ -167,8 +169,8 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             (#eq? @req "require")
           )
         ]
-    "#,
-    query_exports: r#"
+    "#)
+    .exports(r#"
         [
             (export_statement
               (export_clause
@@ -183,9 +185,9 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
               source: (string) @export.source
             )
         ]
-    "#,
-    query_literals: r#"[ (string) (template_string) ] @string"#,
-    query_implements: r#"
+    "#)
+    .literals(r#"[ (string) (template_string) ] @string"#)
+    .implements(r#"
         [
           (class_declaration
             name: (type_identifier) @impl.child
@@ -199,8 +201,8 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             (extends_type_clause type: [(type_identifier) (identifier)] @impl.parent)
           )
         ]
-    "#,
-    query_config: r#"
+    "#)
+    .config_keys(r#"
         [
           (member_expression
             object: (member_expression
@@ -227,34 +229,34 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             (#eq? @method "get")
           )
         ]
-    "#,
-    query_vals: r#"
+    "#)
+    .vals(r#"
         (variable_declarator
             name: (identifier) @val.name
             value: [(string) (template_string)] @val.value
         )
-    "#,
-    // FIXED: Simplified to use broad node captures.
+    "#)
+    // Simplified to use broad node captures.
     // - (type_identifier) catches almost all types (interfaces, generics, array types, etc.)
     // - (predefined_type) catches things like 'string', 'number' (less useful for linking but valid)
     // - Specific rules for extends/new where a simple (identifier) acts as a type.
-    query_types: r#"
+    .types(r#"
         [
             (type_identifier) @type.ref
             (predefined_type) @type.ref
             (extends_clause value: (identifier) @type.ref)
             (new_expression constructor: (identifier) @type.ref)
         ]
-    "#,
-    query_decorators: r#"
+    "#)
+    .decorators(r#"
         (decorator 
             [
                 (call_expression function: (identifier) @decorator.name)
                 (identifier) @decorator.name
             ]
         )
-    "#,
-    query_actions: r#"
+    "#)
+    .actions(r#"
         (call_expression
             function: (identifier) @fn 
             arguments: (arguments 
@@ -299,8 +301,8 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             )
             (#match? @fn "^(on|once|subscribe|sub|listen)$")
         )
-    "#,
-    query_middleware: r#"
+    "#)
+    .middleware(r#"
         (call_expression
             function: (member_expression
                 property: (property_identifier) @prop
@@ -310,8 +312,8 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             )
             (#eq? @prop "use")
         )
-    "#,
-    query_route_defs: r#"
+    "#)
+    .routes(r#"
         (decorator
             (call_expression
                 function: (identifier) @fn
@@ -319,7 +321,6 @@ pub const TYPESCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             )
             (#match? @fn "^(Controller|Get|Post|Put|Delete|Patch)$")
         )
-    "#,
-    di_decorators: &["Injectable", "Component", "Directive", "Pipe", "Service"],
-    magic_methods: &[]
-};
+    "#)
+    .di_decorators(&["Injectable", "Component", "Directive", "Pipe", "Service"]).build()
+}

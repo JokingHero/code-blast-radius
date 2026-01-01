@@ -35,8 +35,8 @@ pub fn extract_structure(
     let mut defined_routes = Vec::new();
 
     // --- 1. Imports ---
-    if !config.query_imports.is_empty() {
-        if let Ok(q) = Query::new(language, config.query_imports) {
+    if let Some(q_str) = config.queries.imports {
+        if let Ok(q) = Query::new(language, q_str) {
             let mut cursor = QueryCursor::new();
             let mut matches = cursor.matches(&q, root_node, source);
             while let Some(m) = matches.next() {
@@ -65,7 +65,7 @@ pub fn extract_structure(
                     }
                 }
                 if !src.is_empty() {
-                    if config.lang_enum == SupportedLanguage::Python {
+                    if config.lang == SupportedLanguage::Python {
                         if src.contains('.') && !src.starts_with("./") && !src.starts_with("../") {
                             if src != "." && src != ".." {
                                 src = src.replace('.', "/");
@@ -79,8 +79,8 @@ pub fn extract_structure(
     }
 
     // --- 2. Exports ---
-    if !config.query_exports.is_empty() {
-        if let Ok(q) = Query::new(language, config.query_exports) {
+    if let Some(q_str) = config.queries.exports {
+        if let Ok(q) = Query::new(language, q_str) {
             let mut cursor = QueryCursor::new();
             let mut matches = cursor.matches(&q, root_node, source);
             while let Some(m) = matches.next() {
@@ -107,8 +107,8 @@ pub fn extract_structure(
     }
 
     // --- 3. Literals & Template Expansion ---
-    if !config.query_literals.is_empty() {
-        if let Ok(q) = Query::new(language, config.query_literals) {
+    if let Some(q_str) = config.queries.literals {
+        if let Ok(q) = Query::new(language, q_str) {
             let mut cursor = QueryCursor::new();
             let mut matches = cursor.matches(&q, root_node, source);
 
@@ -179,8 +179,8 @@ pub fn extract_structure(
     }
 
     // --- 4. Implementations ---
-    if !config.query_implements.is_empty() {
-        if let Ok(q) = Query::new(language, config.query_implements) {
+    if let Some(q_str) = config.queries.implements {
+        if let Ok(q) = Query::new(language, q_str) {
             let mut cursor = QueryCursor::new();
             let mut matches = cursor.matches(&q, root_node, source);
             while let Some(m) = matches.next() {
@@ -203,8 +203,8 @@ pub fn extract_structure(
     }
     
     // --- 5. Explicit Route Definitions ---
-    if !config.query_route_defs.is_empty() {
-        if let Ok(q) = Query::new(language, config.query_route_defs) {
+    if let Some(q_str) = config.queries.route_defs {
+        if let Ok(q) = Query::new(language, q_str) {
             let mut cursor = QueryCursor::new();
             let mut matches = cursor.matches(&q, root_node, source);
 
@@ -230,11 +230,9 @@ pub fn extract_structure(
     }
 
     // --- 6. Middleware Usage ---
-    let middleware_query = if !config.query_middleware.is_empty() {
-        Query::new(language, config.query_middleware).ok()
-    } else {
-        None
-    };
+    let middleware_query = config.queries.middleware.and_then(|q_str| {
+        Query::new(language, q_str).ok()
+    });
 
     if let Some(ref q) = middleware_query {
         let mut mw_cursor = QueryCursor::new();

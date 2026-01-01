@@ -26,7 +26,7 @@ impl TestWorkspace {
     }
 }
 
-// --- NEW HELPERS ---
+// --- HELPERS ---
 
 #[allow(dead_code)]
 pub fn get_calls(index: &WorkspaceIndex, source_id: SymbolId) -> Vec<SymbolId> {

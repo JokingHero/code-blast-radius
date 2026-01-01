@@ -1,15 +1,17 @@
-use crate::analysis::language::{LanguageConfig, SupportedLanguage};
+use crate::analysis::language::{LanguageConfig, LanguageConfigBuilder, SupportedLanguage};
 
-pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::Python,
-    file_extensions: &["py"],
-    query_defs: r#"
+pub fn config() -> LanguageConfig {
+    LanguageConfigBuilder::new(
+        SupportedLanguage::Python,
+        &["py", "pyi", "pyw"]
+    )
+    .defs(r#"
         [
             (function_definition name: (identifier) @function.name) @function.definition
             (class_definition name: (identifier) @function.name) @function.definition
         ]
-    "#,
-    query_calls: r#"
+    "#)
+    .calls(r#"
         [
             (call function: [(identifier) @call.name (attribute attribute: (identifier) @call.name)])
             
@@ -22,14 +24,14 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
                 (#eq? @fn "getattr")
             )
         ]
-    "#,
-    query_docs: r#"
+    "#)
+    .docs(r#"
         [
             (function_definition body: (block . (expression_statement (string) @function.docs))) @function.definition
             (class_definition body: (block . (expression_statement (string) @function.docs))) @function.definition
         ]
-    "#,
-    query_imports: r#"
+    "#)
+    .imports(r#"
         [
             (import_statement 
                 name: (dotted_name) @import.source
@@ -74,23 +76,21 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
                 (#eq? @fn "__import__")
             )
         ]
-    "#,
-    query_exports: "",
-    query_literals: r#"(string) @string"#,
-    query_implements: r#"
+    "#)
+    .literals(r#"(string) @string"#)
+    .implements(r#"
         (class_definition
             name: (identifier) @impl.child
             superclasses: (argument_list (identifier) @impl.parent)
         )
-    "#,
-    query_config: "",
-    query_vals: r#"
+    "#)
+    .vals(r#"
         (assignment
             left: (identifier) @val.name
             right: (string) @val.value
         )
-    "#,
-    query_types: r#"
+    "#)
+    .types(r#"
         [
             (typed_parameter type: (_) @type.ref)
             (typed_default_parameter type: (_) @type.ref)
@@ -98,11 +98,28 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
             (assignment type: (_) @type.ref)
             (class_definition superclasses: (argument_list (_) @type.ref))
         ]
-    "#,
-    query_decorators: r#"
+    "#)
+    .decorators(r#"
         (decorator) @decorator.name
-    "#,
-    query_actions: r#"
+    "#)
+    // Support for os.environ and os.getenv to link to .env files
+    .config_keys(r#"
+        [
+            (subscript
+                value: (attribute object: (identifier) @obj attribute: (identifier) @attr)
+                subscript: (string) @config.key
+                (#eq? @obj "os")
+                (#eq? @attr "environ")
+            )
+            (call
+                function: (attribute object: (identifier) @obj attribute: (identifier) @attr)
+                arguments: (argument_list (string) @config.key)
+                (#eq? @obj "os")
+                (#eq? @attr "getenv")
+            )
+        ]
+    "#)
+    .actions(r#"
         (call
             function: (attribute attribute: (identifier) @fn)
             arguments: (argument_list 
@@ -125,11 +142,8 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
             [(string) (identifier)] @action.handle
             (identifier)
         )
-    "#,
-    // Middleware Detection
-    // 1. Django: MIDDLEWARE = [...]
-    // 2. Flask: @app.before_request (no parens) OR @app.before_request() (parens)
-    query_middleware: r#"
+    "#)
+    .middleware(r#"
         (assignment
             left: (identifier) @var 
             right: (list (string) @middleware.config)
@@ -155,8 +169,8 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
             (function_definition name: (identifier) @middleware.use)
             (#eq? @attr "before_request")
         )
-    "#,
-    query_route_defs: r#"
+    "#)
+    .routes(r#"
         (decorator
             (call
                 function: (attribute attribute: (identifier) @fn)
@@ -164,7 +178,8 @@ pub const PYTHON_CONFIG: LanguageConfig = LanguageConfig {
             )
             (#match? @fn "^(route|get|post)$")
         )
-    "#, 
-    di_decorators: &["dataclass", "Component", "Service"],
-    magic_methods: &["__getattr__", "__getattribute__"], 
-};
+    "#)
+    .di_decorators(&["dataclass", "Component", "Service"])
+    .magic_methods(&["__getattr__", "__getattribute__"])
+    .build()
+}

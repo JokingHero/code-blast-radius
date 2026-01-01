@@ -33,7 +33,7 @@ pub fn analyze_source(
     
     // 1. Setup Parser
     let mut parser = Parser::new();
-    let language = get_language(config.lang_enum);
+    let language = get_language(config.lang);
     parser.set_language(&language).map_err(|e| e.to_string())?;
 
     // Handle empty files early

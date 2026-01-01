@@ -1,9 +1,11 @@
-use crate::analysis::language::{LanguageConfig, SupportedLanguage};
+use crate::analysis::language::{LanguageConfig, LanguageConfigBuilder, SupportedLanguage};
 
-pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::JavaScript,
-    file_extensions: &["js", "jsx", "mjs", "cjs", "vue"],
-    query_defs: r#"
+pub fn config() -> LanguageConfig {
+    LanguageConfigBuilder::new(
+        SupportedLanguage::JavaScript,
+        &["js", "jsx", "mjs", "cjs", "vue"]
+    )
+    .defs(r#"
           (function_declaration name: (identifier) @function.name) @function.definition
           (generator_function_declaration name: (identifier) @function.name) @function.definition
           (method_definition name: (property_identifier) @function.name) @function.definition
@@ -21,8 +23,8 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
                 (#match? @fn_name "^(create|make|define|build|atom|selector)$")
             )
           ) @function.definition
-    "#,
-    query_calls: r#"
+    "#)
+    .calls(r#"
         [
           (call_expression 
             function: (member_expression 
@@ -36,8 +38,8 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
           (call_expression 
             function: (identifier) @call.name)
         ]
-    "#,
-    query_docs: r#"
+    "#)
+    .docs(r#"
       (
         (comment)+ @function.docs
         .
@@ -50,8 +52,8 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             (variable_declaration)
         ] @function.definition
       )
-    "#,
-    query_imports: r#"
+    "#)
+    .imports(r#"
         [
           (import_statement
               (import_clause
@@ -70,16 +72,42 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             (#eq? @req "require")
           )
         ]
-    "#,
-    query_exports: "",
-    query_literals: r#"[ (string) (template_string) ] @string"#,
-    query_implements: r#"
+    "#)
+    // Support for ES6 exports which were missing
+    .exports(r#"
+        [
+            (export_statement
+                (export_clause
+                    (export_specifier name: (identifier) @export.name)
+                )
+            )
+            (export_statement
+                (export_clause
+                    (export_specifier name: (identifier) @export.name)
+                )
+                source: (string) @export.source
+            )
+            (export_statement
+                (wildcard_export)
+                source: (string) @export.source
+            )
+            (export_statement
+                declaration: [
+                    (variable_declaration (variable_declarator name: (identifier) @export.name))
+                    (function_declaration name: (identifier) @export.name)
+                    (class_declaration name: (identifier) @export.name)
+                ]
+            )
+        ]
+    "#)
+    .literals(r#"[ (string) (template_string) ] @string"#)
+    .implements(r#"
         (class_declaration
             name: (identifier) @impl.child
             (class_heritage (identifier) @impl.parent)
         )
-    "#,
-    query_config: r#"
+    "#)
+    .config_keys(r#"
         [
           (member_expression
             object: (member_expression
@@ -98,16 +126,14 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             (#eq? @prop "env")
           )
         ]
-    "#,
-    query_vals: r#"
+    "#)
+    .vals(r#"
         (variable_declarator
             name: (identifier) @val.name
             value: [(string) (template_string)] @val.value
         )
-    "#,
-    query_types: "",
-    query_decorators: "",
-    query_actions: r#"
+    "#)
+    .actions(r#"
         ;; --- Redux / Object Patterns ---
         
         ;; Dispatching object with type: '...' (e.g. put({ type: 'ADD' }))
@@ -164,9 +190,30 @@ pub const JAVASCRIPT_CONFIG: LanguageConfig = LanguageConfig {
             )
             (#match? @fn "^(on|once|subscribe|sub|listen)$")
         )
-    "#,
-    query_middleware: "",
-    query_route_defs: "",
-    di_decorators: &[],
-    magic_methods: &[]
-};
+    "#)
+    .middleware(r#"
+        ;; Express/Connect style middleware
+        (call_expression
+            function: (member_expression
+                property: (property_identifier) @prop
+            )
+            arguments: (arguments 
+                [(identifier) (call_expression)] @middleware.use
+            )
+            (#eq? @prop "use")
+        )
+    "#)
+    // Express.js style route definitions
+    .routes(r#"
+        (call_expression
+            function: (member_expression
+                property: (property_identifier) @method
+            )
+            arguments: (arguments 
+                (string) @route.path
+            )
+            (#match? @method "^(get|post|put|delete|patch|options|head|all)$")
+        )
+    "#)
+    .build()
+}

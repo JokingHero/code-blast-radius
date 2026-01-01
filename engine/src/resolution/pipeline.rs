@@ -24,7 +24,8 @@ impl ResolutionPipeline {
         index: &mut WorkspaceIndex,
         staging: &mut StagingArea,
         lookup: &mut SymbolIndex,
-        configs: &HashMap<String, &'static LanguageConfig>
+        // CHANGE: Remove &'static. It matches HashMap<String, LanguageConfig> now.
+        configs: &HashMap<String, LanguageConfig>
     ) {
         // Reset Graph State
         index.graph.clear();

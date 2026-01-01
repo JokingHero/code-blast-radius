@@ -113,7 +113,7 @@ fn test_redux_object_map_linking() {
 
     let saga_id = indexer.lookup.symbol_map.get("createTodoSaga").unwrap()[0];
 
-    // --- NEW LOGIC START ---
+    // --- LOGIC START ---
     
     // 1. Check the graph for outgoing edges from the Saga
     let edges = indexer.index.graph.get(&saga_id);

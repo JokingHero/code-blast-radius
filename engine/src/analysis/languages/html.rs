@@ -1,22 +1,35 @@
-use crate::analysis::language::{LanguageConfig, SupportedLanguage};
+use crate::analysis::language::{LanguageConfig, LanguageConfigBuilder, SupportedLanguage};
 
-pub const HTML_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::Html,
-    file_extensions: &["html", "htm"],
-    query_defs: r#"(attribute (attribute_name) @attr (#eq? @attr "id") (attribute_value) @function.name) @function.definition"#,
-    query_calls: "",
-    query_docs: "",
-    query_imports: "",
-    query_exports: "",
-    query_literals: r#"(attribute_value) @string"#,
-    query_implements: "",
-    query_config: "",
-    query_vals: "",
-    query_types: "",
-    query_decorators: "",
-    query_actions: "",
-    query_middleware: "",
-    di_decorators: &[],
-    magic_methods: &[],
-    query_route_defs: "",
-};
+pub fn config() -> LanguageConfig {
+    LanguageConfigBuilder::new(
+        SupportedLanguage::Html,
+        &["html", "htm", "xhtml"]
+    )
+    // Preserved logic: treat elements with 'id' attributes as definitions
+    .defs(r#"(attribute (attribute_name) @attr (#eq? @attr "id") (attribute_value) @function.name) @function.definition"#)
+    
+    // Capture script sources and link hrefs as imports
+    .imports(r#"
+        (start_tag
+            (tag_name) @tag
+            (attribute
+                (attribute_name) @attr
+                (attribute_value) @import.source
+            )
+            (#eq? @tag "script")
+            (#eq? @attr "src")
+        )
+        (start_tag
+            (tag_name) @tag
+            (attribute
+                (attribute_name) @attr
+                (attribute_value) @import.source
+            )
+            (#eq? @tag "link")
+            (#eq? @attr "href")
+        )
+    "#)
+    
+    .literals(r#"(attribute_value) @string"#)
+    .build()
+}

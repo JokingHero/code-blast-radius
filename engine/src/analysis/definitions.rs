@@ -57,7 +57,16 @@ pub fn extract_definitions(
         routes: Vec::new(),
     };
 
-    let defs_query = Query::new(language, config.query_defs).map_err(|e| 
+    let defs_query_str = config.queries.defs.unwrap_or("");     
+    if defs_query_str.is_empty() {
+         return Ok(DefinitionsResult {
+            functions,
+            module_info,
+            variable_hints,
+        });
+    }
+
+    let defs_query = Query::new(language, defs_query_str).map_err(|e| 
         format!("Invalid defs query: {}", e)
     )?;
 

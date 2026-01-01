@@ -1,23 +1,12 @@
-use crate::analysis::language::{LanguageConfig, SupportedLanguage};
+use crate::analysis::language::{LanguageConfig, LanguageConfigBuilder, SupportedLanguage};
 
-pub const JSON_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::Json,
-    file_extensions: &["json"],
+pub fn config() -> LanguageConfig {
+    LanguageConfigBuilder::new(
+        SupportedLanguage::Json,
+        &["json"]
+    )
     // Matches keys in "key": value pairs
-    query_defs: r#"(pair key: (string (string_content) @function.name)) @function.definition"#,
-    query_calls: "",
-    query_docs: "",
-    query_imports: "",
-    query_exports: "",
-    query_literals: r#"(string_content) @string"#,
-    query_implements: "",
-    query_config: "",
-    query_vals: "",
-    query_types: "",
-    query_decorators: "",
-    query_actions: "",
-    query_middleware: "",
-    query_route_defs: "",
-    di_decorators: &[],
-    magic_methods: &[]
-};
+    .defs(r#"(pair key: (string (string_content) @function.name)) @function.definition"#)
+    .literals(r#"(string_content) @string"#)
+    .build()
+}

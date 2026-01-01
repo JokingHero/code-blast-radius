@@ -144,27 +144,27 @@ fn pass_variable_hints(ctx: &mut EnrichmentContext, hints: Vec<VariableHint>) {
 fn pass_config_keys(ctx: &mut EnrichmentContext) {
     // We cannot use the generic run_query easily here because we need capture names from the Query object.
     // However, for brevity in this refactor, we'll keep the direct logic but isolated.
-    if ctx.config.query_config.is_empty() { return; }
+    if let Some(q_str) = ctx.config.queries.config {
+        if let Ok(q) = Query::new(ctx.language, q_str) {
+            let mut cursor = QueryCursor::new();
+            let mut matches = cursor.matches(&q, ctx.root_node, ctx.source);
+            
+            while let Some(m) = matches.next() {
+                for cap in m.captures {
+                    if q.capture_names()[cap.index as usize] == "config.key" {
+                        let text = cap.node
+                            .utf8_text(ctx.source)
+                            .unwrap_or("")
+                            .trim_matches(|c| c == '"' || c == '\'' || c == '`')
+                            .to_string();
 
-    if let Ok(q) = Query::new(ctx.language, ctx.config.query_config) {
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&q, ctx.root_node, ctx.source);
-        
-        while let Some(m) = matches.next() {
-            for cap in m.captures {
-                if q.capture_names()[cap.index as usize] == "config.key" {
-                    let text = cap.node
-                        .utf8_text(ctx.source)
-                        .unwrap_or("")
-                        .trim_matches(|c| c == '"' || c == '\'' || c == '`')
-                        .to_string();
-
-                    if !text.is_empty() {
-                        let range = cap.node.byte_range();
-                        if let Some(idx) = ctx.find_owner(range.start, range.end) {
-                            ctx.functions[idx].config_keys.push(text);
-                        } else {
-                            ctx.module_info.config_keys.push(text);
+                        if !text.is_empty() {
+                            let range = cap.node.byte_range();
+                            if let Some(idx) = ctx.find_owner(range.start, range.end) {
+                                ctx.functions[idx].config_keys.push(text);
+                            } else {
+                                ctx.module_info.config_keys.push(text);
+                            }
                         }
                     }
                 }
@@ -174,25 +174,25 @@ fn pass_config_keys(ctx: &mut EnrichmentContext) {
 }
 
 fn pass_decorators(ctx: &mut EnrichmentContext) {
-    if ctx.config.query_decorators.is_empty() { return; }
+    if let Some(q_str) = ctx.config.queries.decorators {
+        if let Ok(q) = Query::new(ctx.language, q_str) {
+            let mut cursor = QueryCursor::new();
+            let mut matches = cursor.matches(&q, ctx.root_node, ctx.source);
+            
+            while let Some(m) = matches.next() {
+                for cap in m.captures {
+                    let text = cap.node.utf8_text(ctx.source).unwrap_or("").to_string();
+                    let clean_name = text
+                        .trim_matches(|c| c == '@' || c == '#' || c == '[' || c == ']' || c == '(' || c == ')')
+                        .to_string();
 
-    if let Ok(q) = Query::new(ctx.language, ctx.config.query_decorators) {
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&q, ctx.root_node, ctx.source);
-        
-        while let Some(m) = matches.next() {
-            for cap in m.captures {
-                let text = cap.node.utf8_text(ctx.source).unwrap_or("").to_string();
-                let clean_name = text
-                    .trim_matches(|c| c == '@' || c == '#' || c == '[' || c == ']' || c == '(' || c == ')')
-                    .to_string();
-
-                if !clean_name.is_empty() {
-                    let range = cap.node.byte_range();
-                    if let Some(idx) = ctx.find_owner_or_neighbor(range.start, range.end) {
-                        ctx.functions[idx].decorators.push(clean_name);
-                    } else {
-                        ctx.module_info.decorators.push(clean_name);
+                    if !clean_name.is_empty() {
+                        let range = cap.node.byte_range();
+                        if let Some(idx) = ctx.find_owner_or_neighbor(range.start, range.end) {
+                            ctx.functions[idx].decorators.push(clean_name);
+                        } else {
+                            ctx.module_info.decorators.push(clean_name);
+                        }
                     }
                 }
             }
@@ -201,55 +201,55 @@ fn pass_decorators(ctx: &mut EnrichmentContext) {
 }
 
 fn pass_calls(ctx: &mut EnrichmentContext) {
-    if ctx.config.query_calls.is_empty() { return; }
+    if let Some(q_str) = ctx.config.queries.calls {
+        if let Ok(q) = Query::new(ctx.language, q_str) {
+            let mut cursor = QueryCursor::new();
+            let mut matches = cursor.matches(&q, ctx.root_node, ctx.source);
+            
+            while let Some(m) = matches.next() {
+                let mut m_name = None;
+                let mut r_name = None;
+                let mut dynamic_receiver = None;
+                let mut call_range = None;
 
-    if let Ok(q) = Query::new(ctx.language, ctx.config.query_calls) {
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&q, ctx.root_node, ctx.source);
-        
-        while let Some(m) = matches.next() {
-            let mut m_name = None;
-            let mut r_name = None;
-            let mut dynamic_receiver = None;
-            let mut call_range = None;
+                for cap in m.captures {
+                    let t = cap.node.utf8_text(ctx.source).unwrap_or("").to_string();
+                    let cap_name = q.capture_names()[cap.index as usize];
 
-            for cap in m.captures {
-                let t = cap.node.utf8_text(ctx.source).unwrap_or("").to_string();
-                let cap_name = q.capture_names()[cap.index as usize];
-
-                if cap_name == "call.name" {
-                    m_name = Some(t);
-                    call_range = Some(cap.node.byte_range());
-                } else if cap_name == "call.receiver" {
-                    r_name = Some(t);
-                } else if cap_name == "call.dynamic_dispatch" {
-                    dynamic_receiver = Some(t);
-                    call_range = Some(cap.node.byte_range());
-                }
-            }
-
-            if let (Some(m), Some(range)) = (m_name, call_range.clone()) {
-                if let Some(idx) = ctx.find_owner(range.start, range.end) {
-                    let func = &mut ctx.functions[idx];
-                    if r_name.is_none() {
-                        func.calls.push(m.clone());
-                    }
-                    if let Some(r) = r_name {
-                        func.fingerprints.entry(r).or_default().push(m);
-                    }
-                } else {
-                    if r_name.is_none() {
-                        ctx.module_info.calls.push(m.clone());
-                    }
-                    if let Some(r) = r_name {
-                        ctx.module_info.fingerprints.entry(r).or_default().push(m);
+                    if cap_name == "call.name" {
+                        m_name = Some(t);
+                        call_range = Some(cap.node.byte_range());
+                    } else if cap_name == "call.receiver" {
+                        r_name = Some(t);
+                    } else if cap_name == "call.dynamic_dispatch" {
+                        dynamic_receiver = Some(t);
+                        call_range = Some(cap.node.byte_range());
                     }
                 }
-            } else if let (Some(dr), Some(range)) = (dynamic_receiver, call_range) {
-                if let Some(idx) = ctx.find_owner(range.start, range.end) {
-                    ctx.functions[idx].fingerprints.entry(dr).or_default().push("*".to_string());
-                } else {
-                    ctx.module_info.fingerprints.entry(dr).or_default().push("*".to_string());
+
+                if let (Some(m), Some(range)) = (m_name, call_range.clone()) {
+                    if let Some(idx) = ctx.find_owner(range.start, range.end) {
+                        let func = &mut ctx.functions[idx];
+                        if r_name.is_none() {
+                            func.calls.push(m.clone());
+                        }
+                        if let Some(r) = r_name {
+                            func.fingerprints.entry(r).or_default().push(m);
+                        }
+                    } else {
+                        if r_name.is_none() {
+                            ctx.module_info.calls.push(m.clone());
+                        }
+                        if let Some(r) = r_name {
+                            ctx.module_info.fingerprints.entry(r).or_default().push(m);
+                        }
+                    }
+                } else if let (Some(dr), Some(range)) = (dynamic_receiver, call_range) {
+                    if let Some(idx) = ctx.find_owner(range.start, range.end) {
+                        ctx.functions[idx].fingerprints.entry(dr).or_default().push("*".to_string());
+                    } else {
+                        ctx.module_info.fingerprints.entry(dr).or_default().push("*".to_string());
+                    }
                 }
             }
         }
@@ -257,21 +257,21 @@ fn pass_calls(ctx: &mut EnrichmentContext) {
 }
 
 fn pass_type_refs(ctx: &mut EnrichmentContext) {
-    if ctx.config.query_types.is_empty() { return; }
-
-    if let Ok(q) = Query::new(ctx.language, ctx.config.query_types) {
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&q, ctx.root_node, ctx.source);
-        
-        while let Some(m) = matches.next() {
-            for cap in m.captures {
-                let type_name = cap.node.utf8_text(ctx.source).unwrap_or("").to_string();
-                if !type_name.is_empty() {
-                    let range = cap.node.byte_range();
-                    if let Some(idx) = ctx.find_owner(range.start, range.end) {
-                        ctx.functions[idx].type_refs.push(type_name);
-                    } else {
-                        ctx.module_info.type_refs.push(type_name);
+    if let Some(q_str) = ctx.config.queries.types {
+        if let Ok(q) = Query::new(ctx.language, q_str) {
+            let mut cursor = QueryCursor::new();
+            let mut matches = cursor.matches(&q, ctx.root_node, ctx.source);
+            
+            while let Some(m) = matches.next() {
+                for cap in m.captures {
+                    let type_name = cap.node.utf8_text(ctx.source).unwrap_or("").to_string();
+                    if !type_name.is_empty() {
+                        let range = cap.node.byte_range();
+                        if let Some(idx) = ctx.find_owner(range.start, range.end) {
+                            ctx.functions[idx].type_refs.push(type_name);
+                        } else {
+                            ctx.module_info.type_refs.push(type_name);
+                        }
                     }
                 }
             }
@@ -280,47 +280,47 @@ fn pass_type_refs(ctx: &mut EnrichmentContext) {
 }
 
 fn pass_actions(ctx: &mut EnrichmentContext) {
-    if ctx.config.query_actions.is_empty() { return; }
+    if let Some(q_str) = ctx.config.queries.actions {
+        if let Ok(q) = Query::new(ctx.language, q_str) {
+            let mut cursor = QueryCursor::new();
+            let mut matches = cursor.matches(&q, ctx.root_node, ctx.source);
+            
+            while let Some(m) = matches.next() {
+                for cap in m.captures {
+                    let raw_text = cap.node.utf8_text(ctx.source).unwrap_or("").to_string();
+                    
+                    // Resolve constant if possible
+                    let resolved_text = if let Some(val) = ctx.constants.get(&raw_text) {
+                        val.clone()
+                    } else {
+                        raw_text
+                    };
 
-    if let Ok(q) = Query::new(ctx.language, ctx.config.query_actions) {
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&q, ctx.root_node, ctx.source);
-        
-        while let Some(m) = matches.next() {
-            for cap in m.captures {
-                let raw_text = cap.node.utf8_text(ctx.source).unwrap_or("").to_string();
-                
-                // Resolve constant if possible
-                let resolved_text = if let Some(val) = ctx.constants.get(&raw_text) {
-                    val.clone()
-                } else {
-                    raw_text
-                };
+                    let text = resolved_text
+                        .trim_matches(|c| c == '"' || c == '\'' || c == '`')
+                        .to_string();
+                    
+                    let capture_name = q.capture_names()[cap.index as usize];
+                    let range = cap.node.byte_range();
 
-                let text = resolved_text
-                    .trim_matches(|c| c == '"' || c == '\'' || c == '`')
-                    .to_string();
-                
-                let capture_name = q.capture_names()[cap.index as usize];
-                let range = cap.node.byte_range();
-
-                // Actions often use the neighbor heuristic (e.g. decorators handling events)
-                // but dispatching is usually inside the function.
-                if let Some(idx) = ctx.find_owner(range.start, range.end) {
-                    if capture_name == "action.dispatch" {
-                        ctx.functions[idx].dispatched_actions.push(text);
-                    } else if capture_name == "action.handle" {
-                        ctx.functions[idx].handled_actions.push(text);
-                    }
-                } else if let Some(idx) = ctx.find_owner_or_neighbor(range.start, range.end) {
-                    if capture_name == "action.handle" {
-                         ctx.functions[idx].handled_actions.push(text);
-                    }
-                } else {
-                     if capture_name == "action.dispatch" {
-                        ctx.module_info.dispatched_actions.push(text);
-                    } else if capture_name == "action.handle" {
-                        ctx.module_info.handled_actions.push(text);
+                    // Actions often use the neighbor heuristic (e.g. decorators handling events)
+                    // but dispatching is usually inside the function.
+                    if let Some(idx) = ctx.find_owner(range.start, range.end) {
+                        if capture_name == "action.dispatch" {
+                            ctx.functions[idx].dispatched_actions.push(text);
+                        } else if capture_name == "action.handle" {
+                            ctx.functions[idx].handled_actions.push(text);
+                        }
+                    } else if let Some(idx) = ctx.find_owner_or_neighbor(range.start, range.end) {
+                        if capture_name == "action.handle" {
+                            ctx.functions[idx].handled_actions.push(text);
+                        }
+                    } else {
+                        if capture_name == "action.dispatch" {
+                            ctx.module_info.dispatched_actions.push(text);
+                        } else if capture_name == "action.handle" {
+                            ctx.module_info.handled_actions.push(text);
+                        }
                     }
                 }
             }
@@ -329,31 +329,31 @@ fn pass_actions(ctx: &mut EnrichmentContext) {
 }
 
 fn pass_routes(ctx: &mut EnrichmentContext) {
-    if ctx.config.query_route_defs.is_empty() { return; }
+    if let Some(q_str) = ctx.config.queries.route_defs {
+        if let Ok(q) = Query::new(ctx.language, q_str) {
+            let mut cursor = QueryCursor::new();
+            let mut matches = cursor.matches(&q, ctx.root_node, ctx.source);
+            
+            while let Some(m) = matches.next() {
+                for cap in m.captures {
+                    let text = cap.node
+                        .utf8_text(ctx.source)
+                        .unwrap_or("")
+                        .trim_matches(|c| c == '"' || c == '\'' || c == '`');
 
-    if let Ok(q) = Query::new(ctx.language, ctx.config.query_route_defs) {
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&q, ctx.root_node, ctx.source);
-        
-        while let Some(m) = matches.next() {
-            for cap in m.captures {
-                let text = cap.node
-                    .utf8_text(ctx.source)
-                    .unwrap_or("")
-                    .trim_matches(|c| c == '"' || c == '\'' || c == '`');
-
-                let route = if text.starts_with('/') {
-                    text.to_string()
-                } else {
-                    format!("/{}", text)
-                };
-
-                if route.len() > 1 {
-                    let range = cap.node.byte_range();
-                    if let Some(idx) = ctx.find_owner_or_neighbor(range.start, range.end) {
-                        ctx.functions[idx].routes.push(route);
+                    let route = if text.starts_with('/') {
+                        text.to_string()
                     } else {
-                        ctx.module_info.routes.push(route);
+                        format!("/{}", text)
+                    };
+
+                    if route.len() > 1 {
+                        let range = cap.node.byte_range();
+                        if let Some(idx) = ctx.find_owner_or_neighbor(range.start, range.end) {
+                            ctx.functions[idx].routes.push(route);
+                        } else {
+                            ctx.module_info.routes.push(route);
+                        }
                     }
                 }
             }
@@ -362,31 +362,31 @@ fn pass_routes(ctx: &mut EnrichmentContext) {
 }
 
 fn pass_documentation(ctx: &mut EnrichmentContext) {
-    if ctx.config.query_docs.is_empty() { return; }
+    if let Some(q_str) = ctx.config.queries.docs {
+        if let Ok(q) = Query::new(ctx.language, q_str) {
+            let mut cursor = QueryCursor::new();
+            let mut matches = cursor.matches(&q, ctx.root_node, ctx.source);
+            
+            while let Some(m) = matches.next() {
+                // Find the definition node to match ranges
+                let d_def = m.captures
+                    .iter()
+                    .find(|c| q.capture_names()[c.index as usize] == "function.definition")
+                    .map(|c| c.node);
 
-    if let Ok(q) = Query::new(ctx.language, ctx.config.query_docs) {
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&q, ctx.root_node, ctx.source);
-        
-        while let Some(m) = matches.next() {
-            // Find the definition node to match ranges
-            let d_def = m.captures
-                .iter()
-                .find(|c| q.capture_names()[c.index as usize] == "function.definition")
-                .map(|c| c.node);
-
-            if let Some(d_node) = d_def {
-                for func in ctx.functions.iter_mut() {
-                    if func.range_start == d_node.start_byte() {
-                        func.documentation = Some(
-                            m.captures
-                                .iter()
-                                .filter(|c| q.capture_names()[c.index as usize] == "function.docs")
-                                .map(|c| c.node.utf8_text(ctx.source).unwrap_or("").to_string())
-                                .collect::<Vec<_>>()
-                                .join("\n")
-                        );
-                        break;
+                if let Some(d_node) = d_def {
+                    for func in ctx.functions.iter_mut() {
+                        if func.range_start == d_node.start_byte() {
+                            func.documentation = Some(
+                                m.captures
+                                    .iter()
+                                    .filter(|c| q.capture_names()[c.index as usize] == "function.docs")
+                                    .map(|c| c.node.utf8_text(ctx.source).unwrap_or("").to_string())
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            );
+                            break;
+                        }
                     }
                 }
             }

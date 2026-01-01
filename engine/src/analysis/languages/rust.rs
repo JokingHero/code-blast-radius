@@ -1,9 +1,11 @@
-use crate::analysis::language::{LanguageConfig, SupportedLanguage};
+use crate::analysis::language::{LanguageConfig, LanguageConfigBuilder, SupportedLanguage};
 
-pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
-    lang_enum: SupportedLanguage::Rust,
-    file_extensions: &["rs"],
-    query_defs: r#"
+pub fn config() -> LanguageConfig {
+    LanguageConfigBuilder::new(
+        SupportedLanguage::Rust,
+        &["rs"]
+    )
+    .defs(r#"
         ;; 1. Standard Function Definitions
         (function_item name: (identifier) @function.name) @function.definition
         
@@ -74,9 +76,9 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
             (token_tree . (identifier) @function.name)
             (#match? @macro_type "_suite$")
         ) @function.definition
-    "#,
-    query_calls: r#"(call_expression function: [(identifier) @call.name (field_expression field: (field_identifier) @call.name)])"#,
-    query_docs: r#"
+    "#)
+    .calls(r#"(call_expression function: [(identifier) @call.name (field_expression field: (field_identifier) @call.name)])"#)
+    .docs(r#"
         (
             (line_comment)+ @function.docs 
             . 
@@ -86,25 +88,35 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
                 (macro_invocation)
             ] @function.definition
         )
-    "#,
-    query_imports: r#"
+    "#)
+    .imports(r#"
         (use_declaration
             argument: [
                 (scoped_identifier)
                 (identifier)
             ] @import.source
         )
-    "#,
-    query_exports: "",
-    query_literals: r#"(string_literal) @string"#,
-    query_implements: r#"
+    "#)
+    .literals(r#"(string_literal) @string"#)
+    .implements(r#"
         (impl_item
             trait: (type_identifier) @impl.parent
             type: (type_identifier) @impl.child
         )
-    "#,
-    query_config: "",
-    query_vals: r#"
+    "#)
+    // Environment variable detection
+    .config_keys(r#"
+        (call_expression
+            function: (scoped_identifier
+                path: (identifier) @mod
+                name: (identifier) @fn
+            )
+            arguments: (arguments (string_literal) @config.key)
+            (#eq? @mod "env")
+            (#eq? @fn "var")
+        )
+    "#)
+    .vals(r#"
         [
             (const_item
                 name: (identifier) @val.name
@@ -115,8 +127,8 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
                 value: (string_literal) @val.value
             )
         ]
-    "#,
-    query_types: r#"
+    "#)
+    .types(r#"
         [
             (parameter type: (type_identifier) @type.ref)
             (function_item return_type: (type_identifier) @type.ref)
@@ -125,11 +137,11 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
             (struct_expression name: (type_identifier) @type.ref)
             (type_arguments (type_identifier) @type.ref)
         ]
-    "#,
-    query_decorators: r#"
+    "#)
+    .decorators(r#"
         (attribute_item) @decorator.name
-    "#,
-    query_actions: r#"
+    "#)
+    .actions(r#"
         (call_expression
             function: (field_expression field: (field_identifier) @fn (#match? @fn "^(emit|dispatch|publish|send)$"))
             arguments: (arguments 
@@ -148,9 +160,6 @@ pub const RUST_CONFIG: LanguageConfig = LanguageConfig {
                 )
             )
         )
-    "#,
-    query_middleware: "",
-    query_route_defs: "",
-    di_decorators: &[],
-    magic_methods: &[]
-};
+    "#)
+    .build()
+}
