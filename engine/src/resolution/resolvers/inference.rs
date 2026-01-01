@@ -11,14 +11,14 @@ pub fn resolve_type_sniffing(index: &mut WorkspaceIndex, staging: &StagingArea, 
             // 1. Walk scope to find variable type
             let mut type_hint = None;
             let mut curr_scope = Some(caller_id);
-            while let Some(sid) = curr_scope {
-                if let Some(vars) = staging.local_variable_types.get(&sid) {
+            while let Some(scope_id) = curr_scope {
+                if let Some(vars) = staging.local_variable_types.get(&scope_id) {
                     if let Some(h) = vars.get(lookup_name) {
                         type_hint = Some(h);
                         break;
                     }
                 }
-                curr_scope = index.symbols.get(&sid).and_then(|s| s.parent_id);
+                curr_scope = index.symbols.get(&scope_id).and_then(|s| s.parent_id);
             }
 
             // 2. Resolve Type
@@ -43,9 +43,9 @@ pub fn resolve_type_sniffing(index: &mut WorkspaceIndex, staging: &StagingArea, 
                                     if method_called == "*" { continue; }
                                     if known_methods.contains(method_called) {
                                         if let Some(method_ids) = lookup.symbol_map.get(method_called) {
-                                            for &mid in method_ids {
-                                                if index.symbols.get(&mid).map_or(false, |s| s.parent_id == Some(type_id)) {
-                                                    new_links.push((caller_id, mid, EdgeKind::Calls));
+                                            for &method_id in method_ids {
+                                                if index.symbols.get(&method_id).map_or(false, |s| s.parent_id == Some(type_id)) {
+                                                    new_links.push((caller_id, method_id, EdgeKind::Calls));
                                                 }
                                             }
                                         }
@@ -67,20 +67,20 @@ pub fn resolve_type_sniffing(index: &mut WorkspaceIndex, staging: &StagingArea, 
 pub fn resolve_fingerprints(index: &mut WorkspaceIndex, staging: &StagingArea, lookup: &SymbolIndex) {
     let mut links = Vec::new();
     
-    for (&cid, fprints) in &staging.fingerprints {
+    for (&caller_id, fprints) in &staging.fingerprints {
         for (receiver_var, meths) in fprints {
             let lookup_name = receiver_var.trim_start_matches("this.").trim_start_matches("self.");
 
             let mut has_type_hint = false;
-            let mut curr_scope = Some(cid);
-            while let Some(sid) = curr_scope {
-                if let Some(vars) = staging.local_variable_types.get(&sid) {
+            let mut curr_scope = Some(caller_id);
+            while let Some(scope_id) = curr_scope {
+                if let Some(vars) = staging.local_variable_types.get(&scope_id) {
                     if vars.contains_key(lookup_name) {
                         has_type_hint = true;
                         break;
                     }
                 }
-                curr_scope = index.symbols.get(&sid).and_then(|s| s.parent_id);
+                curr_scope = index.symbols.get(&scope_id).and_then(|s| s.parent_id);
             }
 
             if has_type_hint { continue; }
@@ -109,13 +109,13 @@ pub fn resolve_fingerprints(index: &mut WorkspaceIndex, staging: &StagingArea, l
             };
 
             for cont_id in final_candidates {
-                links.push((cid, cont_id, EdgeKind::TypeReference)); 
+                links.push((caller_id, cont_id, EdgeKind::TypeReference)); 
                 if let Some(_cont_meths) = staging.container_methods.get(&cont_id) {
                     for m in meths {
                         if let Some(m_ids) = lookup.symbol_map.get(m) {
-                            for &mid in m_ids {
-                                if index.symbols[&mid].parent_id == Some(cont_id) {
-                                    links.push((cid, mid, EdgeKind::Calls));
+                            for &method_id in m_ids {
+                                if index.symbols[&method_id].parent_id == Some(cont_id) {
+                                    links.push((caller_id, method_id, EdgeKind::Calls));
                                 }
                             }
                         }
@@ -133,17 +133,17 @@ pub fn resolve_fingerprints(index: &mut WorkspaceIndex, staging: &StagingArea, l
 pub fn resolve_implicit_connections(index: &mut WorkspaceIndex, staging: &StagingArea, lookup: &SymbolIndex) {
     let mut new_edges = Vec::new();
 
-    for (cid, parents) in &staging.raw_implementations {
+    for (caller_id, parents) in &staging.raw_implementations {
         for p in parents {
-            if let Some(pids) = lookup.symbol_map.get(p) {
-                for &pid in pids {
-                    new_edges.push((*cid, pid));
+            if let Some(parent_ids) = lookup.symbol_map.get(p) {
+                for &parent_id in parent_ids {
+                    new_edges.push((*caller_id, parent_id));
                 }
             }
         }
     }
 
-    for (cid, pid) in new_edges {
-        add_edge(index, cid, pid, EdgeKind::Inherits);
+    for (caller_id, parent_id) in new_edges {
+        add_edge(index, caller_id, parent_id, EdgeKind::Inherits);
     }
 }

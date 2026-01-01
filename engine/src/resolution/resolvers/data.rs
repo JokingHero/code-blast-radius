@@ -87,12 +87,12 @@ pub fn resolve_file_dependencies(index: &mut WorkspaceIndex, lookup: &SymbolInde
         }
     }
 
-    for (fid, imports) in &lookup.file_imports {
+    for (file_id, imports) in &lookup.file_imports {
         let mut deps = HashSet::new();
-        let src_module_id = file_to_module_sym.get(fid).cloned();
+        let src_module_id = file_to_module_sym.get(file_id).cloned();
 
         for imp in imports {
-            if let Some(target_fid) = core::resolve_import_path(index, lookup, *fid, &imp.source) {
+            if let Some(target_fid) = core::resolve_import_path(index, lookup, *file_id, &imp.source) {
                 deps.insert(target_fid);
                 if let (Some(src_id), Some(tgt_id)) = (src_module_id, file_to_module_sym.get(&target_fid)) {
                     add_edge(index, src_id, *tgt_id, EdgeKind::Imports);
@@ -100,7 +100,7 @@ pub fn resolve_file_dependencies(index: &mut WorkspaceIndex, lookup: &SymbolInde
             }
         }
         if !deps.is_empty() {
-            index.file_dependencies.insert(*fid, deps.into_iter().collect());
+            index.file_dependencies.insert(*file_id, deps.into_iter().collect());
         }
     }
 }
@@ -112,17 +112,17 @@ pub fn resolve_namespace_imports(index: &mut WorkspaceIndex, staging: &mut Stagi
         .map(|s| (s.file_id, s.name.clone()))
         .collect();
 
-    for (fid, imports) in &lookup.file_imports {
+    for (file_id, imports) in &lookup.file_imports {
         let mod_sym_id = index.symbols
             .values()
-            .find(|s| s.file_id == *fid && s.kind == SymbolKind::Module)
+            .find(|s| s.file_id == *file_id && s.kind == SymbolKind::Module)
             .map(|s| s.id);
 
         if let Some(scope_id) = mod_sym_id {
             for imp in imports {
                 if imp.name == "*" {
                     if let Some(alias) = &imp.alias {
-                        if let Some(target_fid) = core::resolve_import_path(index, lookup, *fid, &imp.source) {
+                        if let Some(target_fid) = core::resolve_import_path(index, lookup, *file_id, &imp.source) {
                             if let Some(target_mod_name) = file_mod_map.get(&target_fid) {
                                 staging.local_variable_types
                                     .entry(scope_id)
@@ -231,12 +231,12 @@ pub fn resolve_iac_links(index: &mut WorkspaceIndex, staging: &StagingArea, look
     for (sym_id, config_keys) in &staging.symbol_config_refs {
         let sym_file_id = index.symbols.get(sym_id).map(|s| s.file_id);
 
-        if let Some(fid) = sym_file_id {
+        if let Some(file_id) = sym_file_id {
             for key in config_keys {
                 if let Some(def_files) = env_var_definitions.get(key) {
                     for &def_file_id in def_files {
-                        if fid != def_file_id {
-                            new_file_links.push((fid, def_file_id));
+                        if file_id != def_file_id {
+                            new_file_links.push((file_id, def_file_id));
                         }
                     }
                 }

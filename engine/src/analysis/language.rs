@@ -86,40 +86,40 @@ impl LanguageConfigBuilder {
 
     // --- Query Setters ---
 
-    pub fn defs(mut self, q: &'static str) -> Self { self.queries.defs = Some(q); self }
-    pub fn calls(mut self, q: &'static str) -> Self { self.queries.calls = Some(q); self }
-    pub fn docs(mut self, q: &'static str) -> Self { self.queries.docs = Some(q); self }
-    pub fn imports(mut self, q: &'static str) -> Self { self.queries.imports = Some(q); self }
-    pub fn exports(mut self, q: &'static str) -> Self { self.queries.exports = Some(q); self }
-    pub fn literals(mut self, q: &'static str) -> Self { self.queries.literals = Some(q); self }
-    pub fn implements(mut self, q: &'static str) -> Self { self.queries.implements = Some(q); self }
-    pub fn config_keys(mut self, q: &'static str) -> Self { self.queries.config = Some(q); self }
-    pub fn vals(mut self, q: &'static str) -> Self { self.queries.vals = Some(q); self }
-    pub fn types(mut self, q: &'static str) -> Self { self.queries.types = Some(q); self }
-    pub fn decorators(mut self, q: &'static str) -> Self { self.queries.decorators = Some(q); self }
-    pub fn actions(mut self, q: &'static str) -> Self { self.queries.actions = Some(q); self }
-    pub fn middleware(mut self, q: &'static str) -> Self { self.queries.middleware = Some(q); self }
-    pub fn routes(mut self, q: &'static str) -> Self { self.queries.route_defs = Some(q); self }
+    pub fn defs(mut self, query: &'static str) -> Self { self.queries.defs = Some(query); self }
+    pub fn calls(mut self, query: &'static str) -> Self { self.queries.calls = Some(query); self }
+    pub fn docs(mut self, query: &'static str) -> Self { self.queries.docs = Some(query); self }
+    pub fn imports(mut self, query: &'static str) -> Self { self.queries.imports = Some(query); self }
+    pub fn exports(mut self, query: &'static str) -> Self { self.queries.exports = Some(query); self }
+    pub fn literals(mut self, query: &'static str) -> Self { self.queries.literals = Some(query); self }
+    pub fn implements(mut self, query: &'static str) -> Self { self.queries.implements = Some(query); self }
+    pub fn config_keys(mut self, query: &'static str) -> Self { self.queries.config = Some(query); self }
+    pub fn vals(mut self, query: &'static str) -> Self { self.queries.vals = Some(query); self }
+    pub fn types(mut self, query: &'static str) -> Self { self.queries.types = Some(query); self }
+    pub fn decorators(mut self, query: &'static str) -> Self { self.queries.decorators = Some(query); self }
+    pub fn actions(mut self, query: &'static str) -> Self { self.queries.actions = Some(query); self }
+    pub fn middleware(mut self, query: &'static str) -> Self { self.queries.middleware = Some(query); self }
+    pub fn routes(mut self, query: &'static str) -> Self { self.queries.route_defs = Some(query); self }
 
     // --- Heuristic Setters ---
 
-    pub fn di_decorators(mut self, d: &'static [&'static str]) -> Self {
-        self.heuristics.di_decorators = d;
+    pub fn di_decorators(mut self, decorators: &'static [&'static str]) -> Self {
+        self.heuristics.di_decorators = decorators;
         self
     }
 
-    pub fn magic_methods(mut self, m: &'static [&'static str]) -> Self {
-        self.heuristics.magic_methods = m;
+    pub fn magic_methods(mut self, methods: &'static [&'static str]) -> Self {
+        self.heuristics.magic_methods = methods;
         self
     }
 
-    pub fn constructor_names(mut self, c: &'static [&'static str]) -> Self {
-        self.heuristics.constructor_names = c;
+    pub fn constructor_names(mut self, constructors: &'static [&'static str]) -> Self {
+        self.heuristics.constructor_names = constructors;
         self
     }
 
-    pub fn project_config_files(mut self, f: &'static [&'static str]) -> Self {
-        self.heuristics.project_config_files = f;
+    pub fn project_config_files(mut self, files: &'static [&'static str]) -> Self {
+        self.heuristics.project_config_files = files;
         self
     }
 

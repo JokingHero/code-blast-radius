@@ -9,7 +9,7 @@ pub fn resolve_implicit_routes(index: &mut WorkspaceIndex, staging: &StagingArea
     let mut new_links = Vec::new();
     let route_definitions: Vec<(String, SymbolId)> = lookup.implicit_routes
         .iter()
-        .map(|(r, s)| (r.clone(), *s))
+        .map(|(route, &symbol_id)| (route.clone(), symbol_id))
         .collect();
         
     for (src_file_id, literals) in &staging.raw_literals {
@@ -158,8 +158,8 @@ pub fn resolve_middleware_injection(
     for (hub_file_id, middleware_names) in &staging.raw_middleware_usage {
         let mut middleware_ids = Vec::new();
         for name in middleware_names {
-            if let Some(sid) = core::resolve_single_call(index, lookup, cache, *hub_file_id, name) {
-                middleware_ids.push(sid);
+            if let Some(symbol_id) = core::resolve_single_call(index, lookup, cache, *hub_file_id, name) {
+                middleware_ids.push(symbol_id);
             }
         }
         if middleware_ids.is_empty() { continue; }
@@ -167,7 +167,7 @@ pub fn resolve_middleware_injection(
         let imports = lookup.file_imports.get(hub_file_id).cloned().unwrap_or_default();
         for imp in imports {
             if let Some(imported_file_id) = core::resolve_import_path(index, lookup, *hub_file_id, &imp.source) {
-                if middleware_ids.iter().any(|&mid| index.symbols[&mid].file_id == imported_file_id) {
+                if middleware_ids.iter().any(|&middleware_id| index.symbols[&middleware_id].file_id == imported_file_id) {
                     continue;
                 }
 
@@ -177,7 +177,7 @@ pub fn resolve_middleware_injection(
                     .map(|s| s.id);
 
                 if let Some(target_id) = target_mod_id {
-                    for &mid in &middleware_ids { new_links.push((target_id, mid)); }
+                    for &middleware_id in &middleware_ids { new_links.push((target_id, middleware_id)); }
                 }
             }
         }

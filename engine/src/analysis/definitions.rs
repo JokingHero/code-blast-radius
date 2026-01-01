@@ -73,7 +73,7 @@ pub fn extract_definitions(
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(&defs_query, root_node, source);
 
-    while let Some(match_) = matches.next() {
+    while let Some(query_match) = matches.next() {
         let mut def_node = None;
         let mut name_opt: Option<String> = None;
         let mut kind_opt: Option<String> = None;
@@ -84,7 +84,7 @@ pub fn extract_definitions(
         let mut v_type = None;
         let mut v_assign = None;
 
-        for capture in match_.captures {
+        for capture in query_match.captures {
             let cap_name = defs_query.capture_names()[capture.index as usize];
             let text = capture.node.utf8_text(source).unwrap_or("");
 
@@ -112,13 +112,13 @@ pub fn extract_definitions(
                     if let Some(parent) = capture.node.parent() {
                         if let Some(val) = parent.child_by_field_name("value") {
                             if val.kind() == "call_expression" {
-                                if let Some(f) = val.child_by_field_name("function") {
-                                    let fn_name = if f.kind() == "member_expression" {
-                                        f.child_by_field_name("property")
+                                if let Some(function_node) = val.child_by_field_name("function") {
+                                    let fn_name = if function_node.kind() == "member_expression" {
+                                        function_node.child_by_field_name("property")
                                             .and_then(|p| p.utf8_text(source).ok())
                                             .unwrap_or("")
                                     } else {
-                                        f.utf8_text(source).unwrap_or("")
+                                        function_node.utf8_text(source).unwrap_or("")
                                     };
                                     if !fn_name.is_empty() {
                                         v_assign = Some(fn_name.to_string());
@@ -139,8 +139,8 @@ pub fn extract_definitions(
             let node_kind = node.kind();
             
             // Determine the "Kind" of definition
-            let kind = if let Some(k) = kind_opt {
-                match k.as_str() {
+            let kind = if let Some(kind_str) = kind_opt {
+                match kind_str.as_str() {
                     "resource" | "data" => SymbolKind::Resource,
                     "variable" | "output" | "provider" => SymbolKind::Variable,
                     _ => SymbolKind::Function, // Fallback for captured strings
@@ -183,7 +183,7 @@ pub fn extract_definitions(
         } else if let Some(vn) = v_name {
             // It wasn't a function definition, but it matched variable captures
             variable_hints.push(VariableHint {
-                range: match_.captures[0].node.byte_range(),
+                range: query_match.captures[0].node.byte_range(),
                 name: vn,
                 type_name: v_type,
                 assignment: v_assign,

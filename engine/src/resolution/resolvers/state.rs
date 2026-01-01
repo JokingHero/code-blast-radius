@@ -88,20 +88,20 @@ pub fn resolve_magic_proxies(
             let mut curr_scope = Some(*caller_id);
             
             // 1. Scope Walk (Find the variable type)
-            while let Some(sid) = curr_scope {
-                if let Some(vars) = staging.local_variable_types.get(&sid) {
+            while let Some(scope_id) = curr_scope {
+                if let Some(vars) = staging.local_variable_types.get(&scope_id) {
                     if let Some(type_name) = vars.get(receiver_var) {
                          let clean = type_name.split('<').next().unwrap().trim();
                          if let Some(ids) = lookup.symbol_map.get(clean) {
                              type_class_id = ids.iter().find(|&&id| {
-                                 let s = &index.symbols[&id];
-                                 s.kind == SymbolKind::Container
+                                 let symbol = &index.symbols[&id];
+                                 symbol.kind == SymbolKind::Container
                              }).cloned();
                          }
                         break;
                     }
                 }
-                curr_scope = index.symbols.get(&sid).and_then(|s| s.parent_id);
+                curr_scope = index.symbols.get(&scope_id).and_then(|s| s.parent_id);
             }
 
             // 2. Check Magic Methods
@@ -156,7 +156,7 @@ pub fn resolve_decorators(
             if let Some(target_id) = core::resolve_single_call(index, lookup, cache, caller_file_id, clean) {
                 add_edge(index, *caller_id, target_id, EdgeKind::Calls); 
             } else if let Some(candidates) = lookup.symbol_map.get(clean) {
-                for g in candidates { add_edge(index, *caller_id, *g, EdgeKind::Calls); }
+                for &candidate_id in candidates { add_edge(index, *caller_id, candidate_id, EdgeKind::Calls); }
             }
         }
     }

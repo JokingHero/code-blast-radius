@@ -67,12 +67,12 @@ impl ResolutionPipeline {
     fn resolve_structure(&self, index: &mut WorkspaceIndex) {
         let mut edges_to_add = Vec::new();
         for sym in index.symbols.values() {
-            if let Some(pid) = sym.parent_id {
-                edges_to_add.push((pid, sym.id));
+            if let Some(parent_id) = sym.parent_id {
+                edges_to_add.push((parent_id, sym.id));
             }
         }
-        for (p, c) in edges_to_add {
-            add_edge(index, p, c, EdgeKind::Contains);
+        for (parent_id, child_id) in edges_to_add {
+            add_edge(index, parent_id, child_id, EdgeKind::Contains);
         }
     }
 }

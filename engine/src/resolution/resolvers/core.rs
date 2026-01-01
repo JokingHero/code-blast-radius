@@ -69,19 +69,19 @@ pub fn resolve_single_call(
         for imp in imps {
             if imp.alias.as_ref().unwrap_or(&imp.name) == name {
                 // A. Try Local Resolution
-                if let Some(tfid) = resolve_import_path(index, lookup, file_id, &imp.source) {
+                if let Some(target_file_id) = resolve_import_path(index, lookup, file_id, &imp.source) {
                     let mut visited = HashSet::new();
-                    if let Some(found) = resolve_symbol_across_barrels(index, lookup, cache, tfid, &imp.name, &mut visited) {
+                    if let Some(found) = resolve_symbol_across_barrels(index, lookup, cache, target_file_id, &imp.name, &mut visited) {
                         return Some(found);
                     }
                 }
 
                 // B. Try External Resolution
                 if let Some(candidates) = lookup.symbol_map.get(&imp.name) {
-                    for &cid in candidates {
-                        let s = &index.symbols[&cid];
-                        if s.is_external && s.external_source.as_deref() == Some(imp.source.as_str()) {
-                            return Some(cid);
+                    for &candidate_id in candidates {
+                        let symbol = &index.symbols[&candidate_id];
+                        if symbol.is_external && symbol.external_source.as_deref() == Some(imp.source.as_str()) {
+                            return Some(candidate_id);
                         }
                     }
                 }

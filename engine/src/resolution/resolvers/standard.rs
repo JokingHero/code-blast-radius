@@ -68,13 +68,13 @@ pub fn resolve_function_calls(
             // 1. Try Resolve Single Call
             let resolved_id = core::resolve_single_call(index, lookup, cache, caller_file_id, name);
 
-            if let Some(tid) = resolved_id {
-                add_edge(index, *caller_id, tid, EdgeKind::Calls);
+            if let Some(target_id) = resolved_id {
+                add_edge(index, *caller_id, target_id, EdgeKind::Calls);
             } else {
                 // 2. Fallback: Symbol Map Lookup
                 if let Some(candidates) = lookup.symbol_map.get(name) {
-                    for &cid in candidates {
-                        add_edge(index, *caller_id, cid, EdgeKind::Calls);
+                    for &candidate_id in candidates {
+                        add_edge(index, *caller_id, candidate_id, EdgeKind::Calls);
                     }
                 }
             }
@@ -101,8 +101,8 @@ pub fn resolve_type_references(
                 add_edge(index, *caller_id, target_id, EdgeKind::TypeReference);
             } else {
                 if let Some(candidates) = lookup.symbol_map.get(type_name) {
-                    for &cid in candidates {
-                        add_edge(index, *caller_id, cid, EdgeKind::TypeReference);
+                    for &candidate_id in candidates {
+                        add_edge(index, *caller_id, candidate_id, EdgeKind::TypeReference);
                     }
                 }
             }

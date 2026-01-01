@@ -43,12 +43,12 @@ pub fn generate_context_output(
 
     // 2. Group by File
     let mut file_map: HashMap<FileId, Vec<RawByteRange>> = HashMap::new();
-    for &sid in symbol_ids {
-        if let Some(sym) = index.symbols.get(&sid) {
-            if sym.is_external { continue; }
-            file_map.entry(sym.file_id).or_default().push(RawByteRange {
-                start: sym.range_start,
-                end: sym.range_end,
+    for &symbol_id in symbol_ids {
+        if let Some(symbol) = index.symbols.get(&symbol_id) {
+            if symbol.is_external { continue; }
+            file_map.entry(symbol.file_id).or_default().push(RawByteRange {
+                start: symbol.range_start,
+                end: symbol.range_end,
             });
         }
     }
@@ -56,8 +56,8 @@ pub fn generate_context_output(
     let mut output_files = Vec::new();
 
     // 3. Process Files
-    for (fid, mut ranges) in file_map {
-        let file_node = match index.files.values().find(|f| f.id == fid) {
+    for (file_id, mut ranges) in file_map {
+        let file_node = match index.files.values().find(|f| f.id == file_id) {
             Some(f) => f,
             None => continue,
         };
@@ -109,10 +109,10 @@ pub fn generate_context_output(
         };
 
         let mut final_line_ranges = Vec::new();
-        for r in merged_ranges {
+        for range in merged_ranges {
             final_line_ranges.push(LineRange {
-                start: byte_to_line(r.start),
-                end: byte_to_line(r.end)
+                start: byte_to_line(range.start),
+                end: byte_to_line(range.end)
             });
         }
 

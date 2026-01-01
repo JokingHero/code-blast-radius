@@ -251,9 +251,9 @@ impl FileScanner {
             // Handle Config Definitions (Lookup)
             let is_data = matches!(config.lang, crate::analysis::language::SupportedLanguage::Yaml | crate::analysis::language::SupportedLanguage::Json | crate::analysis::language::SupportedLanguage::Toml | crate::analysis::language::SupportedLanguage::Dotenv);
             if is_data {
-                for &sid in &file_symbol_ids {
-                    let name = &index.symbols[&sid].name;
-                    lookup.config_definitions.entry(name.clone()).or_default().push(sid);
+                for &symbol_id in &file_symbol_ids {
+                    let name = &index.symbols[&symbol_id].name;
+                    lookup.config_definitions.entry(name.clone()).or_default().push(symbol_id);
                 }
             }
 
@@ -300,8 +300,8 @@ impl FileScanner {
             // Handle Implementations (Staging)
             for (child, parent) in analysis.implementations {
                 if let Some(ids) = lookup.symbol_map.get(&child) {
-                    if let Some(&cid) = ids.iter().find(|&&id| index.symbols[&id].file_id == file_id) {
-                        staging.raw_implementations.entry(cid).or_default().push(parent);
+                    if let Some(&candidate_id) = ids.iter().find(|&&id| index.symbols[&id].file_id == file_id) {
+                        staging.raw_implementations.entry(candidate_id).or_default().push(parent);
                     }
                 }
             }
@@ -312,9 +312,9 @@ impl FileScanner {
                      lookup.implicit_routes.insert(route, *mid);
                  }
             }
-            for &sid in &file_symbol_ids {
-                 if let Some(sym) = index.symbols.get(&sid) {
-                     for r in &sym.routes { lookup.implicit_routes.insert(r.clone(), sid); }
+            for &symbol_id in &file_symbol_ids {
+                 if let Some(sym) = index.symbols.get(&symbol_id) {
+                     for r in &sym.routes { lookup.implicit_routes.insert(r.clone(), symbol_id); }
                  }
             }
         }
