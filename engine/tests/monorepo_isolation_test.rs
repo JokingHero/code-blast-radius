@@ -1,6 +1,5 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::models::StagingArea;
 use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
 use rfc_engine::query::traversal::find_related_symbols;
 use std::collections::HashSet;

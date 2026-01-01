@@ -1,11 +1,11 @@
 use std::collections::HashMap;
-use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
+use tree_sitter::{Node, QueryCursor, StreamingIterator};
 use crate::analysis::language::LanguageConfig;
 
 pub fn extract_local_constants(
     root_node: Node,
     source: &[u8],
-    language: &tree_sitter::Language,
+    _language: &tree_sitter::Language,
     config: &LanguageConfig
 ) -> HashMap<String, String> {
     let mut constants: HashMap<String, String> = HashMap::new();

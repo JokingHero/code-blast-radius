@@ -3,7 +3,7 @@
 //! with calls, types, and other metadata.
 
 use std::collections::HashMap;
-use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
+use tree_sitter::{Node, QueryCursor, StreamingIterator};
 use crate::analysis::language::LanguageConfig;
 use crate::models::{FunctionInfo, SymbolKind};
 
@@ -28,7 +28,7 @@ pub struct DefinitionsResult {
 pub fn extract_definitions(
     root_node: Node,
     source: &[u8],
-    language: &tree_sitter::Language,
+    _language: &tree_sitter::Language,
     config: &LanguageConfig,
     module_name: &str, 
 ) -> Result<DefinitionsResult, String> {

@@ -1,7 +1,7 @@
 //! Extracts file-level structural information like imports, exports, literals, etc.
 
 use std::collections::HashMap;
-use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
+use tree_sitter::{Node, QueryCursor, StreamingIterator};
 use crate::analysis::language::{LanguageConfig, SupportedLanguage};
 use crate::models::{ImportNode, ExportNode};
 
@@ -23,7 +23,7 @@ pub struct StructuralData {
 pub fn extract_structure(
     root_node: Node,
     source: &[u8],
-    language: &tree_sitter::Language,
+    _language: &tree_sitter::Language,
     config: &LanguageConfig,
     constants: &HashMap<String, String>
 ) -> StructuralData {

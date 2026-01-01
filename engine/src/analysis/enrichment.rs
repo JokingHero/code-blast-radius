@@ -2,7 +2,7 @@
 //! Refactored to separate concerns into distinct passes.
 
 use std::collections::HashMap;
-use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
+use tree_sitter::{Node, QueryCursor, StreamingIterator};
 use crate::analysis::language::LanguageConfig;
 use crate::models::{FunctionInfo, SymbolKind};
 use crate::analysis::definitions::VariableHint;
@@ -13,7 +13,6 @@ struct EnrichmentContext<'a> {
     module_info: &'a mut FunctionInfo,
     source: &'a [u8],
     root_node: Node<'a>,
-    language: &'a tree_sitter::Language,
     config: &'a LanguageConfig,
     constants: &'a HashMap<String, String>,
 }
@@ -64,7 +63,7 @@ pub fn enrich_functions(
     variable_hints: Vec<VariableHint>,
     root_node: Node,
     source: &[u8],
-    language: &tree_sitter::Language,
+    _language: &tree_sitter::Language,
     config: &LanguageConfig,
     constants: &HashMap<String, String>
 ) {
@@ -73,7 +72,6 @@ pub fn enrich_functions(
         module_info,
         source,
         root_node,
-        language,
         config,
         constants,
     };

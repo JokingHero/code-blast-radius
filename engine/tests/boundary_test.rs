@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::{models::StagingArea, resolution::{Indexer, pipeline::Pipeline}};
+use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
 
 use crate::common::get_calls;
 

@@ -1,10 +1,11 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process;
 use anyhow::{Context, Result};
 use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
 use rfc_engine::query::traversal::find_related_symbols;
 use rfc_engine::query::output::generate_context_output;
+use nucleo_matcher::{Matcher, Config, Utf32String};
 
 #[derive(Parser, Debug)]
 #[command(name = "cfb", version, about = "Context Management")]
@@ -12,14 +13,39 @@ struct Cli {
     #[arg(short, long)]
     path: PathBuf,
 
-    #[arg(short, long)]
-    function_name: Option<String>,
+    #[command(subcommand)]
+    command: Commands,
+}
 
-    #[arg(long)]
-    impact: Option<PathBuf>,
-    
-    #[arg(long, default_value_t = true)]
-    no_tests: bool,
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Generate context for a symbol
+    Context {
+        #[arg(short, long)]
+        function_name: String,
+
+        #[arg(long, default_value_t = true)]
+        no_tests: bool,
+
+        #[arg(long)]
+        impact: Option<PathBuf>,
+    },
+    /// Find symbols or files using fuzzy search
+    Find {
+        #[arg(short, long)]
+        query: String,
+
+        #[arg(short, long, default_value_t = 10)]
+        limit: usize,
+    },
+}
+
+#[derive(serde::Serialize)]
+struct MatchResult {
+    name: String,
+    kind: String,
+    path: String,
+    score: u16,
 }
 
 fn report_error(err: anyhow::Error) {
@@ -49,34 +75,74 @@ fn run() -> Result<()> {
     
     indexer.save(&index_path).context("Failed to save index")?;
 
-    // --- Context Generation ---
-    if let Some(func_name) = cli.function_name {
-        // Find Symbols: Pass components explicitly
-        let symbol_ids = find_related_symbols(
-            &indexer.index,
-            &indexer.lookup,
-            &indexer.reverse_graph,
-            &func_name
-        ).ok_or_else(|| anyhow::anyhow!("Symbol not found: {}", func_name))?;
-        
-        let mut symbol_ids = symbol_ids;
+    match cli.command {
+        Commands::Context { function_name, no_tests, impact: _ } => {
+            // Find Symbols: Pass components explicitly
+            let symbol_ids = find_related_symbols(
+                &indexer.index,
+                &indexer.lookup,
+                &indexer.reverse_graph,
+                &function_name
+            ).ok_or_else(|| anyhow::anyhow!("Symbol not found: {}", function_name))?;
+            
+            let mut symbol_ids = symbol_ids;
 
-        // Apply filtering here in main before generating output
-        if cli.no_tests {
-             symbol_ids.retain(|&id| {
-                if let Some(sym) = indexer.index.symbols.get(&id) {
-                    !sym.is_test
-                } else {
-                    true
-                }
-             });
+            // Apply filtering here in main before generating output
+            if no_tests {
+                 symbol_ids.retain(|&id| {
+                    if let Some(sym) = indexer.index.symbols.get(&id) {
+                        !sym.is_test
+                    } else {
+                        true
+                    }
+                 });
+            }
+
+            // Generate Output
+            let output = generate_context_output(&indexer.index, &symbol_ids);
+
+            // Print JSON
+            println!("{}", serde_json::to_string_pretty(&output).context("Failed to serialize output")?);
         }
+        Commands::Find { query, limit } => {
+            let mut matcher = Matcher::new(Config::DEFAULT);
+            let mut results = Vec::new();
+            let query_utf32 = Utf32String::from(query.as_str());
 
-        // Generate Output
-        let output = generate_context_output(&indexer.index, &symbol_ids);
+            // Symbols
+            for sym in indexer.index.symbols.values() {
+                if let Some(score) = matcher.fuzzy_match(Utf32String::from(sym.name.as_str()).slice(..), query_utf32.slice(..)) {
+                    let file_path = indexer.index.files.values()
+                        .find(|f| f.id == sym.file_id)
+                        .map(|f| f.path.as_str())
+                        .unwrap_or("unknown");
 
-        // Print JSON
-        println!("{}", serde_json::to_string_pretty(&output).context("Failed to serialize output")?);
+                    results.push(MatchResult {
+                        name: sym.name.clone(),
+                        kind: format!("{:?}", sym.kind),
+                        path: file_path.to_string(),
+                        score,
+                    });
+                }
+            }
+
+            // Files
+            for file in indexer.index.files.values() {
+                if let Some(score) = matcher.fuzzy_match(Utf32String::from(file.path.as_str()).slice(..), query_utf32.slice(..)) {
+                    results.push(MatchResult {
+                        name: file.path.clone(),
+                        kind: "File".to_string(),
+                        path: file.path.clone(),
+                        score,
+                    });
+                }
+            }
+
+            results.sort_by(|a, b| b.score.cmp(&a.score));
+            results.truncate(limit);
+
+            println!("{}", serde_json::to_string_pretty(&results).context("Failed to serialize search results")?);
+        }
     }
 
     Ok(())
