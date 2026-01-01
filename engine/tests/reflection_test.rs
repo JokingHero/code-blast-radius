@@ -34,7 +34,7 @@ def handle_request(action: str):
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let related = find_related_symbols(&indexer, "handle_request").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "handle_request").unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();

@@ -1,5 +1,5 @@
 use std::collections::{HashSet, VecDeque, HashMap};
-use crate::models::{Edge, EdgeKind, SymbolId, SymbolKind, WorkspaceIndex};
+use crate::models::{Edge, EdgeKind, SymbolId, SymbolKind, WorkspaceIndex, SymbolIndex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SliceDirection {
@@ -37,10 +37,7 @@ impl<'a> GraphWalker<'a> {
             // 1. Go Downstream (Source -> Target)
             if let Some(edges) = self.index.graph.get(&current) {
                 for edge in edges {
-                    // LOGIC CHECK: Sibling Pollution
-                    // If we are at a File (Module), we generally do NOT want to grab every 
-                    // single function in that file unless there is a specific call/reference.
-                    // We skip structural `Contains` edges going down from a Module.
+                    // Skip structural module containment to avoid polluting context with siblings
                     if is_module && edge.kind == EdgeKind::Contains {
                         continue;
                     }
@@ -53,7 +50,7 @@ impl<'a> GraphWalker<'a> {
             }
 
             // 2. Go Upstream (Target -> Source)
-            // SAFETY: Do not traverse upstream from External symbols (e.g. don't index all of React just because I use it)
+            // SAFETY: Do not traverse upstream from External symbols
             if !is_external {
                 if let Some(edges) = self.reverse_graph.get(&current) {
                     for edge in edges {
@@ -78,60 +75,21 @@ impl<'a> GraphWalker<'a> {
 
     fn should_follow_downstream(&self, kind: EdgeKind) -> bool {
         match kind {
-            // Logic & Flow
-            EdgeKind::Calls => true, 
-            EdgeKind::Dispatches => true, 
-            EdgeKind::Constructs => true,
+            EdgeKind::Calls | EdgeKind::Dispatches | EdgeKind::Constructs => true,
+            EdgeKind::TypeReference | EdgeKind::Inherits | EdgeKind::Implements => true,
+            EdgeKind::Contains | EdgeKind::Injects | EdgeKind::Configures | EdgeKind::Related => true,
             
-            // Type System
-            EdgeKind::TypeReference => true,
-            EdgeKind::Inherits => true,
-            EdgeKind::Implements => true, 
-            
-            // Structure & DI
-            EdgeKind::Contains => true, // (Filtered conditionally for Modules above)
-            EdgeKind::Injects => true,
-            EdgeKind::Configures => true, 
-            
-            // Meta
-            EdgeKind::Defines => false, // File -> Module (Keep 1:1)
-            EdgeKind::Imports => false, // Don't traverse file imports deeply downstream
-            EdgeKind::Handles => false, // Reducer handles Action (Usually upstream logic)
-            EdgeKind::Related => true,
+            EdgeKind::Defines | EdgeKind::Imports | EdgeKind::Handles => false,
         }
     }
 
     fn should_follow_upstream(&self, kind: EdgeKind) -> bool {
         match kind {
-            // "Who calls me?"
-            EdgeKind::Calls => true,     
-            EdgeKind::Constructs => true,
-
-            // "Who implements/inherits me?"
-            EdgeKind::Inherits => true,  
-            EdgeKind::Implements => true, 
+            EdgeKind::Calls | EdgeKind::Constructs => true,
+            EdgeKind::Inherits | EdgeKind::Implements | EdgeKind::TypeReference => true,
+            EdgeKind::Contains | EdgeKind::Injects | EdgeKind::Dispatches | EdgeKind::Handles | EdgeKind::Configures | EdgeKind::Related => true,
             
-            // "Who uses me as a type?"
-            EdgeKind::TypeReference => true,
-            
-            // "Who contains me?" (Module/Class)
-            EdgeKind::Contains => true,
-            
-            // "Who injects me?"
-            EdgeKind::Injects => true,
-
-            // "Who dispatches this action?" (If I am the handler)
-            // "Who handles this action?" (If I am the dispatcher - though usually handled by downstream)
-            EdgeKind::Dispatches => true, 
-            EdgeKind::Handles => true,   
-            
-            // Config
-            EdgeKind::Configures => true, 
-
-            // Explicitly ignored
-            EdgeKind::Defines => false,
-            EdgeKind::Imports => false, // Don't traverse upstream imports (Impact Analysis handles this separately)
-            EdgeKind::Related => true,
+            EdgeKind::Defines | EdgeKind::Imports => false,
         }
     }
 }
@@ -144,13 +102,19 @@ pub fn find_call_chain_ids(
     None 
 }
 
-pub fn find_related_symbols(indexer: &crate::resolution::Indexer, target_name: &str) -> Option<Vec<SymbolId>> {
-    let targets = indexer.lookup.symbol_map.get(target_name)?;
+/// Decoupled from Indexer: takes only the data structures needed.
+pub fn find_related_symbols(
+    index: &WorkspaceIndex,
+    lookup: &SymbolIndex,
+    reverse_graph: &HashMap<SymbolId, Vec<Edge>>,
+    target_name: &str
+) -> Option<Vec<SymbolId>> {
+    let targets = lookup.symbol_map.get(target_name)?;
     if targets.is_empty() {
         return None;
     }
 
-    let walker = GraphWalker::new(&indexer.index, &indexer.reverse_graph);
+    let walker = GraphWalker::new(index, reverse_graph);
     Some(walker.walk_deep(targets))
 }
 

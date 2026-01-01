@@ -158,7 +158,7 @@ fn test_scenario_monorepo_nest_angular_prisma() {
     // TEST A: Frontend Component -> Backend Controller
     // Start at the UI component. Can we see the Backend Controller in the context?
     // Path: AppComponent -> DataService -> (String Match "/users") -> UsersController
-    let ui_related = find_related_symbols(&indexer, "AppComponent").unwrap();
+    let ui_related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "AppComponent").unwrap();
     let ui_names: Vec<String> = ui_related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -169,7 +169,7 @@ fn test_scenario_monorepo_nest_angular_prisma() {
     // TEST B: Backend Controller -> Database
     // Start at the Controller. Can we see the Prisma Schema Model?
     // Path: UsersController -> UsersService -> (Prisma Fingerprint) -> User Model
-    let api_related = find_related_symbols(&indexer, "UsersController").unwrap();
+    let api_related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "UsersController").unwrap();
     let api_names: Vec<String> = api_related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();

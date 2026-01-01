@@ -67,7 +67,7 @@ fn test_redux_switch_case_linking() {
 
     // 4. Check Context Slice (End-to-End)
     // If I ask for "handleLogin", I should get "authReducer" in the result
-    let related = find_related_symbols(&indexer, "handleLogin").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "handleLogin").unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();

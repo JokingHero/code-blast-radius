@@ -38,7 +38,7 @@ fn test_python_getattr_proxy() {
     indexer.resolve_references();
 
     // 3. Verify Linkage
-    let related = find_related_symbols(&indexer, "run_workflow").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "run_workflow").unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
