@@ -65,7 +65,7 @@ fn test_python_flask_decorator() {
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let dashboard_id = indexer.index.lookup.symbol_map.get("dashboard").unwrap()[0];
+    let dashboard_id = indexer.lookup.symbol_map.get("dashboard").unwrap()[0];
     let sym = indexer.index.symbols.get(&dashboard_id).unwrap();
 
     // Check if decorators were extracted

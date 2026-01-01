@@ -145,7 +145,7 @@ pub fn find_call_chain_ids(
 }
 
 pub fn find_related_symbols(indexer: &crate::resolution::Indexer, target_name: &str) -> Option<Vec<SymbolId>> {
-    let targets = indexer.index.lookup.symbol_map.get(target_name)?;
+    let targets = indexer.lookup.symbol_map.get(target_name)?;
     if targets.is_empty() {
         return None;
     }

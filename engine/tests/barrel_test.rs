@@ -27,8 +27,8 @@ fn test_diamond_export_resolution() {
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let leaf_id = indexer.index.lookup.symbol_map.get("leafFunc").unwrap()[0];
-    let run_id = indexer.index.lookup.symbol_map.get("run").unwrap()[0];
+    let leaf_id = indexer.lookup.symbol_map.get("leafFunc").unwrap()[0];
+    let run_id = indexer.lookup.symbol_map.get("run").unwrap()[0];
 
     // Check resolutions
     let resolutions = get_calls(&indexer.index, run_id);
@@ -64,7 +64,7 @@ fn test_named_export_priority() {
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let run_id = indexer.index.lookup.symbol_map.get("run").unwrap()[0];
+    let run_id = indexer.lookup.symbol_map.get("run").unwrap()[0];
     
     // Find the correct target ID based on file path
     let correct_id = indexer.index.symbols.values()
@@ -101,7 +101,7 @@ fn test_deep_cycle_detection() {
     // This must not hang or stack overflow
     indexer.resolve_references();
 
-    let run_id = indexer.index.lookup.symbol_map.get("run").unwrap()[0];
+    let run_id = indexer.lookup.symbol_map.get("run").unwrap()[0];
     
     let resolutions = get_calls(&indexer.index, run_id);
     
@@ -132,7 +132,7 @@ fn test_mixed_barrel_and_local() {
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let run_id = indexer.index.lookup.symbol_map.get("run").unwrap()[0];
+    let run_id = indexer.lookup.symbol_map.get("run").unwrap()[0];
     
     let resolutions = get_calls(&indexer.index, run_id);
 

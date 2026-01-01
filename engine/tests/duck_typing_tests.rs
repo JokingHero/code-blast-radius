@@ -39,11 +39,11 @@ fn test_polymorphism_and_specificity() {
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let circle_id = indexer.index.lookup.symbol_map.get("Circle").unwrap()[0];
-    let square_id = indexer.index.lookup.symbol_map.get("Square").unwrap()[0];
+    let circle_id = indexer.lookup.symbol_map.get("Circle").unwrap()[0];
+    let square_id = indexer.lookup.symbol_map.get("Square").unwrap()[0];
     
     // --- Test Case 1: Ambiguity ---
-    let ambig_id = indexer.index.lookup.symbol_map.get("calculate").unwrap()[0];
+    let ambig_id = indexer.lookup.symbol_map.get("calculate").unwrap()[0];
     let ambig_res = get_type_refs(&indexer.index, ambig_id);
     
     assert!(ambig_res.contains(&circle_id), "Should include Circle");
@@ -51,7 +51,7 @@ fn test_polymorphism_and_specificity() {
 
     // --- Test Case 2: Specificity (Direct Edges) ---
     // This ensures inference worked correctly
-    let spec_id = indexer.index.lookup.symbol_map.get("calculateCircle").unwrap()[0];
+    let spec_id = indexer.lookup.symbol_map.get("calculateCircle").unwrap()[0];
     let spec_res = get_type_refs(&indexer.index, spec_id);
 
     assert!(spec_res.contains(&circle_id), "Should direct link to Circle");
@@ -91,8 +91,8 @@ fn test_shared_interface_duck_typing() {
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let run_id = indexer.index.lookup.symbol_map.get("run").unwrap()[0];
-    let interface_id = indexer.index.lookup.symbol_map.get("ILogger").unwrap()[0];
+    let run_id = indexer.lookup.symbol_map.get("run").unwrap()[0];
+    let interface_id = indexer.lookup.symbol_map.get("ILogger").unwrap()[0];
 
     // Check Type Reference
     let resolutions = get_type_refs(&indexer.index, run_id);

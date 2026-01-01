@@ -33,9 +33,9 @@ fn test_output_json_structure_and_merging() {
     indexer.scan(&workspace.path);
     
     // 3. Get Symbol IDs
-    let id_a = indexer.index.lookup.symbol_map.get("funcA").expect("funcA missing")[0];
-    let id_b = indexer.index.lookup.symbol_map.get("funcB").expect("funcB missing")[0];
-    let id_c = indexer.index.lookup.symbol_map.get("funcC").expect("funcC missing")[0];
+    let id_a = indexer.lookup.symbol_map.get("funcA").expect("funcA missing")[0];
+    let id_b = indexer.lookup.symbol_map.get("funcB").expect("funcB missing")[0];
+    let id_c = indexer.lookup.symbol_map.get("funcC").expect("funcC missing")[0];
 
     // 4. Generate Output passing all 3 IDs
     let ids = vec![id_a, id_b, id_c];
@@ -95,8 +95,8 @@ fn test_output_multi_file() {
     let mut indexer = Indexer::new();
     indexer.scan(&workspace.path);
     
-    let id_main = indexer.index.lookup.symbol_map.get("main").unwrap()[0];
-    let id_help = indexer.index.lookup.symbol_map.get("help").unwrap()[0];
+    let id_main = indexer.lookup.symbol_map.get("main").unwrap()[0];
+    let id_help = indexer.lookup.symbol_map.get("help").unwrap()[0];
 
     let output = generate_context_output(&indexer.index, &[id_main, id_help]);
 

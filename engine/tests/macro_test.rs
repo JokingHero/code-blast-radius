@@ -32,13 +32,13 @@ fn test_rust_macro_definitions() {
     indexer.resolve_references();
 
     // Assert macro definition found
-    assert!(indexer.index.lookup.symbol_map.contains_key("create_handler"));
+    assert!(indexer.lookup.symbol_map.contains_key("create_handler"));
 
     // Assert heuristic worked (LoginHandler found inside macro invocation)
-    assert!(indexer.index.lookup.symbol_map.contains_key("LoginHandler"));
+    assert!(indexer.lookup.symbol_map.contains_key("LoginHandler"));
 
     // Assert specific pattern worked (GLOBAL_CONFIG found)
-    assert!(indexer.index.lookup.symbol_map.contains_key("GLOBAL_CONFIG"));
+    assert!(indexer.lookup.symbol_map.contains_key("GLOBAL_CONFIG"));
 }
 
 #[test]
@@ -54,8 +54,8 @@ fn test_rust_macro_definitions_with_visibility() {
     indexer.scan(&workspace.path);
 
     // Assert 'MyStruct' is found
-    assert!(indexer.index.lookup.symbol_map.contains_key("MyStruct"), "Failed to extract MyStruct from 'pub MyStruct'");
+    assert!(indexer.lookup.symbol_map.contains_key("MyStruct"), "Failed to extract MyStruct from 'pub MyStruct'");
     
     // Assert 'pub' is NOT found as a symbol
-    assert!(!indexer.index.lookup.symbol_map.contains_key("pub"), "Incorrectly indexed 'pub' keyword as a function name");
+    assert!(!indexer.lookup.symbol_map.contains_key("pub"), "Incorrectly indexed 'pub' keyword as a function name");
 }

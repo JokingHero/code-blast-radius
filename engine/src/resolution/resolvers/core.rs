@@ -22,7 +22,7 @@ impl Indexer {
         let mut result = None;
         
         // 1. Check direct definition via lookup
-        if let Some(ids) = self.index.lookup.symbol_map.get(symbol_name) {
+        if let Some(ids) = self.lookup.symbol_map.get(symbol_name) {
             if let Some(&id) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == target_file_id) {
                 result = Some(id);
             }
@@ -30,7 +30,7 @@ impl Indexer {
 
         // 2. Check re-exports via lookup
         if result.is_none() {
-            if let Some(exports) = self.index.lookup.file_exports.get(&target_file_id).cloned() {
+            if let Some(exports) = self.lookup.file_exports.get(&target_file_id).cloned() {
                 // Named re-exports: export { Foo } from './bar'
                 for exp in exports.iter().filter(|e| e.name.as_deref() == Some(symbol_name)) {
                     if let Some(next_file_id) = self.resolve_import_path(target_file_id, &exp.source) {
@@ -57,7 +57,7 @@ impl Indexer {
     /// The core glue: resolves a symbol name in the context of a file
     pub(crate) fn resolve_single_call(&mut self, file_id: FileId, name: &str) -> Option<SymbolId> {
         // 1. Check imports explicitly via lookup
-        if let Some(imps) = self.index.lookup.file_imports.get(&file_id).cloned() {
+        if let Some(imps) = self.lookup.file_imports.get(&file_id).cloned() {
             for imp in imps {
                 if imp.alias.as_ref().unwrap_or(&imp.name) == name {
                     // A. Try Local Resolution
@@ -69,7 +69,7 @@ impl Indexer {
                     }
 
                     // B. Try External Resolution
-                    if let Some(candidates) = self.index.lookup.symbol_map.get(&imp.name) {
+                    if let Some(candidates) = self.lookup.symbol_map.get(&imp.name) {
                         for &cid in candidates {
                             let s = &self.index.symbols[&cid];
                             if s.is_external && s.external_source.as_deref() == Some(imp.source.as_str()) {
@@ -82,7 +82,7 @@ impl Indexer {
         }
 
         // 2. Check local file definitions via lookup
-        if let Some(ids) = self.index.lookup.symbol_map.get(name) {
+        if let Some(ids) = self.lookup.symbol_map.get(name) {
             if let Some(&id) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == file_id) {
                 return Some(id);
             }
@@ -109,7 +109,7 @@ impl Indexer {
         }
 
         // 3. Monorepo / Workspace Packages
-        for (pkg_name, pkg_root_str) in &self.index.lookup.package_path_map {
+        for (pkg_name, pkg_root_str) in &self.lookup.package_path_map {
             let is_exact = source == pkg_name;
             let is_subpath = source.starts_with(pkg_name) && source.as_bytes().get(pkg_name.len()) == Some(&b'/');
 
@@ -128,7 +128,7 @@ impl Indexer {
         }
 
         // 4. Aliases (tsconfig, etc)
-        for (alias_key, alias_target) in &self.index.lookup.import_mappings {
+        for (alias_key, alias_target) in &self.lookup.import_mappings {
             if source.starts_with(alias_key) {
                 let replaced = source.replace(alias_key, alias_target);
                 if let Some(id) = self.check_path_variants(Path::new(&replaced)) {
@@ -143,7 +143,7 @@ impl Indexer {
         }
 
         // 6. Fuzzy Suffix Match
-        if !self.index.lookup.external_packages.contains(&source.split('/').next().unwrap_or("").to_string()) {
+        if !self.lookup.external_packages.contains(&source.split('/').next().unwrap_or("").to_string()) {
             let matches: Vec<FileId> = self.index.files.values()
                 .filter(|f| {
                     let p = f.path.replace('\\', "/");

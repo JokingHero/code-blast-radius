@@ -55,7 +55,7 @@ fn test_inline_symbol_test_detection() {
     indexer.scan(&workspace.path);
 
     let get_sym = |name: &str| {
-        let id = indexer.index.lookup.symbol_map.get(name).unwrap()[0];
+        let id = indexer.lookup.symbol_map.get(name).unwrap()[0];
         indexer.index.symbols.get(&id).unwrap()
     };
 
@@ -65,7 +65,7 @@ fn test_inline_symbol_test_detection() {
 
     // JS assertions (Note: your parser config might name the 'it' block 'anonymous' or the inner text depending on grammar)
     // Assuming the name is captured as 'it' or the first arg
-    if let Some(ids) = indexer.index.lookup.symbol_map.get("it") {
+    if let Some(ids) = indexer.lookup.symbol_map.get("it") {
         let sym = indexer.index.symbols.get(&ids[0]).unwrap();
         assert!(sym.is_test, "JS it() blocks should trigger is_test flag");
     }

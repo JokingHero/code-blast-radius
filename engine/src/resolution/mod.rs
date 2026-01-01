@@ -12,6 +12,8 @@ use crate::models::{
     SymbolKind,
     SymbolNode,
     WorkspaceIndex,
+    StagingArea,
+    SymbolIndex
 };
 use crate::analysis::analyze_source;
 use crate::analysis::language::{ get_language_configs, LanguageConfig };
@@ -22,10 +24,12 @@ use ignore::WalkBuilder;
 use blake3;
 
 pub struct Indexer {
-    pub index: WorkspaceIndex,
+    pub index: WorkspaceIndex,   // Persistent Graph
+    pub staging: StagingArea,    // Transient Raw Data
+    pub lookup: SymbolIndex,     // Fast Lookups
+    
     configs: HashMap<String, &'static LanguageConfig>,
     resolution_cache: HashMap<(FileId, String), Option<SymbolId>>,
-    // Runtime-only Reverse Graph (Target -> [Sources])
     pub reverse_graph: HashMap<SymbolId, Vec<Edge>>,
 }
 
@@ -39,6 +43,8 @@ impl Indexer {
         }
         Self {
             index: WorkspaceIndex::default(),
+            staging: StagingArea::default(),
+            lookup: SymbolIndex::default(),
             configs: config_map,
             resolution_cache: HashMap::new(),
             reverse_graph: HashMap::new(),
@@ -66,7 +72,6 @@ impl Indexer {
         }
     }
 
-    /// Rebuilds structural edges (Contains) based on symbol parent_id field.
     fn resolve_structure(&mut self) {
         let mut edges_to_add = Vec::new();
         for sym in self.index.symbols.values() {
@@ -84,7 +89,7 @@ impl Indexer {
         self.index.file_dependencies.clear();
         self.resolution_cache.clear();
 
-        // 0. Restore Structure (FIX)
+        // 0. Restore Structure
         self.resolve_structure();
 
         // 1. Core imports and basic structure
@@ -135,14 +140,16 @@ impl Indexer {
                     if !entry.path().is_file() { continue; }
                     let path = entry.path();
                     let manifest_res = scan_manifests(path);
+                    
+                    // ACCESS UPDATE: self.lookup
                     if let Some(pkg_name) = manifest_res.package_name {
                         if let Some(parent_dir) = path.parent() {
                             let dir_key = utils::to_index_path(parent_dir);
-                            self.index.lookup.package_path_map.insert(pkg_name, dir_key);
+                            self.lookup.package_path_map.insert(pkg_name, dir_key);
                         }
                     }
-                    if !manifest_res.externals.is_empty() { self.index.lookup.external_packages.extend(manifest_res.externals); }
-                    if !manifest_res.aliases.is_empty() { self.index.lookup.import_mappings.extend(manifest_res.aliases); }
+                    if !manifest_res.externals.is_empty() { self.lookup.external_packages.extend(manifest_res.externals); }
+                    if !manifest_res.aliases.is_empty() { self.lookup.import_mappings.extend(manifest_res.aliases); }
 
                     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
                     let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
@@ -186,7 +193,9 @@ impl Indexer {
         if let Some(node) = self.index.files.remove(path_key) {
             self.clear_file_symbols(node.id);
             self.index.file_dependencies.remove(&node.id);
-            self.index.lookup.implicit_routes.retain(|_, sym_id| {
+            
+            // ACCESS UPDATE: self.lookup
+            self.lookup.implicit_routes.retain(|_, sym_id| {
                 self.index.symbols.get(sym_id).map_or(false, |s| s.file_id != node.id)
             });
         }
@@ -198,31 +207,38 @@ impl Indexer {
 
         for &sym_id in &ids_to_remove {
             if let Some(sym) = self.index.symbols.remove(&sym_id) {
-                if let Some(id_list) = self.index.lookup.symbol_map.get_mut(&sym.name) {
+                // ACCESS UPDATE: self.lookup
+                if let Some(id_list) = self.lookup.symbol_map.get_mut(&sym.name) {
                     id_list.retain(|&id| id != sym_id);
-                    if id_list.is_empty() { self.index.lookup.symbol_map.remove(&sym.name); }
+                    if id_list.is_empty() { self.lookup.symbol_map.remove(&sym.name); }
                 }
             }
-            self.index.staging.raw_calls.remove(&sym_id);
-            self.index.staging.raw_implementations.remove(&sym_id);
+            
+            // ACCESS UPDATE: self.staging and self.index.graph
             self.index.graph.remove(&sym_id);
-            self.index.staging.fingerprints.remove(&sym_id);
-            self.index.staging.container_methods.remove(&sym_id);
-            self.index.staging.local_variable_types.remove(&sym_id);
-            self.index.staging.symbol_config_refs.remove(&sym_id);
-            self.index.staging.raw_type_refs.remove(&sym_id);
-            self.index.staging.raw_decorators.remove(&sym_id);
-            self.index.staging.raw_action_dispatches.remove(&sym_id);
-            self.index.staging.raw_action_handlers.remove(&sym_id);
+            
+            self.staging.raw_calls.remove(&sym_id);
+            self.staging.raw_implementations.remove(&sym_id);
+            self.staging.fingerprints.remove(&sym_id);
+            self.staging.container_methods.remove(&sym_id);
+            self.staging.local_variable_types.remove(&sym_id);
+            self.staging.symbol_config_refs.remove(&sym_id);
+            self.staging.raw_type_refs.remove(&sym_id);
+            self.staging.raw_decorators.remove(&sym_id);
+            self.staging.raw_action_dispatches.remove(&sym_id);
+            self.staging.raw_action_handlers.remove(&sym_id);
         }
 
-        for def_list in self.index.lookup.config_definitions.values_mut() {
+        // ACCESS UPDATE: self.lookup
+        for def_list in self.lookup.config_definitions.values_mut() {
             def_list.retain(|id| !ids_to_remove.contains(id));
         }
-        self.index.lookup.config_definitions.retain(|_, v| !v.is_empty());
-        self.index.lookup.file_imports.remove(&file_id);
-        self.index.lookup.file_exports.remove(&file_id);
-        self.index.staging.raw_literals.remove(&file_id);
+        self.lookup.config_definitions.retain(|_, v| !v.is_empty());
+        self.lookup.file_imports.remove(&file_id);
+        self.lookup.file_exports.remove(&file_id);
+        
+        // ACCESS UPDATE: self.staging
+        self.staging.raw_literals.remove(&file_id);
     }
 
     fn update_file(&mut self, path_key: &str, path_obj: &Path, content: &str, hash: [u8; 32], config: &LanguageConfig, is_path_test: bool) {
@@ -237,10 +253,11 @@ impl Indexer {
         });
 
         if let Ok(analysis) = analyze_source(path_obj, content, config) {
-            if !analysis.imports.is_empty() { self.index.lookup.file_imports.insert(file_id, analysis.imports); }
-            if !analysis.exports.is_empty() { self.index.lookup.file_exports.insert(file_id, analysis.exports); }
-            if !analysis.literals.is_empty() { self.index.staging.raw_literals.insert(file_id, analysis.literals); }
-            if !analysis.middleware_usage.is_empty() { self.index.staging.raw_middleware_usage.insert(file_id, analysis.middleware_usage); }
+            // ACCESS UPDATE: self.lookup & self.staging
+            if !analysis.imports.is_empty() { self.lookup.file_imports.insert(file_id, analysis.imports); }
+            if !analysis.exports.is_empty() { self.lookup.file_exports.insert(file_id, analysis.exports); }
+            if !analysis.literals.is_empty() { self.staging.raw_literals.insert(file_id, analysis.literals); }
+            if !analysis.middleware_usage.is_empty() { self.staging.raw_middleware_usage.insert(file_id, analysis.middleware_usage); }
 
             let mut file_symbol_ids = Vec::new();
             for func in analysis.functions {
@@ -262,23 +279,26 @@ impl Indexer {
                 });
                 
                 file_symbol_ids.push(symbol_id);
-                if func.name != "anonymous" { self.index.lookup.symbol_map.entry(func.name.clone()).or_default().push(symbol_id); }
+                // ACCESS UPDATE: self.lookup
+                if func.name != "anonymous" { self.lookup.symbol_map.entry(func.name.clone()).or_default().push(symbol_id); }
                 
-                if !func.config_keys.is_empty() { self.index.staging.symbol_config_refs.insert(symbol_id, func.config_keys); }
-                if !func.calls.is_empty() { self.index.staging.raw_calls.insert(symbol_id, func.calls); }
-                if !func.fingerprints.is_empty() { self.index.staging.fingerprints.insert(symbol_id, func.fingerprints); }
-                if !func.local_types.is_empty() { self.index.staging.local_variable_types.insert(symbol_id, func.local_types); }
-                if !func.type_refs.is_empty() { self.index.staging.raw_type_refs.insert(symbol_id, func.type_refs); }
-                if !func.decorators.is_empty() { self.index.staging.raw_decorators.insert(symbol_id, func.decorators); }
-                if !func.dispatched_actions.is_empty() { self.index.staging.raw_action_dispatches.insert(symbol_id, func.dispatched_actions); }
-                if !func.handled_actions.is_empty() { self.index.staging.raw_action_handlers.insert(symbol_id, func.handled_actions); }
+                // ACCESS UPDATE: self.staging
+                if !func.config_keys.is_empty() { self.staging.symbol_config_refs.insert(symbol_id, func.config_keys); }
+                if !func.calls.is_empty() { self.staging.raw_calls.insert(symbol_id, func.calls); }
+                if !func.fingerprints.is_empty() { self.staging.fingerprints.insert(symbol_id, func.fingerprints); }
+                if !func.local_types.is_empty() { self.staging.local_variable_types.insert(symbol_id, func.local_types); }
+                if !func.type_refs.is_empty() { self.staging.raw_type_refs.insert(symbol_id, func.type_refs); }
+                if !func.decorators.is_empty() { self.staging.raw_decorators.insert(symbol_id, func.decorators); }
+                if !func.dispatched_actions.is_empty() { self.staging.raw_action_dispatches.insert(symbol_id, func.dispatched_actions); }
+                if !func.handled_actions.is_empty() { self.staging.raw_action_handlers.insert(symbol_id, func.handled_actions); }
             }
 
             let is_data = matches!(config.lang_enum, crate::analysis::language::SupportedLanguage::Yaml | crate::analysis::language::SupportedLanguage::Json | crate::analysis::language::SupportedLanguage::Toml | crate::analysis::language::SupportedLanguage::Dotenv);
             if is_data {
                 for &sid in &file_symbol_ids {
                     let name = &self.index.symbols[&sid].name;
-                    self.index.lookup.config_definitions.entry(name.clone()).or_default().push(sid);
+                    // ACCESS UPDATE: self.lookup
+                    self.lookup.config_definitions.entry(name.clone()).or_default().push(sid);
                 }
             }
 
@@ -303,7 +323,8 @@ impl Indexer {
                         }
                     }
                 }
-                if !members.is_empty() { self.index.staging.container_methods.insert(c_id, members); }
+                // ACCESS UPDATE: self.staging
+                if !members.is_empty() { self.staging.container_methods.insert(c_id, members); }
             }
             
             let module_id = file_symbol_ids.iter().find(|&&id| self.index.symbols[&id].kind == SymbolKind::Module).cloned();
@@ -321,21 +342,24 @@ impl Indexer {
             }
 
             for (child, parent) in analysis.implementations {
-                if let Some(ids) = self.index.lookup.symbol_map.get(&child) {
+                // ACCESS UPDATE: self.lookup & self.staging
+                if let Some(ids) = self.lookup.symbol_map.get(&child) {
                     if let Some(&cid) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == file_id) {
-                        self.index.staging.raw_implementations.entry(cid).or_default().push(parent);
+                        self.staging.raw_implementations.entry(cid).or_default().push(parent);
                     }
                 }
             }
 
             if let Some(route) = utils::detect_framework_route(path_obj) {
                  if let Some(mid) = file_symbol_ids.iter().find(|&&id| self.index.symbols[&id].kind == SymbolKind::Module) {
-                     self.index.lookup.implicit_routes.insert(route, *mid);
+                     // ACCESS UPDATE: self.lookup
+                     self.lookup.implicit_routes.insert(route, *mid);
                  }
             }
             for &sid in &file_symbol_ids {
                  if let Some(sym) = self.index.symbols.get(&sid) {
-                     for r in &sym.routes { self.index.lookup.implicit_routes.insert(r.clone(), sid); }
+                     // ACCESS UPDATE: self.lookup
+                     for r in &sym.routes { self.lookup.implicit_routes.insert(r.clone(), sid); }
                  }
             }
         }

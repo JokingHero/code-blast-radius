@@ -28,8 +28,8 @@ fn test_name_collision() {
 
     assert!(indexer.index.symbols.len() > 3, "Graph should contain more than 3 unique nodes");
 
-    assert!(indexer.index.lookup.symbol_map.contains_key("duplicate_func"), "Should have indexed 'duplicate_func'");
-    assert!(indexer.index.lookup.symbol_map.contains_key("main"), "Should have indexed 'main'");
+    assert!(indexer.lookup.symbol_map.contains_key("duplicate_func"), "Should have indexed 'duplicate_func'");
+    assert!(indexer.lookup.symbol_map.contains_key("main"), "Should have indexed 'main'");
 
     let ids_option = find_related_symbols(&indexer, "duplicate_func");
     

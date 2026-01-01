@@ -34,10 +34,10 @@ fn test_external_stub_generation() {
     indexer.resolve_references();
 
     // 4. Verify External Package Detection
-    assert!(indexer.index.lookup.external_packages.contains("axios"), "Should detect axios in package.json");
+    assert!(indexer.lookup.external_packages.contains("axios"), "Should detect axios in package.json");
 
     // 5. Verify Call Resolution
-    let fetch_id = indexer.index.lookup.symbol_map.get("fetchData").unwrap()[0];
+    let fetch_id = indexer.lookup.symbol_map.get("fetchData").unwrap()[0];
     let resolved = get_calls(&indexer.index, fetch_id);
 
     // Get the ID of the 'get' it resolved to

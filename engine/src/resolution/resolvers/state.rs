@@ -8,7 +8,7 @@ impl Indexer {
     pub(crate) fn resolve_state_management(&mut self) {
         let mut action_map: HashMap<String, Vec<SymbolId>> = HashMap::new();
         // Uses staging.raw_action_handlers
-        for (handler_id, actions) in &self.index.staging.raw_action_handlers {
+        for (handler_id, actions) in &self.staging.raw_action_handlers {
             for action in actions {
                 action_map.entry(action.clone()).or_default().push(*handler_id);
             }
@@ -16,7 +16,7 @@ impl Indexer {
 
         let mut new_links = Vec::new();
         // Uses staging.raw_action_dispatches
-        for (dispatch_id, actions) in &self.index.staging.raw_action_dispatches {
+        for (dispatch_id, actions) in &self.staging.raw_action_dispatches {
             for action in actions {
                 if let Some(handler_ids) = action_map.get(action) {
                     for &target_id in handler_ids {
@@ -40,7 +40,7 @@ impl Indexer {
             .map(|(_, node)| node.id).collect();
 
         // Uses staging.raw_literals
-        let literals_snapshot: Vec<(FileId, Vec<String>)> = self.index.staging.raw_literals.iter().map(|(k, v)| (*k, v.clone())).collect();
+        let literals_snapshot: Vec<(FileId, Vec<String>)> = self.staging.raw_literals.iter().map(|(k, v)| (*k, v.clone())).collect();
 
         for (file_id, literals) in literals_snapshot {
             if config_file_ids.contains(&file_id) { continue; }
@@ -71,17 +71,17 @@ impl Indexer {
     pub(crate) fn resolve_magic_proxies(&mut self) {
         let mut new_links = Vec::new();
         // Uses staging.fingerprints
-        let fingerprints_snapshot: Vec<(SymbolId, HashMap<String, Vec<String>>)> = self.index.staging.fingerprints.iter().map(|(k, v)| (*k, v.clone())).collect();
+        let fingerprints_snapshot: Vec<(SymbolId, HashMap<String, Vec<String>>)> = self.staging.fingerprints.iter().map(|(k, v)| (*k, v.clone())).collect();
 
         for (caller_id, receiver_map) in fingerprints_snapshot {
             for (receiver_var, methods) in receiver_map {
                 let mut type_class_id = None;
                 let mut curr_scope = Some(caller_id);
                 while let Some(sid) = curr_scope {
-                    if let Some(vars) = self.index.staging.local_variable_types.get(&sid) {
+                    if let Some(vars) = self.staging.local_variable_types.get(&sid) {
                         if let Some(type_name) = vars.get(&receiver_var) {
                              let clean = type_name.split('<').next().unwrap().trim();
-                             if let Some(ids) = self.index.lookup.symbol_map.get(clean) {
+                             if let Some(ids) = self.lookup.symbol_map.get(clean) {
                                  type_class_id = ids.iter().find(|&&id| {
                                      let s = &self.index.symbols[&id];
                                      s.kind == SymbolKind::Container
@@ -100,15 +100,15 @@ impl Indexer {
                      
                      if let Some(config) = self.configs.get(ext) {
                         if !config.magic_methods.is_empty() {
-                            let has_explicit = if let Some(explicit_methods) = self.index.staging.container_methods.get(&class_id) {
+                            let has_explicit = if let Some(explicit_methods) = self.staging.container_methods.get(&class_id) {
                                 methods.iter().any(|m| explicit_methods.contains(m))
                             } else { false };
 
                             if !has_explicit {
-                                if let Some(class_members) = self.index.staging.container_methods.get(&class_id) {
+                                if let Some(class_members) = self.staging.container_methods.get(&class_id) {
                                     for &magic_name in config.magic_methods {
                                         if class_members.contains(magic_name) {
-                                            if let Some(candidates) = self.index.lookup.symbol_map.get(magic_name) {
+                                            if let Some(candidates) = self.lookup.symbol_map.get(magic_name) {
                                                 for &magic_id in candidates {
                                                     if self.index.symbols[&magic_id].parent_id == Some(class_id) {
                                                         new_links.push((caller_id, magic_id));
@@ -131,14 +131,14 @@ impl Indexer {
 
     pub(crate) fn resolve_decorators(&mut self) {
         // Uses staging.raw_decorators
-        let entries: Vec<_> = self.index.staging.raw_decorators.iter().map(|(k, v)| (*k, v.clone())).collect();
+        let entries: Vec<_> = self.staging.raw_decorators.iter().map(|(k, v)| (*k, v.clone())).collect();
         for (caller_id, dec_names) in entries {
             let caller_file_id = self.index.symbols[&caller_id].file_id;
             for dec_name in dec_names {
                 let clean = dec_name.split('(').next().unwrap_or(&dec_name).trim();
                 if let Some(target_id) = self.resolve_single_call(caller_file_id, clean) {
                     self.add_edge(caller_id, target_id, EdgeKind::Calls); 
-                } else if let Some(candidates) = self.index.lookup.symbol_map.get(clean) {
+                } else if let Some(candidates) = self.lookup.symbol_map.get(clean) {
                     let guesses = candidates.clone();
                     for g in guesses { self.add_edge(caller_id, g, EdgeKind::Calls); }
                 }

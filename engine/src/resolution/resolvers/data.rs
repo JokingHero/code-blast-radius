@@ -17,8 +17,8 @@ impl Indexer {
         let mut new_links = Vec::new();
 
         // 2. Resolve via Literals
-        // Snapshot: Collect data to avoid holding borrow on self.index.staging.raw_literals
-        let literals_snapshot: Vec<(FileId, Vec<String>)> = self.index.staging.raw_literals
+        // Snapshot: Collect data to avoid holding borrow on self.staging.raw_literals
+        let literals_snapshot: Vec<(FileId, Vec<String>)> = self.staging.raw_literals
             .iter()
             .map(|(k, v)| (*k, v.clone()))
             .collect();
@@ -46,7 +46,7 @@ impl Indexer {
 
         // 3. Resolve via Fingerprints
         // We iterate fingerprints from staging
-        for (func_id, prints) in &self.index.staging.fingerprints {
+        for (func_id, prints) in &self.staging.fingerprints {
             for (receiver, _) in prints {
                 for (table_name, &table_sym_id) in &schema_map {
                     let receiver_lower = receiver.to_lowercase();
@@ -72,9 +72,9 @@ impl Indexer {
     pub(crate) fn resolve_config_links(&mut self) {
         let mut new_links = Vec::new();
         // Collect edges to add from staging
-        for (&sym_id, used_keys) in &self.index.staging.symbol_config_refs {
+        for (&sym_id, used_keys) in &self.staging.symbol_config_refs {
             for key in used_keys {
-                if let Some(def_ids) = self.index.lookup.config_definitions.get(key) {
+                if let Some(def_ids) = self.lookup.config_definitions.get(key) {
                     for &target_sid in def_ids {
                         new_links.push((sym_id, target_sid));
                     }
@@ -95,14 +95,14 @@ impl Indexer {
             }
         }
 
-        let fids: Vec<FileId> = self.index.lookup.file_imports.keys().cloned().collect();
+        let fids: Vec<FileId> = self.lookup.file_imports.keys().cloned().collect();
 
         for fid in fids {
             let mut deps = HashSet::new();
             let src_module_id = file_to_module_sym.get(&fid).cloned();
 
             // FIX: Clone imports to end borrow on self.index.lookup
-            let imports = self.index.lookup.file_imports.get(&fid).cloned().unwrap_or_default();
+            let imports = self.lookup.file_imports.get(&fid).cloned().unwrap_or_default();
 
             for imp in imports {
                 // Now we can call resolve_import_path (immut) and add_edge (mut)
@@ -131,7 +131,7 @@ impl Indexer {
             .map(|s| (s.file_id, s.name.clone()))
             .collect();
 
-        let file_ids: Vec<FileId> = self.index.lookup.file_imports.keys().cloned().collect();
+        let file_ids: Vec<FileId> = self.lookup.file_imports.keys().cloned().collect();
 
         for fid in file_ids {
             let mod_sym_id = self.index.symbols
@@ -141,14 +141,14 @@ impl Indexer {
 
             if let Some(scope_id) = mod_sym_id {
                 // FIX: Clone imports to avoid borrow conflict
-                let imports = self.index.lookup.file_imports.get(&fid).cloned().unwrap_or_default();
+                let imports = self.lookup.file_imports.get(&fid).cloned().unwrap_or_default();
 
                 for imp in imports {
                     if imp.name == "*" {
                         if let Some(alias) = &imp.alias {
                             if let Some(target_fid) = self.resolve_import_path(fid, &imp.source) {
                                 if let Some(target_mod_name) = file_mod_map.get(&target_fid) {
-                                    self.index.staging.local_variable_types
+                                    self.staging.local_variable_types
                                         .entry(scope_id)
                                         .or_default()
                                         .insert(alias.clone(), target_mod_name.clone());
@@ -173,7 +173,7 @@ impl Indexer {
             .collect();
 
         // FIX: Snapshot staging.raw_literals to break borrow
-        let literals_snapshot: Vec<(FileId, Vec<String>)> = self.index.staging.raw_literals
+        let literals_snapshot: Vec<(FileId, Vec<String>)> = self.staging.raw_literals
             .iter()
             .map(|(k, v)| (*k, v.clone()))
             .collect();
@@ -219,7 +219,7 @@ impl Indexer {
             .collect();
 
         // FIX: Snapshot staging.raw_literals
-        let literals_snapshot: Vec<(FileId, Vec<String>)> = self.index.staging.raw_literals
+        let literals_snapshot: Vec<(FileId, Vec<String>)> = self.staging.raw_literals
             .iter()
             .map(|(k, v)| (*k, v.clone()))
             .collect();
@@ -273,7 +273,7 @@ impl Indexer {
         let mut env_var_definitions: HashMap<String, Vec<FileId>> = HashMap::new();
 
         // FIX: Snapshot staging.raw_literals
-        let literals_snapshot: Vec<(FileId, Vec<String>)> = self.index.staging.raw_literals
+        let literals_snapshot: Vec<(FileId, Vec<String>)> = self.staging.raw_literals
             .iter()
             .map(|(k, v)| (*k, v.clone()))
             .collect();
@@ -297,7 +297,7 @@ impl Indexer {
         }
 
         // Snapshot staging.symbol_config_refs to iterate safely
-        let config_refs_snapshot: Vec<(SymbolId, Vec<String>)> = self.index.staging.symbol_config_refs
+        let config_refs_snapshot: Vec<(SymbolId, Vec<String>)> = self.staging.symbol_config_refs
             .iter()
             .map(|(k, v)| (*k, v.clone()))
             .collect();
@@ -323,7 +323,7 @@ impl Indexer {
         // Snapshot lookup.file_imports
         let imports_snapshot: Vec<
             (FileId, Vec<crate::models::ImportNode>)
-        > = self.index.lookup.file_imports
+        > = self.lookup.file_imports
             .iter()
             .map(|(k, v)| (*k, v.clone()))
             .collect();

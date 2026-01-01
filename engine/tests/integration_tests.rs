@@ -5,7 +5,7 @@ use rfc_engine::query::traversal::find_related_symbols;
 
 // Helper to find ID by name
 fn has_func(index: &rfc_engine::models::WorkspaceIndex, name: &str) -> bool {
-    index.lookup.symbol_map.contains_key(name)
+    index.symbols.values().any(|s| s.name == name)
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn test_rust_docs_extraction() {
     let mut indexer = Indexer::new();
     indexer.scan(&workspace.path);
 
-    let id = indexer.index.lookup.symbol_map.get("my_rust_func").unwrap()[0];
+    let id = indexer.lookup.symbol_map.get("my_rust_func").unwrap()[0];
     let sym = indexer.index.symbols.get(&id).unwrap();
     let docs = sym.doc_comment.as_ref().unwrap();
     

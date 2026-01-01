@@ -43,20 +43,20 @@ fn test_redux_switch_case_linking() {
     // --- Assertions ---
 
     // 1. Check if symbols exist
-    let reducer_ids = indexer.index.lookup.symbol_map.get("authReducer").expect("Reducer symbol not found");
+    let reducer_ids = indexer.lookup.symbol_map.get("authReducer").expect("Reducer symbol not found");
     let handler_id = reducer_ids[0];
 
-    let component_ids = indexer.index.lookup.symbol_map.get("handleLogin").expect("Component symbol not found");
+    let component_ids = indexer.lookup.symbol_map.get("handleLogin").expect("Component symbol not found");
     let caller_id = component_ids[0];
 
     // 2. Check Extraction (White-box testing the index)
     // The handler should have recorded the action string
-    let handled = indexer.index.staging.raw_action_handlers.get(&handler_id).expect("Reducer should capture handled actions");
+    let handled = indexer.staging.raw_action_handlers.get(&handler_id).expect("Reducer should capture handled actions");
     assert!(handled.contains(&"AUTH/LOGIN_SUCCESS".to_string()));
     assert!(handled.contains(&"AUTH/LOGOUT".to_string()));
 
     // The dispatcher should have recorded the action string
-    let dispatched = indexer.index.staging.raw_action_dispatches.get(&caller_id).expect("Component should capture dispatched actions");
+    let dispatched = indexer.staging.raw_action_dispatches.get(&caller_id).expect("Component should capture dispatched actions");
     assert!(dispatched.contains(&"AUTH/LOGIN_SUCCESS".to_string()));
 
     // 3. Check Resolution (The Linkage)
@@ -109,7 +109,7 @@ fn test_redux_object_map_linking() {
     indexer.scan(&workspace.path);
     indexer.resolve_references();
 
-    let saga_id = indexer.index.lookup.symbol_map.get("createTodoSaga").unwrap()[0];
+    let saga_id = indexer.lookup.symbol_map.get("createTodoSaga").unwrap()[0];
 
     // --- NEW LOGIC START ---
     

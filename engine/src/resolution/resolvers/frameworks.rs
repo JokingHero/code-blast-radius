@@ -7,16 +7,16 @@ use crate::models::{ FileId, SymbolId, SymbolKind, EdgeKind };
 impl Indexer {
     pub(crate) fn resolve_implicit_routes(&mut self) {
         let mut new_links = Vec::new();
-        let route_definitions: Vec<(String, SymbolId)> = self.index.lookup.implicit_routes
+        let route_definitions: Vec<(String, SymbolId)> = self.lookup.implicit_routes
             .iter()
             .map(|(r, s)| (r.clone(), *s))
             .collect();
         // Uses staging.raw_literals
-        for (src_file_id, literals) in &self.index.staging.raw_literals {
+        for (src_file_id, literals) in &self.staging.raw_literals {
             for lit in literals {
                 let clean_lit = lit.trim_matches(|c| c == '"' || c == '\'' || c == '`');
 
-                if let Some(&target_sym_id) = self.index.lookup.implicit_routes.get(clean_lit) {
+                if let Some(&target_sym_id) = self.lookup.implicit_routes.get(clean_lit) {
                     if self.index.symbols[&target_sym_id].file_id != *src_file_id {
                         new_links.push((*src_file_id, target_sym_id));
                     }
@@ -116,7 +116,7 @@ impl Indexer {
         let mut new_links = Vec::new();
         let mut injection_points = Vec::new();
         // Uses staging.local_variable_types
-        for (scope_id, var_types) in &self.index.staging.local_variable_types {
+        for (scope_id, var_types) in &self.staging.local_variable_types {
             if let Some(scope_sym) = self.index.symbols.get(scope_id) {
                 let link_source_id = if
                     scope_sym.name == "constructor" ||
@@ -168,7 +168,7 @@ impl Indexer {
     pub(crate) fn resolve_middleware_injection(&mut self) {
         let mut new_links = Vec::new();
         // Uses staging.raw_middleware_usage
-        let usage_snapshot: Vec<(FileId, Vec<String>)> = self.index.staging.raw_middleware_usage
+        let usage_snapshot: Vec<(FileId, Vec<String>)> = self.staging.raw_middleware_usage
             .iter()
             .map(|(k, v)| (*k, v.clone()))
             .collect();
@@ -184,7 +184,7 @@ impl Indexer {
                 continue;
             }
 
-            let imports = self.index.lookup.file_imports.get(&hub_file_id).cloned().unwrap_or_default();
+            let imports = self.lookup.file_imports.get(&hub_file_id).cloned().unwrap_or_default();
             for imp in imports {
                 if let Some(imported_file_id) = self.resolve_import_path(hub_file_id, &imp.source) {
                     if
