@@ -24,12 +24,16 @@ use ignore::WalkBuilder;
 use blake3;
 
 pub struct Indexer {
-    pub index: WorkspaceIndex,   // Persistent Graph
-    pub staging: StagingArea,    // Transient Raw Data
-    pub lookup: SymbolIndex,     // Fast Lookups
+    // The Knowledge Graph (Persisted)
+    pub index: WorkspaceIndex,
+    // The Raw Data (Transient)
+    pub staging: StagingArea,
+    // The Lookups (Rebuildable)
+    pub lookup: SymbolIndex,
     
     configs: HashMap<String, &'static LanguageConfig>,
     resolution_cache: HashMap<(FileId, String), Option<SymbolId>>,
+    // Runtime-only Reverse Graph (Target -> [Sources])
     pub reverse_graph: HashMap<SymbolId, Vec<Edge>>,
 }
 
@@ -51,6 +55,7 @@ impl Indexer {
         }
     }
 
+    /// Helper to add an edge to the graph (used during Scan phase)
     pub fn add_edge(&mut self, source: SymbolId, target: SymbolId, kind: EdgeKind) {
         if source == target { return; }
         let edges = self.index.graph.entry(source).or_default();
@@ -72,6 +77,7 @@ impl Indexer {
         }
     }
 
+    /// Rebuilds structural edges (Contains) based on symbol parent_id field.
     fn resolve_structure(&mut self) {
         let mut edges_to_add = Vec::new();
         for sym in self.index.symbols.values() {
@@ -84,6 +90,8 @@ impl Indexer {
         }
     }
 
+    /// The main resolution pipeline.
+    /// Uses split borrowing to avoid cloning raw data.
     pub fn resolve_references(&mut self) {
         self.index.graph.clear();
         self.index.file_dependencies.clear();
@@ -93,32 +101,32 @@ impl Indexer {
         self.resolve_structure();
 
         // 1. Core imports and basic structure
-        self.resolve_external_imports();
-        self.resolve_decorators();
-        self.resolve_implicit_routes();
-        self.resolve_namespace_imports();
+        resolvers::standard::resolve_external_imports(&mut self.index, &mut self.lookup);
+        resolvers::state::resolve_decorators(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache);
+        resolvers::frameworks::resolve_implicit_routes(&mut self.index, &self.staging, &self.lookup);
+        resolvers::data::resolve_namespace_imports(&mut self.index, &mut self.staging, &self.lookup);
 
         // 2. Data and Literals
-        self.resolve_literal_dependencies();
-        self.resolve_shared_literals();
-        self.resolve_pubsub_wildcards();
+        resolvers::data::resolve_literal_dependencies(&mut self.index, &self.staging, &self.lookup);
+        resolvers::data::resolve_shared_literals(&mut self.index, &self.staging);
+        resolvers::state::resolve_pubsub_wildcards(&mut self.index, &self.staging);
 
         // 3. Inference & Magic
-        self.resolve_type_sniffing();
-        self.resolve_magic_proxies();
-        self.resolve_fingerprints();
-        self.resolve_implicit_connections();
+        resolvers::inference::resolve_type_sniffing(&mut self.index, &self.staging, &self.lookup);
+        resolvers::state::resolve_magic_proxies(&mut self.index, &self.staging, &self.lookup, &self.configs);
+        resolvers::inference::resolve_fingerprints(&mut self.index, &self.staging, &self.lookup);
+        resolvers::inference::resolve_implicit_connections(&mut self.index, &self.staging, &self.lookup);
 
         // 4. Frameworks & State
-        self.resolve_dependency_injection();
-        self.resolve_function_calls();
-        self.resolve_config_links();
-        self.resolve_type_references();
-        self.resolve_database_references();
-        self.resolve_file_dependencies(); 
-        self.resolve_state_management();
-        self.resolve_middleware_injection();
-        self.resolve_iac_links();
+        resolvers::frameworks::resolve_dependency_injection(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache, &self.configs);
+        resolvers::standard::resolve_function_calls(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache);
+        resolvers::data::resolve_config_links(&mut self.index, &self.staging, &self.lookup);
+        resolvers::standard::resolve_type_references(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache);
+        resolvers::data::resolve_database_references(&mut self.index, &self.staging);
+        resolvers::data::resolve_file_dependencies(&mut self.index, &self.lookup); 
+        resolvers::state::resolve_state_management(&mut self.index, &self.staging);
+        resolvers::frameworks::resolve_middleware_injection(&mut self.index, &self.staging, &self.lookup, &mut self.resolution_cache);
+        resolvers::data::resolve_iac_links(&mut self.index, &self.staging, &self.lookup);
 
         // Finalize
         self.build_reverse_graph();
@@ -141,7 +149,7 @@ impl Indexer {
                     let path = entry.path();
                     let manifest_res = scan_manifests(path);
                     
-                    // ACCESS UPDATE: self.lookup
+                    // Populate Lookups from Manifests
                     if let Some(pkg_name) = manifest_res.package_name {
                         if let Some(parent_dir) = path.parent() {
                             let dir_key = utils::to_index_path(parent_dir);
@@ -193,8 +201,6 @@ impl Indexer {
         if let Some(node) = self.index.files.remove(path_key) {
             self.clear_file_symbols(node.id);
             self.index.file_dependencies.remove(&node.id);
-            
-            // ACCESS UPDATE: self.lookup
             self.lookup.implicit_routes.retain(|_, sym_id| {
                 self.index.symbols.get(sym_id).map_or(false, |s| s.file_id != node.id)
             });
@@ -207,16 +213,16 @@ impl Indexer {
 
         for &sym_id in &ids_to_remove {
             if let Some(sym) = self.index.symbols.remove(&sym_id) {
-                // ACCESS UPDATE: self.lookup
                 if let Some(id_list) = self.lookup.symbol_map.get_mut(&sym.name) {
                     id_list.retain(|&id| id != sym_id);
                     if id_list.is_empty() { self.lookup.symbol_map.remove(&sym.name); }
                 }
             }
             
-            // ACCESS UPDATE: self.staging and self.index.graph
+            // Clear Graph
             self.index.graph.remove(&sym_id);
             
+            // Clear Staging
             self.staging.raw_calls.remove(&sym_id);
             self.staging.raw_implementations.remove(&sym_id);
             self.staging.fingerprints.remove(&sym_id);
@@ -229,7 +235,7 @@ impl Indexer {
             self.staging.raw_action_handlers.remove(&sym_id);
         }
 
-        // ACCESS UPDATE: self.lookup
+        // Clear Lookups
         for def_list in self.lookup.config_definitions.values_mut() {
             def_list.retain(|id| !ids_to_remove.contains(id));
         }
@@ -237,8 +243,9 @@ impl Indexer {
         self.lookup.file_imports.remove(&file_id);
         self.lookup.file_exports.remove(&file_id);
         
-        // ACCESS UPDATE: self.staging
+        // Clear File-Level Staging
         self.staging.raw_literals.remove(&file_id);
+        self.staging.raw_middleware_usage.remove(&file_id);
     }
 
     fn update_file(&mut self, path_key: &str, path_obj: &Path, content: &str, hash: [u8; 32], config: &LanguageConfig, is_path_test: bool) {
@@ -253,9 +260,11 @@ impl Indexer {
         });
 
         if let Ok(analysis) = analyze_source(path_obj, content, config) {
-            // ACCESS UPDATE: self.lookup & self.staging
+            // Populate Lookups
             if !analysis.imports.is_empty() { self.lookup.file_imports.insert(file_id, analysis.imports); }
             if !analysis.exports.is_empty() { self.lookup.file_exports.insert(file_id, analysis.exports); }
+            
+            // Populate Staging
             if !analysis.literals.is_empty() { self.staging.raw_literals.insert(file_id, analysis.literals); }
             if !analysis.middleware_usage.is_empty() { self.staging.raw_middleware_usage.insert(file_id, analysis.middleware_usage); }
 
@@ -268,6 +277,7 @@ impl Indexer {
                     func.source_code.contains("it(") || func.name.contains("test") || func.decorators.iter().any(|d| d.contains("test"))
                 );
 
+                // Add to Graph (Symbols)
                 self.index.symbols.insert(symbol_id, SymbolNode {
                     id: symbol_id, file_id, parent_id: None,
                     name: func.name.clone(), kind: func.kind,
@@ -279,10 +289,9 @@ impl Indexer {
                 });
                 
                 file_symbol_ids.push(symbol_id);
-                // ACCESS UPDATE: self.lookup
                 if func.name != "anonymous" { self.lookup.symbol_map.entry(func.name.clone()).or_default().push(symbol_id); }
                 
-                // ACCESS UPDATE: self.staging
+                // Add to Staging
                 if !func.config_keys.is_empty() { self.staging.symbol_config_refs.insert(symbol_id, func.config_keys); }
                 if !func.calls.is_empty() { self.staging.raw_calls.insert(symbol_id, func.calls); }
                 if !func.fingerprints.is_empty() { self.staging.fingerprints.insert(symbol_id, func.fingerprints); }
@@ -293,15 +302,16 @@ impl Indexer {
                 if !func.handled_actions.is_empty() { self.staging.raw_action_handlers.insert(symbol_id, func.handled_actions); }
             }
 
+            // Handle Config Definitions (Lookup)
             let is_data = matches!(config.lang_enum, crate::analysis::language::SupportedLanguage::Yaml | crate::analysis::language::SupportedLanguage::Json | crate::analysis::language::SupportedLanguage::Toml | crate::analysis::language::SupportedLanguage::Dotenv);
             if is_data {
                 for &sid in &file_symbol_ids {
                     let name = &self.index.symbols[&sid].name;
-                    // ACCESS UPDATE: self.lookup
                     self.lookup.config_definitions.entry(name.clone()).or_default().push(sid);
                 }
             }
 
+            // Handle Containers (Graph + Staging)
             let container_ids: Vec<SymbolId> = file_symbol_ids.iter().filter(|&&id| {
                 let s = &self.index.symbols[&id]; 
                 s.kind == SymbolKind::Container || s.kind == SymbolKind::Module
@@ -323,10 +333,10 @@ impl Indexer {
                         }
                     }
                 }
-                // ACCESS UPDATE: self.staging
                 if !members.is_empty() { self.staging.container_methods.insert(c_id, members); }
             }
             
+            // Handle Module Scope (Graph)
             let module_id = file_symbol_ids.iter().find(|&&id| self.index.symbols[&id].kind == SymbolKind::Module).cloned();
             if let Some(mid) = module_id {
                 for &id in &file_symbol_ids {
@@ -341,8 +351,8 @@ impl Indexer {
                 }
             }
 
+            // Handle Implementations (Staging)
             for (child, parent) in analysis.implementations {
-                // ACCESS UPDATE: self.lookup & self.staging
                 if let Some(ids) = self.lookup.symbol_map.get(&child) {
                     if let Some(&cid) = ids.iter().find(|&&id| self.index.symbols[&id].file_id == file_id) {
                         self.staging.raw_implementations.entry(cid).or_default().push(parent);
@@ -350,15 +360,14 @@ impl Indexer {
                 }
             }
 
+            // Handle Routes (Lookup)
             if let Some(route) = utils::detect_framework_route(path_obj) {
                  if let Some(mid) = file_symbol_ids.iter().find(|&&id| self.index.symbols[&id].kind == SymbolKind::Module) {
-                     // ACCESS UPDATE: self.lookup
                      self.lookup.implicit_routes.insert(route, *mid);
                  }
             }
             for &sid in &file_symbol_ids {
                  if let Some(sym) = self.index.symbols.get(&sid) {
-                     // ACCESS UPDATE: self.lookup
                      for r in &sym.routes { self.lookup.implicit_routes.insert(r.clone(), sid); }
                  }
             }

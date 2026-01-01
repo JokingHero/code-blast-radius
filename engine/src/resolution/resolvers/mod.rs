@@ -5,16 +5,24 @@ pub mod frameworks;
 pub mod state;
 pub mod data;
 
-use crate::{models::{EdgeKind, SymbolKind}, resolution::Indexer};
+use crate::models::{Edge, EdgeKind, SymbolId, WorkspaceIndex, SymbolKind};
 
-impl Indexer {
-    // Shared helper for linking modules in file dependencies
-    pub(crate) fn link_modules(&mut self, file_a: u32, file_b: u32) {
-        let mod_a = self.index.symbols.values().find(|s| s.file_id == file_a && s.kind == SymbolKind::Module).map(|s| s.id);
-        let mod_b = self.index.symbols.values().find(|s| s.file_id == file_b && s.kind == SymbolKind::Module).map(|s| s.id);
-        if let (Some(ma), Some(mb)) = (mod_a, mod_b) {
-            self.add_edge(ma, mb, EdgeKind::Imports);
-            self.add_edge(mb, ma, EdgeKind::Imports);
-        }
+// Shared helper to avoid code duplication in resolvers
+pub fn add_edge(index: &mut WorkspaceIndex, source: SymbolId, target: SymbolId, kind: EdgeKind) {
+    if source == target { return; }
+    let edges = index.graph.entry(source).or_default();
+    for edge in edges.iter() {
+        if edge.target_id == target && edge.kind == kind { return; }
+    }
+    edges.push(Edge { target_id: target, kind });
+}
+
+// Shared helper for linking modules
+pub fn link_modules(index: &mut WorkspaceIndex, file_a: u32, file_b: u32) {
+    let mod_a = index.symbols.values().find(|s| s.file_id == file_a && s.kind == SymbolKind::Module).map(|s| s.id);
+    let mod_b = index.symbols.values().find(|s| s.file_id == file_b && s.kind == SymbolKind::Module).map(|s| s.id);
+    if let (Some(ma), Some(mb)) = (mod_a, mod_b) {
+        add_edge(index, ma, mb, EdgeKind::Imports);
+        add_edge(index, mb, ma, EdgeKind::Imports);
     }
 }
