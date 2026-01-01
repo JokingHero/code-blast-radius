@@ -1,13 +1,14 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::fs;
 use std::collections::{HashMap, HashSet};
 use ignore::WalkBuilder;
 use blake3;
+use rayon::prelude::*;
 
-use crate::manifest::scan_manifests;
+use crate::manifest::{scan_manifests, ManifestResult};
 use crate::models::{
     FileNode, FileId, SymbolNode, SymbolKind, SymbolId,
-    WorkspaceIndex, StagingArea, SymbolIndex
+    WorkspaceIndex, StagingArea, SymbolIndex, FileAnalysis
 };
 use crate::analysis::analyze_source;
 use crate::analysis::language::{get_language_configs, LanguageConfig};
@@ -45,70 +46,115 @@ impl FileScanner {
             index.roots.push(root_string);
         }
 
-        let mut seen_paths = HashSet::new();
+        // 1. Collect all candidate files
         let walker = WalkBuilder::new(&root_abs).hidden(false).git_ignore(true).build();
+        let mut file_entries = Vec::new();
 
         for result in walker {
             match result {
                 Ok(entry) => {
-                    if !entry.path().is_file() { continue; }
-                    let path = entry.path();
-                    
-                    // 1. Manifest Scanning
-                    let manifest_res = scan_manifests(path);
-                    if let Some(pkg_name) = manifest_res.package_name {
-                        if let Some(parent_dir) = path.parent() {
-                            let dir_key = utils::to_index_path(parent_dir);
-                            lookup.package_path_map.insert(pkg_name, dir_key);
-                        }
-                    }
-                    if !manifest_res.externals.is_empty() { lookup.external_packages.extend(manifest_res.externals); }
-                    if !manifest_res.aliases.is_empty() { lookup.import_mappings.extend(manifest_res.aliases); }
-
-                    // 2. Language Detection
-                    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-                    let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                    
-                    // Note: .cloned() creates a copy of the reference (&'static T), which is cheap
-                    let config = self.configs.get(ext)
-                        .or_else(|| self.configs.get(filename))
-                        .or_else(|| if filename.starts_with('.') { self.configs.get(&filename[1..]) } else { None });
-
-                    // 3. File Processing
-                    if let Some(config) = config {
-                        if let Ok(content) = fs::read_to_string(path) {
-                            let hash = blake3::hash(content.as_bytes());
-                            let hash_bytes: [u8; 32] = hash.into();
-                            let path_key = utils::to_index_path(path);
-                            seen_paths.insert(path_key.clone());
-
-                            let is_test = match path.strip_prefix(&root_abs) {
-                                Ok(rel) => utils::is_test_path(rel),
-                                Err(_) => {
-                                    let fname = path.file_name().map(Path::new).unwrap_or(path);
-                                    utils::is_test_path(fname)
-                                }
-                            };
-
-                            let needs_update = match index.files.get(&path_key) {
-                                Some(node) => node.hash != hash_bytes,
-                                None => true,
-                            };
-                            
-                            if needs_update {
-                                self.update_file(
-                                    &path_key, path, &content, hash_bytes, config, is_test, 
-                                    index, staging, lookup
-                                );
-                            }
-                        }
+                    if entry.path().is_file() {
+                        file_entries.push(entry.into_path());
                     }
                 }
                 Err(err) => eprintln!("Error walking directory: {}", err),
             }
         }
 
-        // 4. Cleanup Removed Files
+        // 2. Parallel Processing (Read & Hash)
+        struct InitialFileResult {
+            path: PathBuf,
+            path_key: String,
+            manifest: ManifestResult,
+            config: Option<LanguageConfig>,
+            is_test: bool,
+            hash: Option<[u8; 32]>,
+            content: Option<String>,
+        }
+
+        let initial_results: Vec<InitialFileResult> = file_entries.into_par_iter().map(|path| {
+            let path_key = utils::to_index_path(&path);
+            let manifest = scan_manifests(&path);
+            
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+            let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            let config = self.configs.get(ext)
+                .or_else(|| self.configs.get(filename))
+                .or_else(|| if filename.starts_with('.') { self.configs.get(&filename[1..]) } else { None })
+                .cloned();
+
+            let is_test = match path.strip_prefix(&root_abs) {
+                Ok(rel) => utils::is_test_path(rel),
+                Err(_) => {
+                    let fname = path.file_name().map(Path::new).unwrap_or(&path);
+                    utils::is_test_path(fname)
+                }
+            };
+
+            let mut hash = None;
+            let mut content = None;
+            if config.is_some() {
+                if let Ok(c) = fs::read_to_string(&path) {
+                    hash = Some(blake3::hash(c.as_bytes()).into());
+                    content = Some(c);
+                }
+            }
+
+            InitialFileResult { path, path_key, manifest, config, is_test, hash, content }
+        }).collect();
+
+        // 3. Filter and trigger slow analysis in parallel
+        struct ProcessingResult {
+            path: PathBuf,
+            path_key: String,
+            config: LanguageConfig,
+            is_test: bool,
+            hash: [u8; 32],
+            analysis: Result<FileAnalysis, String>,
+        }
+
+        let mut seen_paths = HashSet::new();
+        let mut to_process = Vec::new();
+
+        for res in initial_results {
+            // Update manifest data sequentially (fast)
+            if let Some(pkg_name) = res.manifest.package_name.clone() {
+                if let Some(parent_dir) = res.path.parent() {
+                    let dir_key = utils::to_index_path(parent_dir);
+                    lookup.package_path_map.insert(pkg_name, dir_key);
+                }
+            }
+            if !res.manifest.externals.is_empty() { lookup.external_packages.extend(res.manifest.externals.clone()); }
+            if !res.manifest.aliases.is_empty() { lookup.import_mappings.extend(res.manifest.aliases.clone()); }
+
+            if let (Some(config), Some(hash), Some(content)) = (res.config, res.hash, res.content) {
+                seen_paths.insert(res.path_key.clone());
+                
+                let needs_update = match index.files.get(&res.path_key) {
+                    Some(node) => node.hash != hash,
+                    None => true,
+                };
+
+                if needs_update {
+                    to_process.push((res.path, res.path_key, res.manifest, config, res.is_test, hash, content));
+                }
+            }
+        }
+
+        let analysis_results: Vec<ProcessingResult> = to_process.into_par_iter().map(|(path, path_key, _manifest, config, is_test, hash, content)| {
+            let analysis = analyze_source(&path, &content, &config);
+            ProcessingResult { path, path_key, config, is_test, hash, analysis }
+        }).collect();
+
+        // 4. Sequential state merge
+        for res in analysis_results {
+            self.update_file_from_analysis(
+                &res.path_key, &res.path, res.analysis, res.hash, &res.config, res.is_test,
+                index, staging, lookup
+            );
+        }
+
+        // 5. Cleanup Removed Files
         let to_remove: Vec<String> = index.files.keys()
             .filter(|path_key| !seen_paths.contains(*path_key))
             .cloned()
@@ -119,75 +165,11 @@ impl FileScanner {
         }
     }
 
-    fn remove_file(
-        &self, 
-        path_key: &str, 
-        index: &mut WorkspaceIndex, 
-        staging: &mut StagingArea, 
-        lookup: &mut SymbolIndex
-    ) {
-        if let Some(node) = index.files.remove(path_key) {
-            self.clear_file_symbols(node.id, index, staging, lookup);
-            index.file_dependencies.remove(&node.id);
-            lookup.implicit_routes.retain(|_, sym_id| {
-                index.symbols.get(sym_id).map_or(false, |s| s.file_id != node.id)
-            });
-        }
-    }
-
-    fn clear_file_symbols(
-        &self, 
-        file_id: FileId, 
-        index: &mut WorkspaceIndex, 
-        staging: &mut StagingArea, 
-        lookup: &mut SymbolIndex
-    ) {
-        let ids_to_remove: Vec<SymbolId> = index.symbols.values()
-            .filter(|s| s.file_id == file_id).map(|s| s.id).collect();
-
-        for &sym_id in &ids_to_remove {
-            if let Some(sym) = index.symbols.remove(&sym_id) {
-                if let Some(id_list) = lookup.symbol_map.get_mut(&sym.name) {
-                    id_list.retain(|&id| id != sym_id);
-                    if id_list.is_empty() { lookup.symbol_map.remove(&sym.name); }
-                }
-            }
-            
-            // Clear Graph
-            index.graph.remove(&sym_id);
-            
-            // Clear Staging
-            staging.raw_calls.remove(&sym_id);
-            staging.raw_implementations.remove(&sym_id);
-            staging.fingerprints.remove(&sym_id);
-            staging.container_methods.remove(&sym_id);
-            staging.local_variable_types.remove(&sym_id);
-            staging.symbol_config_refs.remove(&sym_id);
-            staging.raw_type_refs.remove(&sym_id);
-            staging.raw_decorators.remove(&sym_id);
-            staging.raw_action_dispatches.remove(&sym_id);
-            staging.raw_action_handlers.remove(&sym_id);
-        }
-
-        // Clear Lookups
-        for def_list in lookup.config_definitions.values_mut() {
-            def_list.retain(|id| !ids_to_remove.contains(id));
-        }
-        lookup.config_definitions.retain(|_, v| !v.is_empty());
-        lookup.file_imports.remove(&file_id);
-        lookup.file_exports.remove(&file_id);
-        
-        // Clear File-Level Staging
-        staging.raw_literals.remove(&file_id);
-        staging.raw_middleware_usage.remove(&file_id);
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn update_file(
+    fn update_file_from_analysis(
         &self,
         path_key: &str,
         path_obj: &Path,
-        content: &str,
+        analysis_res: Result<FileAnalysis, String>,
         hash: [u8; 32],
         config: &LanguageConfig, 
         is_path_test: bool,
@@ -205,7 +187,7 @@ impl FileScanner {
             id: file_id, path: path_key.to_string(), hash, is_test: is_path_test,
         });
 
-        if let Ok(analysis) = analyze_source(path_obj, content, config) {
+        if let Ok(analysis) = analysis_res {
             // Populate Lookups
             if !analysis.imports.is_empty() { lookup.file_imports.insert(file_id, analysis.imports); }
             if !analysis.exports.is_empty() { lookup.file_exports.insert(file_id, analysis.exports); }
@@ -319,7 +301,70 @@ impl FileScanner {
             }
         }
     }
-    
+
+    fn remove_file(
+        &self, 
+        path_key: &str, 
+        index: &mut WorkspaceIndex, 
+        staging: &mut StagingArea, 
+        lookup: &mut SymbolIndex
+    ) {
+        if let Some(node) = index.files.remove(path_key) {
+            self.clear_file_symbols(node.id, index, staging, lookup);
+            index.file_dependencies.remove(&node.id);
+            lookup.implicit_routes.retain(|_, sym_id| {
+                index.symbols.get(sym_id).map_or(false, |s| s.file_id != node.id)
+            });
+        }
+    }
+
+    fn clear_file_symbols(
+        &self, 
+        file_id: FileId, 
+        index: &mut WorkspaceIndex, 
+        staging: &mut StagingArea, 
+        lookup: &mut SymbolIndex
+    ) {
+        let ids_to_remove: Vec<SymbolId> = index.symbols.values()
+            .filter(|s| s.file_id == file_id).map(|s| s.id).collect();
+
+        for &sym_id in &ids_to_remove {
+            if let Some(sym) = index.symbols.remove(&sym_id) {
+                if let Some(id_list) = lookup.symbol_map.get_mut(&sym.name) {
+                    id_list.retain(|&id| id != sym_id);
+                    if id_list.is_empty() { lookup.symbol_map.remove(&sym.name); }
+                }
+            }
+            
+            // Clear Graph
+            index.graph.remove(&sym_id);
+            
+            // Clear Staging
+            staging.raw_calls.remove(&sym_id);
+            staging.raw_implementations.remove(&sym_id);
+            staging.fingerprints.remove(&sym_id);
+            staging.container_methods.remove(&sym_id);
+            staging.local_variable_types.remove(&sym_id);
+            staging.symbol_config_refs.remove(&sym_id);
+            staging.raw_type_refs.remove(&sym_id);
+            staging.raw_decorators.remove(&sym_id);
+            staging.raw_action_dispatches.remove(&sym_id);
+            staging.raw_action_handlers.remove(&sym_id);
+        }
+
+        // Clear Lookups
+        for def_list in lookup.config_definitions.values_mut() {
+            def_list.retain(|id| !ids_to_remove.contains(id));
+        }
+        lookup.config_definitions.retain(|_, v| !v.is_empty());
+        lookup.file_imports.remove(&file_id);
+        lookup.file_exports.remove(&file_id);
+        
+        // Clear File-Level Staging
+        staging.raw_literals.remove(&file_id);
+        staging.raw_middleware_usage.remove(&file_id);
+    }
+
     fn add_edge_internal(index: &mut WorkspaceIndex, source: SymbolId, target: SymbolId, kind: crate::models::EdgeKind) {
         if source == target { return; }
         let edges = index.graph.entry(source).or_default();
