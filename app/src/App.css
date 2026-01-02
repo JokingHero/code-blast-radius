@@ -1,7 +1,6 @@
 @import "tailwindcss";
 
 @theme {
-  /* Define the Matrix Color Palette directly here */
   --color-matrix-bg: #050505;
   --color-matrix-panel: #0a0f0a;
   --color-matrix-border: #1a2e1a;
@@ -10,11 +9,19 @@
   --color-matrix-highlight: #ccffcc;
   --color-matrix-error: #ff0000;
 
-  /* Custom Font */
   --font-mono: "JetBrains Mono", "Fira Code", monospace;
   
-  /* Custom Shadow */
   --shadow-glow: 0 0 10px rgba(0, 255, 65, 0.3);
+}
+
+/* Custom Keyframes for the Scanner */
+@keyframes scan {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(200%);
+  }
 }
 
 /* Global Styles */
@@ -25,7 +32,7 @@ body {
   overflow: hidden;
 }
 
-/* Custom Scrollbar */
+/* ... existing scrollbar styles ... */
 ::-webkit-scrollbar {
   width: 8px;
 }
@@ -36,5 +43,5 @@ body {
   background-color: var(--color-matrix-border);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(0, 255, 65, 0.5); /* Primary with opacity */
+  background-color: rgba(0, 255, 65, 0.5); 
 }
