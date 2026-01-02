@@ -1,11 +1,11 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
-use rfc_engine::query::traversal::find_related_symbols; 
-use rfc_engine::models::StagingArea;
+use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::query::traversal::find_related_symbols; 
+use blast_radius_engine::models::StagingArea;
 
 // Helper to find ID by name
-fn has_func(index: &rfc_engine::models::WorkspaceIndex, name: &str) -> bool {
+fn has_func(index: &blast_radius_engine::models::WorkspaceIndex, name: &str) -> bool {
     index.symbols.values().any(|s| s.name == name)
 }
 

@@ -1,7 +1,7 @@
 {
-  "name": "app",
+  "name": "code-blast-radius-gui",
   "version": "0.1.0",
-  "description": "",
+  "description": "Code Blast Radius - Visual code dependency analyzer",
   "type": "module",
   "scripts": {
     "start": "vite",

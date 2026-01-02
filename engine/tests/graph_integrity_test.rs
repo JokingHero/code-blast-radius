@@ -1,7 +1,7 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
-use rfc_engine::models::{EdgeKind, SymbolKind};
+use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::models::{EdgeKind, SymbolKind};
 
 #[test]
 fn test_graph_structural_integrity() {

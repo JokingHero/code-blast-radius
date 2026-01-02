@@ -1,8 +1,8 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::{models::StagingArea, resolution::{Indexer, pipeline::Pipeline}};
+use blast_radius_engine::{models::StagingArea, resolution::{Indexer, pipeline::Pipeline}};
 
-fn has_func(index: &rfc_engine::models::WorkspaceIndex, name: &str) -> bool {
+fn has_func(index: &blast_radius_engine::models::WorkspaceIndex, name: &str) -> bool {
     index.symbols.values().any(|s| s.name == name)
 }
 

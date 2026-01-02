@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::{models::StagingArea, resolution::{Indexer, pipeline::Pipeline}};
+use blast_radius_engine::{models::StagingArea, resolution::{Indexer, pipeline::Pipeline}};
 
 #[test]
 fn test_monorepo_package_subpath_resolution() {

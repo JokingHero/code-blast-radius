@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
 
 #[test]
 fn test_strategy_1_and_3_cli_path_linking() {

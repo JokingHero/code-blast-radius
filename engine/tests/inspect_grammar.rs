@@ -1,4 +1,4 @@
-use rfc_engine::analysis::language::{ get_language, SupportedLanguage };
+use blast_radius_engine::analysis::language::{ get_language, SupportedLanguage };
 use tree_sitter::Parser;
 #[test]
 fn inspect_prisma_structure() {

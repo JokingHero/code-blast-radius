@@ -1,8 +1,8 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::models::{EdgeKind, StagingArea};
-use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
-use rfc_engine::query::traversal::find_related_symbols;
+use blast_radius_engine::models::{EdgeKind, StagingArea};
+use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::query::traversal::find_related_symbols;
 
 #[test]
 fn test_redux_switch_case_linking() {

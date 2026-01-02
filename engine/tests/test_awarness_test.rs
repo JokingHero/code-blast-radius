@@ -1,8 +1,8 @@
 mod common;
 use common::TestWorkspace;
-use rfc_engine::models::StagingArea;
-use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
-use rfc_engine::query::traversal::{find_related_symbols, generate_context_from_ids};
+use blast_radius_engine::models::StagingArea;
+use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::query::traversal::{find_related_symbols, generate_context_from_ids};
 
 #[test]
 fn test_path_based_test_detection() {

@@ -2,13 +2,13 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process;
 use anyhow::{Context, Result};
-use rfc_engine::resolution::{Indexer, pipeline::Pipeline};
-use rfc_engine::query::traversal::find_related_symbols;
-use rfc_engine::query::output::generate_context_output;
+use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::query::traversal::find_related_symbols;
+use blast_radius_engine::query::output::generate_context_output;
 use nucleo_matcher::{Matcher, Config, Utf32String};
 
 #[derive(Parser, Debug)]
-#[command(name = "cfb", version, about = "Context Management")]
+#[command(name = "cblast", version, about = "Code Blast Radius - Analyze code dependencies and impact")]
 struct Cli {
     #[arg(short, long)]
     path: PathBuf,
@@ -19,8 +19,8 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Generate context for a symbol
-    Context {
+    /// Analyze blast radius for a symbol
+    Radius {
         #[arg(short, long)]
         function_name: String,
 
@@ -76,7 +76,7 @@ fn run() -> Result<()> {
     indexer.save(&index_path).context("Failed to save index")?;
 
     match cli.command {
-        Commands::Context { function_name, no_tests, impact: _ } => {
+        Commands::Radius { function_name, no_tests, impact: _ } => {
             // Find Symbols: Pass components explicitly
             let symbol_ids = find_related_symbols(
                 &indexer.index,

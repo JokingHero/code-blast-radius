@@ -31,10 +31,10 @@ function App() {
           <div class="h-full flex flex-col items-center justify-center space-y-8 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-matrix-panel to-matrix-bg">
             <div class="text-center space-y-2">
               <div class="text-5xl font-bold tracking-widest text-matrix-highlight drop-shadow-[0_0_10px_rgba(0,255,65,0.5)]">
-                CFB_ENGINE
+                CODE BLAST RADIUS
               </div>
               <div class="text-xs tracking-[0.5em] opacity-50">
-                CONTEXT FRAGMENTATION BUILDER
+                DEPENDENCY IMPACT ANALYZER
               </div>
             </div>
             <button 

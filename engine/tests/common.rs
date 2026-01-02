@@ -2,7 +2,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::PathBuf;
 use tempfile::TempDir;
-use rfc_engine::models::{SymbolId, EdgeKind, WorkspaceIndex};
+use blast_radius_engine::models::{SymbolId, EdgeKind, WorkspaceIndex};
 
 pub struct TestWorkspace {
     _temp: TempDir, 
