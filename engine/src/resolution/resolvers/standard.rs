@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::models::{ SymbolKind, SymbolNode, EdgeKind, WorkspaceIndex, SymbolIndex, StagingArea };
 use crate::resolution::resolvers::{core, add_edge};
 
@@ -39,6 +41,13 @@ pub fn resolve_external_imports(index: &mut WorkspaceIndex, lookup: &mut SymbolI
                         external_source: Some(pkg_name.clone()),
                         decorators: Vec::new(),
                         routes: Vec::new(),
+                        calls: Vec::new(),
+                        type_refs: Vec::new(),
+                        fingerprints: HashMap::new(),
+                        local_types: HashMap::new(),
+                        config_keys: Vec::new(),
+                        dispatched_actions: Vec::new(),
+                        handled_actions: Vec::new(),
                     });
                 }
             }

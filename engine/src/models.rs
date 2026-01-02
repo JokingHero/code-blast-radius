@@ -79,6 +79,8 @@ pub struct FileNode {
     pub path: String,
     pub hash: [u8; 32],
     pub is_test: bool,
+    pub literals: Vec<String>,
+    pub middleware_usage: Vec<String>,
 }
 
 #[derive(Archive, Deserialize, Serialize, Debug, Clone)]
@@ -98,6 +100,13 @@ pub struct SymbolNode {
     pub external_source: Option<String>,
     pub decorators: Vec<String>, 
     pub routes: Vec<String>,
+    pub calls: Vec<String>,
+    pub type_refs: Vec<String>,
+    pub fingerprints: HashMap<String, Vec<String>>,
+    pub local_types: HashMap<String, String>,
+    pub config_keys: Vec<String>,
+    pub dispatched_actions: Vec<String>,
+    pub handled_actions: Vec<String>,
 }
 
 #[derive(Archive, Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -156,6 +165,8 @@ pub struct WorkspaceIndex {
     // Core Data
     pub files: HashMap<String, FileNode>,
     pub symbols: HashMap<SymbolId, SymbolNode>,
+    pub file_imports: HashMap<FileId, Vec<ImportNode>>,
+    pub file_exports: HashMap<FileId, Vec<ExportNode>>,
     pub graph: HashMap<SymbolId, Vec<Edge>>,
 
     // This is technically a "cached result" but valuable enough to persist 

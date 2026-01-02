@@ -30,16 +30,85 @@ impl Pipeline {
         }
     }
 
-    /// Convenience method to run the full pipeline.
     pub fn run(&mut self, indexer: &mut Indexer, path: &std::path::Path) {
+        // 1. SCAN: Updates Index state for changed files only.
+        // Unchanged files remain untouched in indexer.index
+        self.scanner.scan(path, &mut indexer.index, &mut indexer.lookup);
+
+        // 2. HYDRATE: Rebuild StagingArea from the FULL Index (Changed + Unchanged files)
+        // This ensures the Resolvers see the complete picture.
+        let mut staging = self.hydrate_staging(&indexer.index);
+
+        // 3. RESOLVE: Rebuild the graph using the staged data
+        self.resolver.run(
+            &mut indexer.index,
+            &mut staging,
+            &mut indexer.lookup,
+            &self.scanner.configs
+        );
+        
+        indexer.build_reverse_graph();
+    }
+
+    /// Reads the persisted Index and populates the transient StagingArea
+    fn hydrate_staging(&self, index: &WorkspaceIndex) -> StagingArea {
         let mut staging = StagingArea::default();
-        self.scan(indexer, path, &mut staging);
-        self.resolve(indexer, &mut staging);
+
+        // Hydrate from Files
+        for file in index.files.values() {
+            if !file.literals.is_empty() {
+                staging.raw_literals.insert(file.id, file.literals.clone());
+            }
+            if !file.middleware_usage.is_empty() {
+                staging.raw_middleware_usage.insert(file.id, file.middleware_usage.clone());
+            }
+        }
+
+        // Hydrate from Symbols
+        for sym in index.symbols.values() {
+            if !sym.calls.is_empty() {
+                staging.raw_calls.insert(sym.id, sym.calls.clone());
+            }
+            if !sym.type_refs.is_empty() {
+                staging.raw_type_refs.insert(sym.id, sym.type_refs.clone());
+            }
+            if !sym.config_keys.is_empty() {
+                staging.symbol_config_refs.insert(sym.id, sym.config_keys.clone());
+            }
+            if !sym.decorators.is_empty() {
+                staging.raw_decorators.insert(sym.id, sym.decorators.clone());
+            }
+            if !sym.dispatched_actions.is_empty() {
+                staging.raw_action_dispatches.insert(sym.id, sym.dispatched_actions.clone());
+            }
+            if !sym.handled_actions.is_empty() {
+                staging.raw_action_handlers.insert(sym.id, sym.handled_actions.clone());
+            }
+            if !sym.local_types.is_empty() {
+                staging.local_variable_types.insert(sym.id, sym.local_types.clone());
+            }
+            if !sym.fingerprints.is_empty() {
+                staging.fingerprints.insert(sym.id, sym.fingerprints.clone());
+            }
+            
+            if sym.kind == crate::models::SymbolKind::Container || sym.kind == crate::models::SymbolKind::Module {
+                let children_names: std::collections::HashSet<String> = index.symbols.values()
+                    .filter(|s| s.parent_id == Some(sym.id))
+                    .map(|s| s.name.clone())
+                    .collect();
+                
+                if !children_names.is_empty() {
+                    staging.container_methods.insert(sym.id, children_names);
+                }
+            }
+        }
+
+        staging
     }
 
     /// Perform only the scanning phase.
-    pub fn scan(&self, indexer: &mut Indexer, path: &std::path::Path, staging: &mut StagingArea) {
-        self.scanner.scan(path, &mut indexer.index, staging, &mut indexer.lookup);
+    pub fn scan(&self, indexer: &mut Indexer, path: &std::path::Path, _staging: &mut StagingArea) {
+        self.scanner.scan(path, &mut indexer.index, &mut indexer.lookup);
     }
 
     /// Perform only the resolution phase.

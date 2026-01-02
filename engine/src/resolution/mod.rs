@@ -52,6 +52,9 @@ impl Indexer {
         for sym in self.index.symbols.values() {
              self.lookup.symbol_map.entry(sym.name.clone()).or_default().push(sym.id);
         }
+        // This is crucial for incremental updates!
+        self.lookup.file_imports = self.index.file_imports.clone();
+        self.lookup.file_exports = self.index.file_exports.clone();
         self.build_reverse_graph();
     }
 

@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::models::{EdgeKind, StagingArea};
+use blast_radius_engine::models::{EdgeKind}; // Removed StagingArea import
 use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
 use blast_radius_engine::query::traversal::find_related_symbols;
 
@@ -38,9 +38,9 @@ fn test_redux_switch_case_linking() {
 
     let mut indexer = Indexer::new();
     let mut pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
-    pipeline.resolve(&mut indexer, &mut staging);
+    
+    // CHANGE: Use .run() to ensure Scan -> Hydrate -> Resolve flow
+    pipeline.run(&mut indexer, &workspace.path);
 
     // --- Assertions ---
 
@@ -52,14 +52,13 @@ fn test_redux_switch_case_linking() {
     let caller_id = component_ids[0];
 
     // 2. Check Extraction (White-box testing the index)
-    // The handler should have recorded the action string
-    let handled = staging.raw_action_handlers.get(&handler_id).expect("Reducer should capture handled actions");
-    assert!(handled.contains(&"AUTH/LOGIN_SUCCESS".to_string()));
-    assert!(handled.contains(&"AUTH/LOGOUT".to_string()));
+    // CHANGE: Inspect persisted SymbolNode data instead of transient StagingArea
+    let handler_sym = indexer.index.symbols.get(&handler_id).unwrap();
+    assert!(handler_sym.handled_actions.contains(&"AUTH/LOGIN_SUCCESS".to_string()), "Reducer should persist handled actions");
+    assert!(handler_sym.handled_actions.contains(&"AUTH/LOGOUT".to_string()));
 
-    // The dispatcher should have recorded the action string
-    let dispatched = staging.raw_action_dispatches.get(&caller_id).expect("Component should capture dispatched actions");
-    assert!(dispatched.contains(&"AUTH/LOGIN_SUCCESS".to_string()));
+    let caller_sym = indexer.index.symbols.get(&caller_id).unwrap();
+    assert!(caller_sym.dispatched_actions.contains(&"AUTH/LOGIN_SUCCESS".to_string()), "Component should persist dispatched actions");
 
     // 3. Check Resolution (The Linkage)
     let edges = indexer.index.graph.get(&caller_id).unwrap();
@@ -81,8 +80,7 @@ fn test_redux_switch_case_linking() {
 fn test_redux_object_map_linking() {
     let workspace = TestWorkspace::new();
 
-    // 1. Object Map Reducer (Common in older Redux or custom frameworks)
-    // Matches: (pair key: (string) @action.handle)
+    // 1. Object Map Reducer
     workspace.create_file("store/todos.js", r#"
         const todoHandlers = {
             'TODO/ADD': (state, action) => {
@@ -99,19 +97,18 @@ fn test_redux_object_map_linking() {
         }
     "#);
 
-    // 2. Dispatcher using 'put' (redux-saga style) or generic 'dispatch'
+    // 2. Dispatcher using 'put'
     workspace.create_file("sagas/todoSaga.js", r#"
         function* createTodoSaga() {
-            // Using 'put' instead of 'dispatch' to test regex flexibility
             yield put({ type: 'TODO/ADD', payload: 'New Item' });
         }
     "#);
 
     let mut indexer = Indexer::new();
     let mut pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
-    pipeline.resolve(&mut indexer, &mut staging);
+    
+    // CHANGE: Use .run() to ensure full pipeline execution including hydration
+    pipeline.run(&mut indexer, &workspace.path);
 
     let saga_id = indexer.lookup.symbol_map.get("createTodoSaga").unwrap()[0];
 
@@ -126,19 +123,11 @@ fn test_redux_object_map_linking() {
     assert!(!edges.is_empty(), "Saga should have at least one outgoing edge");
 
     // 2. Resolve the target IDs from the edges
-    // The resolver adds EdgeKind::Dispatches and implicit EdgeKind::Calls
     let resolved_target_ids: Vec<u32> = edges.iter()
         .map(|e| e.target_id)
         .collect();
 
-    // Debugging output to see what we matched
-    let targets: Vec<String> = resolved_target_ids.iter()
-        .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
-        .collect();
-    println!("Found targets for saga: {:?}", targets);
-
     // 3. Verify linkage to the reducer file
-    // We expect the graph to link to a symbol defined inside "store/todos.js"
     let reducer_file_id = indexer.index.files.values()
         .find(|f| f.path.contains("todos.js"))
         .expect("Reducer file should be indexed")
