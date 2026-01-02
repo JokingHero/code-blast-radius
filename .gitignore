@@ -40,13 +40,13 @@ build/
 # Tauri
 # ----------------------------------------------------------------------
 # Tauri build artifacts (often inside src-tauri)
-src-tauri/target/
+app/src-tauri/target/
 
 # Tauri generated files (for Android/iOS/Capabilities)
-src-tauri/gen/
+app/src-tauri/gen/
 
 # Tauri internal cache
-.tauri/
+app/.tauri/
 
 # ----------------------------------------------------------------------
 # IDE & OS System Files
