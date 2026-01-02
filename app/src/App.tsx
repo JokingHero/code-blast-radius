@@ -34,7 +34,7 @@ function App() {
                 CODE BLAST RADIUS
               </div>
               <div class="text-xs tracking-[0.5em] opacity-50">
-                DEPENDENCY IMPACT ANALYZER
+                MANAGE CONTEXT LIKE A SURGEON
               </div>
             </div>
             <button 

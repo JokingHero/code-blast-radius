@@ -52,9 +52,9 @@ export const SearchBar = () => {
       {/* MATRIX TYPING EFFECT OVERLAY */}
       <Show when={query() === ""}>
         <div class="absolute inset-0 flex items-center px-4 pointer-events-none select-none">
-          <span class="text-matrix-primary font-bold mr-2">{">>>"}</span>
+          <span class="text-matrix-primary font-bold mr-2">{">"}</span>
           <span class="text-matrix-primary/50 text-sm tracking-widest">
-            AWAITING INPUT
+            SEARCH SYMBOLS OR FILES
           </span>
           <span class="ml-2 w-2 h-4 bg-matrix-primary animate-[pulse_1s_infinite]"></span>
         </div>

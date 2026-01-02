@@ -27,7 +27,7 @@ export const TitleBar = () => {
       {/* LEFT: App Title / Icon */}
       <div class="flex items-center space-x-2 pointer-events-none opacity-70">
         <div class="w-2 h-2 bg-matrix-primary rounded-full shadow-[0_0_5px_rgba(0,255,65,0.8)] animate-pulse"></div>
-        <span class="text-xs font-bold tracking-widest text-matrix-primary">CONTEXT_SLICER // V1.0</span>
+        <span class="text-xs font-bold tracking-widest text-matrix-primary">Code Blast Radius</span>
       </div>
 
       {/* RIGHT: Window Controls */}
