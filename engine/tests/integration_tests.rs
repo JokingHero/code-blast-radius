@@ -1,8 +1,7 @@
 mod common;
 use common::TestWorkspace;
 use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
-use blast_radius_engine::query::traversal::find_related_symbols; 
-use blast_radius_engine::models::StagingArea;
+use blast_radius_engine::query::traversal::find_related_symbols;
 
 // Helper to find ID by name
 fn has_func(index: &blast_radius_engine::models::WorkspaceIndex, name: &str) -> bool {
@@ -73,8 +72,7 @@ fn test_rust_docs_extraction() {
 
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+    pipeline.scan(&mut indexer, &workspace.path);
 
     let id = indexer.lookup.symbol_map.get("my_rust_func").unwrap()[0];
     let sym = indexer.index.symbols.get(&id).unwrap();
@@ -92,8 +90,7 @@ fn test_polyglot_folder() {
 
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+    pipeline.scan(&mut indexer, &workspace.path);
 
     assert!(has_func(&indexer.index, "py_func"));
     assert!(has_func(&indexer.index, "js_func"));

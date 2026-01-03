@@ -156,9 +156,23 @@ impl FileScanner {
             );
         }
 
-        // 5. Cleanup Removed Files
+        // 5. Cleanup Removed Files (SCOPED)
+        // We calculate the prefix based on the *current* root being scanned (root_abs).
+        let root_prefix = utils::to_index_path(&root_abs);
+
+        // We filter keys that are in the index but were NOT seen in this specific scan execution.
         let to_remove: Vec<String> = index.files.keys()
-            .filter(|path_key| !seen_paths.contains(*path_key))
+            .filter(|path_key| {
+                // Condition 1: File actually belongs to the root we are currently scanning.
+                // We use standard starts_with check.
+                // Note: we assume path_key is already normalized by utils::to_index_path during insertion.
+                let belongs_to_current_root = path_key.starts_with(&root_prefix);
+
+                // Condition 2: We did NOT find this file in the current walk of this root.
+                let not_seen = !seen_paths.contains(*path_key);
+
+                belongs_to_current_root && not_seen
+            })
             .cloned()
             .collect();
             
@@ -340,7 +354,7 @@ impl FileScanner {
         }
     }
 
-    fn remove_file(
+    pub fn remove_file(
         &self, 
         path_key: &str, 
         index: &mut WorkspaceIndex, 

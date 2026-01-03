@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::{models::StagingArea, resolution::{Indexer, pipeline::Pipeline}};
+use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
 
 #[test]
 fn test_monorepo_package_subpath_resolution() {
@@ -95,8 +95,7 @@ fn test_cargo_workspace_mapping() {
     // 2. Run scan
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+    pipeline.scan(&mut indexer, &workspace.path);
     
     // 3. Verify Mapping
     // We mainly want to ensure the logic in manifest.rs correctly extracted the name

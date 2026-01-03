@@ -91,4 +91,23 @@ impl Indexer {
         }
         impacted_paths
     }
+
+    pub fn remove_root(&mut self, root_path: &Path) {
+        let root_str = utils::to_index_path(root_path);
+        
+        // 1. Remove from roots list
+        self.index.roots.retain(|r| *r != root_str);
+
+        // 2. Identify files to remove
+        let paths_to_remove: Vec<String> = self.index.files.values()
+            .filter(|f| f.path.starts_with(&root_str))
+            .map(|f| f.path.clone())
+            .collect();
+
+        // 3. Remove them (This reuses your existing internal cleanup logic)
+        let scanner = crate::resolution::scanner::FileScanner::new();
+        for path in paths_to_remove {
+            scanner.remove_file(&path, &mut self.index, &mut self.lookup);
+        }
+    }
 }

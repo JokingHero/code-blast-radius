@@ -1,6 +1,5 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::models::StagingArea;
 use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
 use blast_radius_engine::query::traversal::{find_related_symbols, generate_context_from_ids};
 
@@ -18,8 +17,7 @@ fn test_path_based_test_detection() {
 
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+    pipeline.scan(&mut indexer, &workspace.path);
 
     // Verify FileNode flags
     let files = &indexer.index.files;
@@ -56,8 +54,7 @@ fn test_inline_symbol_test_detection() {
 
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+    pipeline.scan(&mut indexer, &workspace.path);
 
     let get_sym = |name: &str| {
         let id = indexer.lookup.symbol_map.get(name).unwrap()[0];
@@ -122,8 +119,7 @@ fn test_python_test_detection() {
 
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+    pipeline.scan(&mut indexer, &workspace.path);
     
     // Use stricter matching to ensure we don't accidentally grab "test_logic.py"
     // when looking for "logic.py"

@@ -1,6 +1,5 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::models::StagingArea;
 use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
 use blast_radius_engine::query::output::generate_context_output;
 
@@ -32,8 +31,7 @@ fn test_output_json_structure_and_merging() {
     // 2. Index the file
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+    pipeline.scan(&mut indexer, &workspace.path);
     
     // 3. Get Symbol IDs
     let id_a = indexer.lookup.symbol_map.get("funcA").expect("funcA missing")[0];
@@ -97,8 +95,7 @@ fn test_output_multi_file() {
 
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+    pipeline.scan(&mut indexer, &workspace.path);
     
     let id_main = indexer.lookup.symbol_map.get("main").unwrap()[0];
     let id_help = indexer.lookup.symbol_map.get("help").unwrap()[0];

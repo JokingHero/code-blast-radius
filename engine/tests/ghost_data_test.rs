@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::{models::StagingArea, resolution::{Indexer, pipeline::Pipeline}};
+use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
 use std::fs;
 
 #[test]
@@ -14,8 +14,7 @@ fn test_ghost_data_removal() {
     {
         let mut indexer = Indexer::new();
         let pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+        pipeline.scan(&mut indexer, &workspace.path);
         indexer.save(&index_file).unwrap();
         
         // Check symbol existence directly in index
@@ -28,8 +27,7 @@ fn test_ghost_data_removal() {
     {
         let mut indexer = Indexer::load_from_file(&index_file).unwrap();
         let pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+        pipeline.scan(&mut indexer, &workspace.path);
         
         assert!(indexer.index.symbols.values().any(|f| f.name == "new_function"), "New function not found");
         assert!(!indexer.index.symbols.values().any(|f| f.name == "old_function"), "Ghost Data: old_function still exists after rename!");
@@ -41,8 +39,7 @@ fn test_ghost_data_removal() {
     {
         let mut indexer = Indexer::load_from_file(&index_file).unwrap();
         let pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+        pipeline.scan(&mut indexer, &workspace.path);
         
         assert!(!indexer.index.symbols.values().any(|f| f.name == "new_function"), "Ghost Data: function still exists after file deletion!");
         assert!(indexer.index.symbols.is_empty(), "Graph should be empty");

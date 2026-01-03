@@ -5,12 +5,17 @@ use std::path::PathBuf;
 use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
 use blast_radius_engine::query::traversal::find_related_symbols;
 use blast_radius_engine::query::output::generate_context_output;
+use blast_radius_engine::workspace::WorkspaceManager; // Use Engine's workspace
 use nucleo_matcher::{Matcher, Config, Utf32String};
 
 // Global App State
 struct AppState {
     indexer: Mutex<Option<Indexer>>,
-    root_path: Mutex<Option<PathBuf>>,
+    // We store the active config path so "refresh" knows what to reload
+    // If None, we are in Single-Folder mode.
+    active_workspace_file: Mutex<Option<PathBuf>>,
+    // If workspace_file is None, we use this for Single-Folder refresh
+    active_folder_path: Mutex<Option<PathBuf>>,
 }
 
 #[derive(serde::Serialize)]
@@ -23,27 +28,90 @@ struct SearchResult {
 
 #[tauri::command]
 async fn set_workspace(path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let path_buf = PathBuf::from(path);
-    if !path_buf.exists() {
+    let target_path = PathBuf::from(&path);
+    if !target_path.exists() {
         return Err("Path does not exist".into());
     }
 
-    let index_path = path_buf.join(".index");
-    
-    // Load or Create Indexer
-    let mut indexer = Indexer::load_from_file(&index_path)
-        .unwrap_or_else(|_| Indexer::new());
+    let mut indexer;
+    let workspace_file_entry;
+    let folder_path_entry;
 
-    // Run Pipeline (Scan/Resolve)
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &path_buf);
-    
-    // Save
-    let _ = indexer.save(&index_path);
+    if target_path.is_file() && path.ends_with(".cblast") {
+        // === MULTI-ROOT MODE (Managed by WorkspaceManager) ===
+        let mut manager = WorkspaceManager::new(target_path.clone())
+            .map_err(|e| e.to_string())?;
+        
+        // Ensure everything is up to date (scans all roots, re-resolves)
+        manager.sync();
+        manager.save().map_err(|e| e.to_string())?;
+
+        indexer = manager.indexer;
+        
+        workspace_file_entry = Some(target_path);
+        folder_path_entry = None;
+    } else if target_path.is_dir() {
+        // === SINGLE FOLDER MODE (Legacy/Implicit) ===
+        // We keep this manually managed for simplicity of "Open Folder" without creating config files
+        indexer = Indexer::new();
+        
+        let cblast_dir = target_path.join(".cblast");
+        let _ = std::fs::create_dir_all(&cblast_dir);
+        let index_path = cblast_dir.join("index.bin");
+
+        // Try load existing
+        if index_path.exists() {
+            if let Ok(loaded) = Indexer::load_from_file(&index_path) {
+                indexer = loaded;
+            }
+        }
+
+        // Run Scan/Resolve
+        let mut pipeline = Pipeline::new();
+        pipeline.run(&mut indexer, &target_path);
+        
+        // Save
+        let _ = indexer.save(&index_path);
+
+        workspace_file_entry = None;
+        folder_path_entry = Some(target_path);
+    } else {
+        return Err("Invalid path. Must be a folder or .cblast file".into());
+    }
 
     // Update State
-    *state.root_path.lock().unwrap() = Some(path_buf);
     *state.indexer.lock().unwrap() = Some(indexer);
+    *state.active_workspace_file.lock().unwrap() = workspace_file_entry;
+    *state.active_folder_path.lock().unwrap() = folder_path_entry;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn refresh_workspace(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let workspace_opt = state.active_workspace_file.lock().unwrap().clone();
+    let folder_opt = state.active_folder_path.lock().unwrap().clone();
+
+    if let Some(ws_path) = workspace_opt {
+        // Refresh Multi-Root
+        let mut manager = WorkspaceManager::new(ws_path)
+            .map_err(|e| e.to_string())?;
+        manager.sync();
+        manager.save().map_err(|e| e.to_string())?;
+        *state.indexer.lock().unwrap() = Some(manager.indexer);
+    } else if let Some(folder_path) = folder_opt {
+        // Refresh Single Folder
+        let index_path = folder_path.join(".cblast").join("index.bin");
+        let mut indexer = Indexer::load_from_file(&index_path).unwrap_or(Indexer::new());
+        
+        let mut pipeline = Pipeline::new();
+        pipeline.run(&mut indexer, &folder_path);
+        let _ = indexer.save(&index_path);
+
+        *state.indexer.lock().unwrap() = Some(indexer);
+    } else {
+        return Err("No workspace loaded".into());
+    }
 
     Ok(())
 }
@@ -113,15 +181,18 @@ fn main() {
     tauri::Builder::default()
         .manage(AppState { 
             indexer: Mutex::new(None),
-            root_path: Mutex::new(None) 
+            active_workspace_file: Mutex::new(None),
+            active_folder_path: Mutex::new(None)
         })
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             set_workspace,
             search_symbols,
-            resolve_recipe
+            resolve_recipe,
+            refresh_workspace
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

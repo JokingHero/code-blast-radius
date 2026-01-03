@@ -4,3 +4,4 @@ pub mod analysis;
 pub mod manifest;
 pub mod topic;
 pub mod query;
+pub mod workspace;

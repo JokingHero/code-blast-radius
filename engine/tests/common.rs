@@ -16,6 +16,7 @@ impl TestWorkspace {
         Self { _temp: temp, path }
     }
 
+    #[allow(dead_code)] 
     pub fn create_file(&self, relative_path: &str, content: &str) {
         let file_path = self.path.join(relative_path);
         if let Some(parent) = file_path.parent() {

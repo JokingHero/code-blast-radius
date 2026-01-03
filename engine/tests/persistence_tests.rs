@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::{models::StagingArea, resolution::{Indexer, pipeline::Pipeline}};
+use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
 
 fn has_func(index: &blast_radius_engine::models::WorkspaceIndex, name: &str) -> bool {
     index.symbols.values().any(|s| s.name == name)
@@ -40,8 +40,7 @@ fn test_incremental_updates() {
     {
         let mut indexer = Indexer::new();
         let pipeline = Pipeline::new();
-        let mut staging = StagingArea::default();
-        pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+        pipeline.scan(&mut indexer, &workspace.path);
         indexer.save(&index_file).unwrap();
     }
 
@@ -57,8 +56,7 @@ fn test_incremental_updates() {
 
         // 2. Create a FRESH staging area for the update scan
         let pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+    pipeline.scan(&mut indexer, &workspace.path);
 
         assert!(has_func(&indexer.index, "helper"), "Incremental scan missed new file");
         assert!(has_func(&indexer.index, "init_system_v2"), "Incremental scan missed modified function");

@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::{models::StagingArea, resolution::{Indexer, pipeline::Pipeline}};
+use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
 
 #[test]
 fn test_rust_macro_definitions() {
@@ -52,8 +52,7 @@ fn test_rust_macro_definitions_with_visibility() {
 
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    let mut staging = StagingArea::default();
-    pipeline.scan(&mut indexer, &workspace.path, &mut staging);
+    pipeline.scan(&mut indexer, &workspace.path);
 
     // Assert 'MyStruct' is found
     assert!(indexer.lookup.symbol_map.contains_key("MyStruct"), "Failed to extract MyStruct from 'pub MyStruct'");

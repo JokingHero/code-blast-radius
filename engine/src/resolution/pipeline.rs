@@ -51,7 +51,7 @@ impl Pipeline {
     }
 
     /// Reads the persisted Index and populates the transient StagingArea
-    fn hydrate_staging(&self, index: &WorkspaceIndex) -> StagingArea {
+    pub fn hydrate_staging(&self, index: &WorkspaceIndex) -> StagingArea {
         let mut staging = StagingArea::default();
 
         // Hydrate from Files
@@ -107,7 +107,7 @@ impl Pipeline {
     }
 
     /// Perform only the scanning phase.
-    pub fn scan(&self, indexer: &mut Indexer, path: &std::path::Path, _staging: &mut StagingArea) {
+    pub fn scan(&self, indexer: &mut Indexer, path: &std::path::Path) {
         self.scanner.scan(path, &mut indexer.index, &mut indexer.lookup);
     }
 
