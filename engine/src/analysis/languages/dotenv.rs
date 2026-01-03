@@ -6,8 +6,9 @@ pub fn config() -> LanguageConfig {
         &["env", "env.example", "env.template", "env.local", "env.development", "env.test", "env.production"]
     )
     .defs(r#"
-        (variable_assignment 
+        (variable_assignment
             name: (variable_name) @function.name
+            value: (_) @function.body
         ) @function.definition
     "#)
     .vals(r#"

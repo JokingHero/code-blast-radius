@@ -7,19 +7,23 @@ pub fn config() -> LanguageConfig {
     )
     .defs(r#"
         [
-            (pair key: (bare_key) @function.name) 
+            (pair (bare_key) @function.name (string) @function.body)
             (table (bare_key) @function.name)
         ] @function.definition
     "#)
     .literals(r#"(string) @string"#)
     .vals(r#"
         (pair
-            key: (bare_key) @val.name
-            value: [
-                (string) @val.value
-                (integer) @val.value
-                (boolean) @val.value
-            ]
+            (bare_key) @val.name
+            (string) @val.value
+        )
+        (pair
+            (bare_key) @val.name
+            (integer) @val.value
+        )
+        (pair
+            (bare_key) @val.name
+            (boolean) @val.value
         )
     "#)
     .build()

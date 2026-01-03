@@ -6,14 +6,34 @@ pub fn config() -> LanguageConfig {
         &["js", "jsx", "mjs", "cjs", "vue"]
     )
     .defs(r#"
-          (function_declaration name: (identifier) @function.name) @function.definition
-          (generator_function_declaration name: (identifier) @function.name) @function.definition
-          (method_definition name: (property_identifier) @function.name) @function.definition
-          (class_declaration name: (identifier) @function.name) @function.definition
-          
-          ((variable_declarator 
-             name: (identifier) @function.name 
-             value: [(arrow_function) (function_expression)]
+          (function_declaration
+            name: (identifier) @function.name
+            body: (statement_block) @function.body
+          ) @function.definition
+
+          (generator_function_declaration
+            name: (identifier) @function.name
+            body: (statement_block) @function.body
+          ) @function.definition
+
+          (method_definition
+            name: (property_identifier) @function.name
+            body: (statement_block)? @function.body
+          ) @function.definition
+
+          (class_declaration
+            name: (identifier) @function.name
+            body: (class_body) @function.body
+          ) @function.definition
+
+          ((variable_declarator
+             name: (identifier) @function.name
+             value: (arrow_function body: (_) @function.body)
+          ) @function.definition)
+
+          ((variable_declarator
+             name: (identifier) @function.name
+             value: (function_expression body: (statement_block) @function.body)
           ) @function.definition)
           
           (variable_declarator
@@ -88,7 +108,6 @@ pub fn config() -> LanguageConfig {
                 source: (string) @export.source
             )
             (export_statement
-                (wildcard_export)
                 source: (string) @export.source
             )
             (export_statement

@@ -8,6 +8,7 @@ pub fn config() -> LanguageConfig {
     .defs(r#"
         (block_mapping_pair
           key: (_) @function.name
+          value: (_) @function.body
         ) @function.definition
     "#)
     .docs(r#"

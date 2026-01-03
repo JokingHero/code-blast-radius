@@ -8,14 +8,9 @@ pub fn config() -> LanguageConfig {
     .defs(r#"
         [
             ;; R functions are assignments: f <- function() {}
-            (left_assignment
-                name: (identifier) @function.name
-                value: (function_definition)
-            ) @function.definition
-            
-            (equals_assignment
-                name: (identifier) @function.name
-                value: (function_definition)
+            (binary_operator
+                lhs: (identifier) @function.name
+                rhs: (function_definition)
             ) @function.definition
         ]
     "#)
@@ -33,11 +28,10 @@ pub fn config() -> LanguageConfig {
     "#)
     .docs(r#"
         (
-            (comment)+ @function.docs 
-            . 
+            (comment)+ @function.docs
+            .
             [
-                (left_assignment value: (function_definition))
-                (equals_assignment value: (function_definition))
+                (binary_operator rhs: (function_definition))
             ] @function.definition
         )
     "#)
@@ -60,13 +54,9 @@ pub fn config() -> LanguageConfig {
     .literals(r#"(string) @string"#)
     .vals(r#"
         [
-            (left_assignment
-                name: (identifier) @val.name
-                value: (string) @val.value
-            )
-            (equals_assignment
-                name: (identifier) @val.name
-                value: (string) @val.value
+            (binary_operator
+                lhs: (identifier) @val.name
+                rhs: (string) @val.value
             )
         ]
     "#)

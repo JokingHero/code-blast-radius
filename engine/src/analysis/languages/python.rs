@@ -7,8 +7,8 @@ pub fn config() -> LanguageConfig {
     )
     .defs(r#"
         [
-            (function_definition name: (identifier) @function.name) @function.definition
-            (class_definition name: (identifier) @function.name) @function.definition
+            (function_definition name: (identifier) @function.name body: (block) @function.body) @function.definition
+            (class_definition name: (identifier) @function.name body: (block) @function.body) @function.definition
         ]
     "#)
     .calls(r#"

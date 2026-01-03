@@ -6,9 +6,9 @@ pub fn config() -> LanguageConfig {
         &["go"]
     )
     .defs(r#"
-        (function_declaration name: (identifier) @function.name) @function.definition
-        (method_declaration name: (field_identifier) @function.name) @function.definition
-        (type_spec name: (type_identifier) @function.name) @function.definition
+        (function_declaration name: (identifier) @function.name body: (block) @function.body) @function.definition
+        (method_declaration name: (field_identifier) @function.name body: (block) @function.body) @function.definition
+        (type_spec name: (type_identifier) @function.name type: (struct_type (field_declaration_list) @function.body)) @function.definition
     "#)
     .calls(r#"
         (call_expression function: [

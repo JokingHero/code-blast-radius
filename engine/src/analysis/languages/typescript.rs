@@ -7,37 +7,54 @@ pub fn config() -> LanguageConfig {
     )
     .defs(r#"
           ;; Standard Definitions
-          (function_declaration 
-            name: (identifier) @function.name 
-            return_type: (type_annotation)? @function.return_type 
+          (function_declaration
+            name: (identifier) @function.name
+            return_type: (type_annotation)? @function.return_type
+            body: (statement_block) @function.body
           ) @function.definition
 
-          (method_definition 
-            name: [(property_identifier) (identifier)] @function.name 
-            return_type: (type_annotation)? @function.return_type 
+          (method_definition
+            name: [(property_identifier) (identifier)] @function.name
+            return_type: (type_annotation)? @function.return_type
+            body: (statement_block)? @function.body
           ) @function.definition
 
-          (method_signature 
-            name: [(property_identifier) (identifier)] @function.name 
-            return_type: (type_annotation)? @function.return_type 
+          (method_signature
+            name: [(property_identifier) (identifier)] @function.name
+            return_type: (type_annotation)? @function.return_type
           ) @function.definition
 
-          (class_declaration name: (type_identifier) @function.name) @function.definition
+          (class_declaration
+            name: (type_identifier) @function.name
+            body: (class_body) @function.body
+          ) @function.definition
+
           (interface_declaration name: [(type_identifier) (identifier)] @function.name) @function.definition
 
-          ((variable_declarator 
-            name: (identifier) @function.name 
-            type: (type_annotation)? @variable.type 
-            value: [(arrow_function) (function_expression)]
+          ((variable_declarator
+            name: (identifier) @function.name
+            type: (type_annotation)? @variable.type
+            value: (arrow_function
+              body: (_) @function.body
+            )
+          ) @function.definition)
+
+          ((variable_declarator
+            name: (identifier) @function.name
+            type: (type_annotation)? @variable.type
+            value: (function_expression
+              body: (statement_block) @function.body
+            )
           ) @function.definition)
 
           ;; --- Factories / Framework Patterns ---
-          
+
           ;; 1. Direct Call (e.g., const useStore = create(...))
           (variable_declarator
             name: (identifier) @function.name
             value: (call_expression
                 function: (identifier) @fn_name
+                arguments: (arguments) @function.body
             )
             (#match? @fn_name "^(create|make|define|build|atom|selector)$")
           ) @function.definition
@@ -181,7 +198,6 @@ pub fn config() -> LanguageConfig {
               source: (string) @export.source
             )
             (export_statement
-              (wildcard_import)
               source: (string) @export.source
             )
         ]

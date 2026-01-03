@@ -6,9 +6,12 @@ pub fn config() -> LanguageConfig {
         &["sql"]
     )
     .defs(r#"
-        (create_table
-            (object_reference
-                name: (identifier) @function.name
+        (statement
+            (create_table
+                (object_reference
+                    name: (identifier) @function.name
+                )
+                (column_definitions) @function.body
             )
         ) @function.definition
     "#)
@@ -21,7 +24,7 @@ pub fn config() -> LanguageConfig {
     "#)
     // Capture string literals (e.g. 'active', 'user')
     .literals(r#"
-        (string_literal) @string
+        (literal) @string
     "#)
     .types(r#"
         ;; Capture column names as type refs.

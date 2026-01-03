@@ -7,17 +7,19 @@ pub fn config() -> LanguageConfig {
     )
     .defs(r#"
         ;; Resources and Data sources have 2 labels: type and name
-        (block 
+        (block
             (identifier) @function.kind
             (string_lit (template_literal) @function.name)
             (string_lit (template_literal) @resource.instance_name)
+            (body) @function.body
             (#match? @function.kind "^(resource|data)$")
         ) @function.definition
-        
+
         ;; Variables, Outputs, Modules, Providers have 1 label: name
-        (block 
+        (block
             (identifier) @function.kind
             (string_lit (template_literal) @function.name)
+            (body) @function.body
             (#match? @function.kind "^(variable|output|module|provider)$")
         ) @function.definition
     "#)

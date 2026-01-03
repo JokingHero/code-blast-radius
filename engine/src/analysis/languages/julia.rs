@@ -7,24 +7,32 @@ pub fn config() -> LanguageConfig {
     )
     .defs(r#"
         [
-            (function_definition name: (identifier) @function.name) @function.definition
-            (macro_definition name: (identifier) @function.name) @function.definition
-            (struct_definition name: (identifier) @function.name) @function.definition
-            (abstract_definition name: (identifier) @function.name) @function.definition
-            (module_definition name: (identifier) @function.name) @function.definition
-            
-            ;; Short-form function definition: f(x) = x + 1
-            ;; We differentiate this from variable assignment by checking if 'left' is a call
-            (assignment 
-                left: (call_expression function: (identifier) @function.name)
+            (function_definition
+                (signature
+                    (call_expression
+                        (identifier) @function.name
+                    )
+                )
+            ) @function.definition
+            (macro_definition
+                (signature
+                    (call_expression
+                        (identifier) @function.name
+                    )
+                )
             ) @function.definition
         ]
     "#)
     .calls(r#"
         [
-            (call_expression function: (identifier) @call.name)
-            (call_expression function: (field_expression field: (identifier) @call.name))
-            (macro_call_expression name: (macro_identifier) @call.name)
+            (call_expression
+                (identifier) @call.name
+            )
+            (call_expression
+                (field_expression
+                    (identifier) @call.name
+                )
+            )
         ]
     "#)
     .docs(r#"
@@ -54,28 +62,20 @@ pub fn config() -> LanguageConfig {
     .literals(r#"
         [
             (string_literal)
-            (cmd_string)
         ] @string
     "#)
     .vals(r#"
         [
-            (const_statement
-                (assignment
-                    left: (identifier) @val.name
-                    right: (string_literal) @val.value
-                )
-            )
             (assignment
-                left: (identifier) @val.name
-                right: (string_literal) @val.value
+                (identifier) @val.name
+                (string_literal) @val.value
             )
         ]
     "#)
     .types(r#"
         [
-            (typed_expression type: (identifier) @type.ref)
-            (struct_definition 
-                (field_declaration type: (identifier) @type.ref)
+            (typed_expression
+                (identifier) @type.ref
             )
         ]
     "#)

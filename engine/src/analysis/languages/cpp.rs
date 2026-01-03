@@ -14,11 +14,15 @@ pub fn config() -> LanguageConfig {
                 (qualified_identifier name: (identifier) @function.name)
                 (field_identifier) @function.name
             ]
+            body: (compound_statement) @function.body
         ) @function.definition
-        (class_specifier name: [
-            (type_identifier) @function.name
-            (qualified_identifier name: (type_identifier) @function.name)
-        ]) @function.definition
+        (class_specifier
+            name: [
+                (type_identifier) @function.name
+                (qualified_identifier name: (type_identifier) @function.name)
+            ]
+            body: (field_declaration_list) @function.body
+        ) @function.definition
     "#)
     .calls(r#"
         (call_expression

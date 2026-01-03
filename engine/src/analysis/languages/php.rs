@@ -6,15 +6,15 @@ pub fn config() -> LanguageConfig {
         &["php"]
     )
     .defs(r#"
-        (function_definition name: (identifier) @function.name) @function.definition
-        (method_declaration name: (identifier) @function.name) @function.definition
-        (class_declaration name: (identifier) @function.name) @function.definition
+        (function_definition name: (name) @function.name body: (compound_statement) @function.body) @function.definition
+        (method_declaration name: (name) @function.name body: (compound_statement) @function.body) @function.definition
+        (class_declaration name: (name) @function.name body: (declaration_list) @function.body) @function.definition
     "#)
     .calls(r#"
         (function_call_expression
             function: [
-                (qualified_name (identifier) @call.name)
-                (member_call_expression name: (field_identifier) @call.name)
+                (qualified_name (name) @call.name)
+                (member_call_expression name: (name) @call.name)
             ]
         )
     "#)

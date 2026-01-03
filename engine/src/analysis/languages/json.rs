@@ -6,7 +6,7 @@ pub fn config() -> LanguageConfig {
         &["json"]
     )
     // Matches keys in "key": value pairs
-    .defs(r#"(pair key: (string (string_content) @function.name)) @function.definition"#)
+    .defs(r#"(pair key: (string (string_content) @function.name) value: (_) @function.body) @function.definition"#)
     .literals(r#"(string_content) @string"#)
     .build()
 }

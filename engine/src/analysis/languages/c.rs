@@ -12,6 +12,12 @@ pub fn config() -> LanguageConfig {
                 (function_declarator declarator: (identifier) @function.name)
                 (pointer_declarator declarator: (function_declarator declarator: (identifier) @function.name))
             ]
+            body: (compound_statement) @function.body
+        ) @function.definition
+
+        (struct_specifier
+            name: (type_identifier) @function.name
+            body: (field_declaration_list) @function.body
         ) @function.definition
     "#)
     .calls(r#"

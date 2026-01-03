@@ -7,11 +7,11 @@ pub fn config() -> LanguageConfig {
     )
     .defs(r#"
         [
-            (class_declaration name: (identifier) @function.name) @function.definition
+            (class_declaration name: (identifier) @function.name body: (class_body) @function.body) @function.definition
             (interface_declaration name: (identifier) @function.name) @function.definition
             (enum_declaration name: (identifier) @function.name) @function.definition
             (annotation_type_declaration name: (identifier) @function.name) @function.definition
-            (method_declaration name: (identifier) @function.name) @function.definition
+            (method_declaration name: (identifier) @function.name body: (block) @function.body) @function.definition
             (constructor_declaration name: (identifier) @function.name) @function.definition
             (record_declaration name: (identifier) @function.name) @function.definition
         ]
@@ -47,15 +47,14 @@ pub fn config() -> LanguageConfig {
         (class_declaration
             name: (identifier) @impl.child
             superclass: (superclass (type_identifier) @impl.parent)?
-            interfaces: (super_interfaces (type_identifier) @impl.parent)?
+            interfaces: (super_interfaces (type_list (type_identifier) @impl.parent))?
         )
         (interface_declaration
             name: (identifier) @impl.child
-            extends_interfaces: (extends_interfaces (type_identifier) @impl.parent)?
         )
         (record_declaration
             name: (identifier) @impl.child
-            interfaces: (super_interfaces (type_identifier) @impl.parent)?
+            interfaces: (super_interfaces (type_list (type_identifier) @impl.parent))?
         )
     "#)
     .vals(r#"

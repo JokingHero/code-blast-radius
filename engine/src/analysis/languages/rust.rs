@@ -7,12 +7,23 @@ pub fn config() -> LanguageConfig {
     )
     .defs(r#"
         ;; 1. Standard Function Definitions
-        (function_item name: (identifier) @function.name) @function.definition
-        
-        ;; 2. Macro Definitions (macro_rules! foo {})
-        (macro_definition name: (identifier) @function.name) @function.definition
+        (function_item
+            name: (identifier) @function.name
+            body: (block) @function.body
+        ) @function.definition
 
-        ;; 3. Common Library Patterns
+        ;; 2. Macro Definitions (macro_rules! foo {})
+        (macro_definition
+            name: (identifier) @function.name
+        ) @function.definition
+
+        ;; 3. Impl blocks - anonymous container
+        (impl_item
+            type: (type_identifier)
+            body: (declaration_list) @function.body
+        ) @function.definition
+
+        ;; 4. Common Library Patterns
         
         ;; thread_local! { static FOO: ... }
         (macro_invocation

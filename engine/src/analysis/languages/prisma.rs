@@ -6,6 +6,7 @@ pub fn config() -> LanguageConfig {
         .defs(r#"
             (model_declaration
             (identifier) @function.name
+            (statement_block) @function.body
             ) @function.definition
             "#)
                     .docs(r#"

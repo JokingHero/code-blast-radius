@@ -23,12 +23,10 @@ pub fn config() -> LanguageConfig {
         )
     "#)
     .exports(r#"
-        (command
-            name: (command_name (word) @cmd)
-            argument: (variable_assignment
+        (declaration_command
+            (variable_assignment
                 name: (variable_name) @export.name
             )
-            (#eq? @cmd "export")
         )
     "#)
     .vals(r#"

@@ -6,7 +6,7 @@ pub fn config() -> LanguageConfig {
         &["rb"]
     )
     .defs(r#"
-        (method name: (identifier) @function.name) @function.definition
+        (method name: (identifier) @function.name body: (body_statement) @function.body) @function.definition
         (class name: [
             (constant) @function.name
             (scope_resolution name: (constant) @function.name)
