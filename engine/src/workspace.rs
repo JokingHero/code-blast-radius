@@ -1,13 +1,16 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{PathBuf};
 use std::fs;
 use anyhow::{Result, Context};
+use crate::recipes::models::Recipe;
 use crate::resolution::{Indexer, pipeline::Pipeline};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct WorkspaceConfig {
     pub name: String,
     pub roots: Vec<PathBuf>,
+    pub recipes: HashMap<String, Recipe>,
 }
 
 pub struct WorkspaceManager {

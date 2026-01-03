@@ -1,12 +1,13 @@
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 use anyhow::{Context, Result};
 
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
-use blast_radius_engine::query::traversal::find_related_symbols;
+use blast_radius_engine::query::traversal::GraphWalker;
 use blast_radius_engine::query::output::generate_context_output;
 use blast_radius_engine::workspace::WorkspaceManager;
+use blast_radius_engine::recipes::executor::RecipeExecutor;
+use blast_radius_engine::recipes::models::Recipe;
 use nucleo_matcher::{Matcher, Config, Utf32String};
 
 #[derive(Parser, Debug)]
@@ -22,16 +23,14 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Analyze blast radius for a symbol
+    /// Analyze blast radius for a symbol OR a file path.
+    /// If the argument matches a file path, it calculates the combined impact of all symbols in that file.
     Radius {
-        #[arg(short, long)]
-        function_name: String,
+        /// Function name, Class name, or File path (relative)
+        symbol: String,
 
         #[arg(long, default_value_t = true)]
         no_tests: bool,
-
-        #[arg(long)]
-        impact: Option<PathBuf>,
     },
     /// Find symbols or files using fuzzy search
     Find {
@@ -45,6 +44,11 @@ enum Commands {
     Workspace {
         #[command(subcommand)]
         action: WorkspaceAction,
+    },
+    /// Manage and Run Context Recipes
+    Recipe {
+        #[command(subcommand)]
+        action: RecipeAction,
     }
 }
 
@@ -56,8 +60,27 @@ enum WorkspaceAction {
     Add { root: PathBuf },
     /// Remove a root folder from the workspace
     Remove { root: PathBuf },
-    /// Refresh/Sync the workspace (Check for file changes)
+    /// Refresh/Sync the workspace (Explicit command, though Sync happens automatically now)
     Sync,
+}
+
+#[derive(Subcommand, Debug)]
+enum RecipeAction {
+    /// List all recipes defined in the workspace
+    List,
+    /// Add or Overwrite a recipe. Expects a JSON string definition.
+    Add { 
+        #[arg(short, long)]
+        json: String 
+    },
+    /// Remove a recipe by name
+    Remove { 
+        name: String 
+    },
+    /// Run a specific recipe and output the context JSON
+    Run { 
+        name: String 
+    },
 }
 
 #[derive(serde::Serialize)]
@@ -79,99 +102,171 @@ fn main() {
     }
 }
 
+/// Helper to normalize where Config and Index live based on user input
+fn resolve_paths(input: &Path) -> Result<(PathBuf, PathBuf)> {
+    if input.is_file() && input.extension().map_or(false, |e| e == "cblast") {
+        // Explicit Workspace File: ./my-project.cblast
+        let config_path = input.to_path_buf();
+        let index_path = input.with_extension("cblast.index");
+        Ok((config_path, index_path))
+    } else if input.is_dir() {
+        // Implicit Directory Workspace: ./my-project/.cblast/
+        let cblast_dir = input.join(".cblast");
+        if !cblast_dir.exists() {
+            std::fs::create_dir(&cblast_dir).ok(); 
+        }
+        let config_path = cblast_dir.join("workspace.json");
+        let index_path = cblast_dir.join("index.bin");
+        Ok((config_path, index_path))
+    } else {
+        anyhow::bail!("Path must be a directory or a .cblast file");
+    }
+}
+
 fn run() -> Result<()> {
     let cli = Cli::parse();
 
-    // --- WORKSPACE MANAGEMENT COMMANDS ---
-    // These operate on the .cblast file specifically
-    if let Commands::Workspace { action } = cli.command {
-        // For workspace commands, cli.path MUST be the .cblast file path (or where we want to create it)
-        let mut manager = WorkspaceManager::new(cli.path.clone())
-            .context("Failed to load/create workspace context")?;
+    // 1. Resolve Paths
+    let (config_path, _index_path) = resolve_paths(&cli.path)?;
 
-        match action {
-            WorkspaceAction::Init { name } => {
-                manager.config.name = name;
-                println!("Initialized workspace: {}", cli.path.display());
-            }
-            WorkspaceAction::Add { root } => {
-                manager.add_root(root);
-                println!("Added root. Total roots: {}", manager.config.roots.len());
-            }
-            WorkspaceAction::Remove { root } => {
-                manager.remove_root(root);
-                println!("Removed root. Total roots: {}", manager.config.roots.len());
-            }
-            WorkspaceAction::Sync => {
-                manager.sync();
-                println!("Workspace synced successfully.");
-            }
-        }
-        
-        manager.save().context("Failed to save workspace state")?;
-        return Ok(());
+    // 2. Load Manager (Handles Config + Index loading)
+    let mut manager = WorkspaceManager::new(config_path.clone())
+        .context("Failed to load workspace")?;
+
+    // 3. Auto-Add Root in Directory Mode
+    // If we are in directory mode and the config is empty (newly created), 
+    // automatically add the directory itself as a root.
+    if cli.path.is_dir() && manager.config.roots.is_empty() {
+        let abs_root = std::fs::canonicalize(&cli.path).unwrap_or(cli.path.clone());
+        manager.add_root(abs_root);
     }
 
-    // --- READ-ONLY COMMANDS (Radius / Find) ---
-    // We need to load the index correctly depending on whether the user gave us a Folder or a .cblast File
-    
-    let index_path = if cli.path.is_file() && cli.path.extension().map_or(false, |e| e == "cblast") {
-        // Multi-root mode: Index is adjacent (project.cblast.index)
-        cli.path.with_extension("cblast.index")
-    } else if cli.path.is_dir() {
-        // Single-folder mode: Index is inside (.cblast/index.bin)
-        cli.path.join(".cblast").join("index.bin")
-    } else {
-        anyhow::bail!("Path must be a directory or a .cblast file: {:?}", cli.path);
-    };
+    // 4. SYNC (Incremental Update)
+    // Always sync to ensure freshness before any operation.
+    // This is critical for Recipes to ensure AST byte offsets match disk content.
+    manager.sync();
+    manager.save().context("Failed to save workspace state")?;
 
-    if !index_path.exists() {
-        // If index doesn't exist, we try to scan on the fly for single folder, or fail for workspace
-        if cli.path.is_dir() {
-            eprintln!("Index not found. Scanning now...");
-            let mut indexer = Indexer::new();
-            let mut pipeline = Pipeline::new();
-            pipeline.run(&mut indexer, &cli.path);
-            let _ = indexer.save(&index_path); // Try save but ignore failure
-            // Continue with this in-memory indexer...
-            // (In a real app refactor, we would unify this logic, but this keeps existing behavior working)
-        } else {
-             anyhow::bail!("Index not found at {:?}. Run 'cblast workspace sync' first.", index_path);
+    match &cli.command {
+        // --- WORKSPACE MANAGEMENT ---
+        Commands::Workspace { action } => {
+            match action {
+                WorkspaceAction::Init { name } => {
+                    manager.config.name = name.clone();
+                    manager.save()?;
+                    println!("Initialized workspace config at {:?}", config_path);
+                }
+                WorkspaceAction::Add { root } => {
+                    manager.add_root(root.clone());
+                    manager.save()?;
+                    println!("Added root. Total roots: {}", manager.config.roots.len());
+                }
+                WorkspaceAction::Remove { root } => {
+                    manager.remove_root(root.clone());
+                    manager.save()?;
+                    println!("Removed root. Total roots: {}", manager.config.roots.len());
+                }
+                WorkspaceAction::Sync => {
+                    println!("Workspace synced successfully.");
+                }
+            }
         }
-    }
 
-    // Load the index for querying
-    let indexer = Indexer::load_from_file(&index_path).unwrap_or_else(|_| Indexer::new());
-
-    match cli.command {
-        Commands::Radius { function_name, no_tests, impact: _ } => {
-            let symbol_ids = find_related_symbols(
-                &indexer.index,
-                &indexer.lookup,
-                &indexer.reverse_graph,
-                &function_name
-            ).ok_or_else(|| anyhow::anyhow!("Symbol not found: {}", function_name))?;
-            
-            let mut symbol_ids = symbol_ids;
-
-            if no_tests {
-                 symbol_ids.retain(|&id| {
-                    if let Some(sym) = indexer.index.symbols.get(&id) {
-                        !sym.is_test
+        // --- RECIPE MANAGEMENT ---
+        Commands::Recipe { action } => {
+            match action {
+                RecipeAction::List => {
+                    let names: Vec<String> = manager.config.recipes.keys().cloned().collect();
+                    println!("{}", serde_json::to_string_pretty(&names)?);
+                }
+                RecipeAction::Add { json } => {
+                    let recipe: Recipe = serde_json::from_str(json)
+                        .context("Invalid recipe JSON")?;
+                    let name = recipe.name.clone();
+                    manager.config.recipes.insert(name.clone(), recipe);
+                    manager.save()?;
+                    println!("Recipe '{}' saved.", name);
+                }
+                RecipeAction::Remove { name } => {
+                    if manager.config.recipes.remove(name).is_some() {
+                        manager.save()?;
+                        println!("Recipe '{}' Removed.", name);
                     } else {
-                        true
+                        eprintln!("Recipe '{}' not found.", name);
+                        process::exit(1);
                     }
-                 });
+                }
+                RecipeAction::Run { name } => {
+                    let recipe = manager.config.recipes.get(name)
+                        .ok_or_else(|| anyhow::anyhow!("Recipe '{}' not found", name))?;
+
+                    let executor = RecipeExecutor::new(&manager.indexer);
+                    let output = executor.execute(recipe)?;
+                    
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                }
+            }
+        }
+
+        // --- QUERY: RADIUS (Smart Impact) ---
+        Commands::Radius { symbol, no_tests } => {
+            let indexer = &manager.indexer;
+            
+            // Step A: Check if input is a File Path
+            // We search for files ending with the input string (fuzzy path match)
+            let matching_file_id = indexer.index.files.values()
+                .find(|f| f.path.ends_with(symbol) || f.path == *symbol)
+                .map(|f| f.id);
+
+            let mut start_ids = Vec::new();
+
+            if let Some(fid) = matching_file_id {
+                // It's a file! Gather all symbols defined in this file.
+                for sym in indexer.index.symbols.values() {
+                    if sym.file_id == fid {
+                        start_ids.push(sym.id);
+                    }
+                }
+                if start_ids.is_empty() {
+                    // Fallback: If file exists but has no symbols (e.g. pure script), 
+                    // we can't traverse graph from it, but maybe we should output the file itself?
+                    // For now, warn.
+                    eprintln!("File found, but it contains no indexed symbols to trace from.");
+                    return Ok(());
+                }
+            } else {
+                // It's a Symbol Name! Lookup IDs.
+                if let Some(ids) = indexer.lookup.symbol_map.get(symbol) {
+                    start_ids.extend(ids.iter());
+                } else {
+                    anyhow::bail!("Symbol or File not found: {}", symbol);
+                }
             }
 
-            let output = generate_context_output(&indexer.index, &symbol_ids);
-            println!("{}", serde_json::to_string_pretty(&output).context("Failed to serialize output")?);
+            // Step B: Traverse Graph
+            let walker = GraphWalker::new(&indexer.index, &indexer.reverse_graph);
+            let mut related_ids = walker.walk_deep(&start_ids);
+
+            // Step C: Filter
+            if *no_tests {
+                related_ids.retain(|&id| {
+                    indexer.index.symbols.get(&id).map_or(true, |s| !s.is_test)
+                });
+            }
+
+            // Step D: Output
+            let output = generate_context_output(&indexer.index, &related_ids);
+            println!("{}", serde_json::to_string_pretty(&output)?);
         }
+
+        // --- QUERY: FIND (Fuzzy Search) ---
         Commands::Find { query, limit } => {
+            let indexer = &manager.indexer;
             let mut matcher = Matcher::new(Config::DEFAULT);
             let mut results = Vec::new();
             let query_utf32 = Utf32String::from(query.as_str());
 
+            // Match Symbols
             for sym in indexer.index.symbols.values() {
                 if let Some(score) = matcher.fuzzy_match(Utf32String::from(sym.name.as_str()).slice(..), query_utf32.slice(..)) {
                     let file_path = indexer.index.files.values()
@@ -188,6 +283,7 @@ fn run() -> Result<()> {
                 }
             }
 
+            // Match Files
             for file in indexer.index.files.values() {
                 if let Some(score) = matcher.fuzzy_match(Utf32String::from(file.path.as_str()).slice(..), query_utf32.slice(..)) {
                     results.push(MatchResult {
@@ -200,11 +296,10 @@ fn run() -> Result<()> {
             }
 
             results.sort_by(|a, b| b.score.cmp(&a.score));
-            results.truncate(limit);
+            results.truncate(*limit);
 
-            println!("{}", serde_json::to_string_pretty(&results).context("Failed to serialize search results")?);
+            println!("{}", serde_json::to_string_pretty(&results)?);
         }
-        _ => {} // Workspace handled above
     }
 
     Ok(())

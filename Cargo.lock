@@ -367,6 +367,7 @@ dependencies = [
  "blake3",
  "cc",
  "clap",
+ "globset",
  "ignore",
  "memmap2",
  "nucleo-matcher",
