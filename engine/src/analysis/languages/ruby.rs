@@ -6,11 +6,22 @@ pub fn config() -> LanguageConfig {
         &["rb"]
     )
     .defs(r#"
-        (method name: (identifier) @function.name body: (body_statement) @function.body) @function.definition
+        ;; Methods - body is optional for one-liners like "def foo; end"
+        (method
+            name: (identifier) @function.name
+            body: (body_statement)? @function.body
+        ) @function.definition
+        ;; Singleton methods (def self.foo)
+        (singleton_method
+            name: (identifier) @function.name
+            body: (body_statement)? @function.body
+        ) @function.definition
+        ;; Classes
         (class name: [
             (constant) @function.name
             (scope_resolution name: (constant) @function.name)
         ]) @function.definition
+        ;; Modules
         (module name: [
             (constant) @function.name
             (scope_resolution name: (constant) @function.name)

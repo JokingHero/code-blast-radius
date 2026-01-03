@@ -11,7 +11,7 @@ pub fn config() -> LanguageConfig {
             (identifier) @function.kind
             (string_lit (template_literal) @function.name)
             (string_lit (template_literal) @resource.instance_name)
-            (body) @function.body
+            (body)? @function.body
             (#match? @function.kind "^(resource|data)$")
         ) @function.definition
 
@@ -19,7 +19,7 @@ pub fn config() -> LanguageConfig {
         (block
             (identifier) @function.kind
             (string_lit (template_literal) @function.name)
-            (body) @function.body
+            (body)? @function.body
             (#match? @function.kind "^(variable|output|module|provider)$")
         ) @function.definition
     "#)

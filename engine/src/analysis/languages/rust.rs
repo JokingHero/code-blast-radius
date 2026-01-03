@@ -12,36 +12,48 @@ pub fn config() -> LanguageConfig {
             body: (block) @function.body
         ) @function.definition
 
-        ;; 2. Macro Definitions (macro_rules! foo {})
+        ;; 2. Struct Definitions
+        (struct_item
+            name: (type_identifier) @function.name
+            body: (field_declaration_list) @function.body
+        ) @function.definition
+
+        ;; 3. Enum Definitions
+        (enum_item
+            name: (type_identifier) @function.name
+            body: (enum_variant_list) @function.body
+        ) @function.definition
+
+        ;; 4. Macro Definitions (macro_rules! foo {})
         (macro_definition
             name: (identifier) @function.name
         ) @function.definition
 
-        ;; 3. Impl blocks - anonymous container
+        ;; 5. Impl blocks - anonymous container (the type name is captured for context but not as the definition name)
         (impl_item
             type: (type_identifier)
             body: (declaration_list) @function.body
         ) @function.definition
 
         ;; 4. Common Library Patterns
-        
+
         ;; thread_local! { static FOO: ... }
+        ;; Pattern: thread_local! { static NAME: type }
         (macro_invocation
             macro: (identifier) @m (#eq? @m "thread_local")
             (token_tree
-                (identifier) @kw_static (#eq? @kw_static "static")
-                .
                 (identifier) @function.name
+                (#not-match? @function.name "^(static|ref)$")
             )
         ) @function.definition
 
         ;; lazy_static! { static ref FOO: ... }
+        ;; Pattern: lazy_static! { static ref NAME: type }
         (macro_invocation
             macro: (identifier) @m (#eq? @m "lazy_static")
             (token_tree
-                (identifier) @kw_ref (#eq? @kw_ref "ref")
-                .
                 (identifier) @function.name
+                (#not-match? @function.name "^(static|ref)$")
             )
         ) @function.definition
 

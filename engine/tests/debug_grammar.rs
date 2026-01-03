@@ -520,3 +520,273 @@ fn inspect_cpp_structure() {
     println!("{}", tree.root_node().to_sexp());
     println!("------------------------\n");
 }
+
+#[test]
+fn inspect_rust_struct_and_impl() {
+    let mut parser = Parser::new();
+    let language = get_language(SupportedLanguage::Rust);
+    parser.set_language(&language).expect("Error loading Rust grammar");
+    let code = r#"
+fn calculate() {}
+pub struct User { id: u32 }
+impl User {
+    fn new() -> Self { User { id: 0 } }
+}
+"#;
+    let tree = parser.parse(code, None).unwrap();
+    println!("\n--- RUST STRUCT AND IMPL ---");
+    println!("{}", tree.root_node().to_sexp());
+    println!("-----------------------\n");
+}
+
+#[test]
+fn inspect_ruby_module_and_class() {
+    let mut parser = Parser::new();
+    let language = get_language(SupportedLanguage::Ruby);
+    parser.set_language(&language).expect("Error loading Ruby grammar");
+    let code = r#"
+module Utils
+  class Parser
+    def parse; end
+  end
+end
+"#;
+    let tree = parser.parse(code, None).unwrap();
+    println!("\n--- RUBY MODULE AND CLASS ---");
+    println!("{}", tree.root_node().to_sexp());
+    println!("-----------------------\n");
+}
+
+#[test]
+fn inspect_cpp_class_with_method() {
+    let mut parser = Parser::new();
+    let language = get_language(SupportedLanguage::Cpp);
+    parser.set_language(&language).expect("Error loading Cpp grammar");
+    let code = r#"
+class Engine {
+    public:
+        void start() {}
+};
+"#;
+    let tree = parser.parse(code, None).unwrap();
+    println!("\n--- CPP CLASS WITH METHOD ---");
+    println!("{}", tree.root_node().to_sexp());
+    println!("-----------------------\n");
+}
+
+#[test]
+fn inspect_hcl_variable_and_data() {
+    let mut parser = Parser::new();
+    let language = get_language(SupportedLanguage::Hcl);
+    parser.set_language(&language).expect("Error loading Hcl grammar");
+    let code = r#"
+resource "aws_s3_bucket" "b" { bucket = "b" }
+variable "region" {}
+data "aws_ami" "ubuntu" {}
+"#;
+    let tree = parser.parse(code, None).unwrap();
+    println!("\n--- HCL VARIABLE AND DATA ---");
+    println!("{}", tree.root_node().to_sexp());
+    println!("-----------------------\n");
+}
+
+#[test]
+fn inspect_rust_thread_local_macro() {
+    let mut parser = Parser::new();
+    let language = get_language(SupportedLanguage::Rust);
+    parser.set_language(&language).expect("Error loading Rust grammar");
+    let code = "thread_local! { static CONTEXT: i32 = 0; }";
+    let tree = parser.parse(code, None).unwrap();
+    println!("\n--- RUST THREAD_LOCAL MACRO ---");
+    println!("{}", tree.root_node().to_sexp());
+    println!("-----------------------\n");
+}
+
+#[test]
+fn inspect_rust_lazy_static_macro() {
+    let mut parser = Parser::new();
+    let language = get_language(SupportedLanguage::Rust);
+    parser.set_language(&language).expect("Error loading Rust grammar");
+    let code = "lazy_static! { static ref CONFIG: i32 = 0; }";
+    let tree = parser.parse(code, None).unwrap();
+    println!("\n--- RUST LAZY_STATIC MACRO ---");
+    println!("{}", tree.root_node().to_sexp());
+
+    // Inspect token_tree children
+    let root = tree.root_node();
+    let code_bytes = code.as_bytes();
+    if let Some(macro_invoc) = root.child(0) {
+        println!("\nMacro invocation kind: {}", macro_invoc.kind());
+        for i in 0..macro_invoc.child_count() {
+            let child = macro_invoc.child(i).unwrap();
+            println!("  Child {}: {} = '{}'", i, child.kind(), child.utf8_text(code_bytes).unwrap_or(""));
+            if child.kind() == "token_tree" {
+                for j in 0..child.child_count() {
+                    let tc = child.child(j).unwrap();
+                    println!("    TokenTree child {}: {} = '{}'", j, tc.kind(), tc.utf8_text(code_bytes).unwrap_or(""));
+                }
+            }
+        }
+    }
+    println!("-----------------------\n");
+}
+
+#[test]
+fn inspect_rust_macro_test_code() {
+    let mut parser = Parser::new();
+    let language = get_language(SupportedLanguage::Rust);
+    parser.set_language(&language).expect("Error loading Rust grammar");
+    let code = r#"
+                macro_rules! my_macro { () => {} }
+                lazy_static! { static ref CONFIG: i32 = 0; }
+                thread_local! { static CONTEXT: i32 = 0; }
+            "#;
+    let tree = parser.parse(code, None).unwrap();
+    println!("\n--- RUST MACRO TEST CODE ---");
+    println!("{}", tree.root_node().to_sexp());
+
+    let root = tree.root_node();
+    let code_bytes = code.as_bytes();
+    for i in 0..root.child_count() {
+        let child = root.child(i).unwrap();
+        if child.kind() == "macro_invocation" {
+            println!("\nMacro invocation {}: {}", i, child.utf8_text(code_bytes).unwrap_or(""));
+            for j in 0..child.child_count() {
+                let grandchild = child.child(j).unwrap();
+                if grandchild.kind() == "token_tree" {
+                    println!("  TokenTree: {}", grandchild.utf8_text(code_bytes).unwrap_or(""));
+                    for k in 0..grandchild.child_count() {
+                        let tc = grandchild.child(k).unwrap();
+                        println!("    {}: {}", tc.kind(), tc.utf8_text(code_bytes).unwrap_or(""));
+                    }
+                }
+            }
+        }
+    }
+    println!("-----------------------\n");
+}
+
+#[test]
+fn test_rust_macro_query() {
+    use blast_radius_engine::analysis::language::{get_language, SupportedLanguage};
+    use tree_sitter::{Query, StreamingIterator};
+
+    let mut parser = tree_sitter::Parser::new();
+    let language = get_language(SupportedLanguage::Rust);
+    parser.set_language(&language).expect("Error loading Rust grammar");
+
+    // Test with pattern for lazy_static - capture token_tree and inspect it
+    let query_str = r#"
+        (macro_invocation
+            macro: (identifier) @m (#eq? @m "lazy_static")
+            (token_tree) @tt
+        )
+    "#;
+
+    let code = b"lazy_static! { static ref CONFIG: i32 = 0; }";
+    let tree = parser.parse(code, None).unwrap();
+
+    match Query::new(&language, query_str) {
+        Ok(query) => {
+            let mut cursor = tree_sitter::QueryCursor::new();
+            let mut matches = cursor.matches(&query, tree.root_node(), &code[..]);
+            println!("\n--- LAZY_STATIC MACRO TOKEN_TREE ---");
+            while let Some(mat) = matches.next() {
+                for cap in mat.captures {
+                    let cap_name = &query.capture_names()[cap.index as usize];
+                    let text = cap.node.utf8_text(&code[..]).unwrap_or("");
+                    println!("  Capture '{}' = '{}'", cap_name, text);
+                    if cap_name == &"tt" && cap.node.kind() == "token_tree" {
+                        println!("    TokenTree has {} children:", cap.node.child_count());
+                        for j in 0..cap.node.child_count() {
+                            let tc = cap.node.child(j).unwrap();
+                            println!("      {}: {} = '{}'", j, tc.kind(), tc.utf8_text(&code[..]).unwrap_or(""));
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => println!("Query error: {:?}", e),
+    }
+
+    // Test thread_local
+    let query_str2 = r#"
+        (macro_invocation
+            macro: (identifier) @m (#eq? @m "thread_local")
+            (token_tree) @tt
+        )
+    "#;
+
+    let code2 = b"thread_local! { static CONTEXT: i32 = 0; }";
+    let tree2 = parser.parse(code2, None).unwrap();
+
+    match Query::new(&language, query_str2) {
+        Ok(query) => {
+            let mut cursor = tree_sitter::QueryCursor::new();
+            let mut matches = cursor.matches(&query, tree2.root_node(), &code2[..]);
+            println!("\n--- THREAD_LOCAL MACRO TOKEN_TREE ---");
+            while let Some(mat) = matches.next() {
+                for cap in mat.captures {
+                    let cap_name = &query.capture_names()[cap.index as usize];
+                    let text = cap.node.utf8_text(&code2[..]).unwrap_or("");
+                    println!("  Capture '{}' = '{}'", cap_name, text);
+                    if cap_name == &"tt" && cap.node.kind() == "token_tree" {
+                        println!("    TokenTree has {} children:", cap.node.child_count());
+                        for j in 0..cap.node.child_count() {
+                            let tc = cap.node.child(j).unwrap();
+                            println!("      {}: {} = '{}'", j, tc.kind(), tc.utf8_text(&code2[..]).unwrap_or(""));
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => println!("Query error: {:?}", e),
+    }
+
+    // Now try to match the name - third identifier for lazy_static
+    let query_str3 = r#"
+        (macro_invocation
+            macro: (identifier) @m (#eq? @m "lazy_static")
+            (token_tree
+                (_)* @skip
+                (identifier) @name
+            )
+        )
+    "#;
+
+    match Query::new(&language, query_str3) {
+        Ok(query) => {
+            let mut cursor = tree_sitter::QueryCursor::new();
+            let mut matches = cursor.matches(&query, tree.root_node(), &code[..]);
+            println!("\n--- LAZY_STATIC IDENTIFIER MATCHES ---");
+            while let Some(mat) = matches.next() {
+                for cap in mat.captures {
+                    let cap_name = &query.capture_names()[cap.index as usize];
+                    let text = cap.node.utf8_text(&code[..]).unwrap_or("");
+                    if cap_name == &"name" {
+                        println!("  Name = '{}'", text);
+                    }
+                }
+            }
+        }
+        Err(e) => println!("Query error: {:?}", e),
+    }
+    println!("-----------------------\n");
+}
+
+#[test]
+fn inspect_cpp_method_in_class() {
+    let mut parser = Parser::new();
+    let language = get_language(SupportedLanguage::Cpp);
+    parser.set_language(&language).expect("Error loading Cpp grammar");
+    let code = r#"
+class Engine {
+    public:
+        void start() {}
+};
+"#;
+    let tree = parser.parse(code, None).unwrap();
+    println!("\n--- CPP METHOD IN CLASS ---");
+    println!("{}", tree.root_node().to_sexp());
+    println!("-----------------------\n");
+}

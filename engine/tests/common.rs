@@ -10,6 +10,7 @@ pub struct TestWorkspace {
 }
 
 impl TestWorkspace {
+    #[allow(dead_code)] 
     pub fn new() -> Self {
         let temp = TempDir::new().expect("Failed to create temp dir");
         let path = temp.path().to_path_buf();

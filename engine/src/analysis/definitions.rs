@@ -154,7 +154,8 @@ pub fn extract_definitions(
                 node_kind.contains("class") ||
                 node_kind.contains("interface") ||
                 node_kind.contains("struct") ||
-                node_kind.contains("impl")
+                node_kind.contains("impl") ||
+                node_kind.contains("module")
             {
                 SymbolKind::Container
             } else {

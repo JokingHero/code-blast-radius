@@ -10,7 +10,9 @@ pub fn config() -> LanguageConfig {
             declarator: [
                 (identifier) @function.name
                 (function_declarator declarator: (identifier) @function.name)
+                (function_declarator declarator: (field_identifier) @function.name)
                 (pointer_declarator declarator: (function_declarator declarator: (identifier) @function.name))
+                (pointer_declarator declarator: (function_declarator declarator: (field_identifier) @function.name))
                 (qualified_identifier name: (identifier) @function.name)
                 (field_identifier) @function.name
             ]
