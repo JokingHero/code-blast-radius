@@ -42,6 +42,7 @@ pub fn extract_definitions(
         is_anonymous: false,
         range_start: root_node.start_byte(),
         range_end: root_node.end_byte(),
+        body_start: None, 
         source_code: String::new(),
         documentation: None,
         calls: Vec::new(),
@@ -72,6 +73,7 @@ pub fn extract_definitions(
     while let Some(query_match) = matches.next() {
         let mut def_node = None;
         let mut name_opt: Option<String> = None;
+        let mut body_start: Option<usize> = None;
         let mut kind_opt: Option<String> = None;
         let mut return_type = None;
         
@@ -90,6 +92,9 @@ pub fn extract_definitions(
                 }
                 "function.name" => {
                     name_opt = Some(text.to_string());
+                }
+                "function.body" => { 
+                    body_start = Some(capture.node.start_byte());
                 }
                 "function.kind" => {
                     kind_opt = Some(text.to_string());
@@ -162,6 +167,7 @@ pub fn extract_definitions(
                 is_anonymous: name_opt.is_none(),
                 range_start: node.start_byte(),
                 range_end: node.end_byte(),
+                body_start,
                 source_code: node.utf8_text(source).unwrap_or("").to_string(),
                 documentation: None,
                 calls: Vec::new(),

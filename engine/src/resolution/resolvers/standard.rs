@@ -34,6 +34,7 @@ pub fn resolve_external_imports(index: &mut WorkspaceIndex, lookup: &mut SymbolI
                         kind: SymbolKind::External,
                         range_start: 0,
                         range_end: 0,
+                        body_start: None,
                         doc_comment: Some(format!("External import from package `{}`", pkg_name)),
                         return_type: None,
                         is_test: false,

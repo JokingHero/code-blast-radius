@@ -249,6 +249,7 @@ impl FileScanner {
                     kind: func.kind,
                     range_start: func.range_start, 
                     range_end: func.range_end,
+                    body_start: func.body_start,
                     doc_comment: func.documentation, 
                     return_type: func.return_type,
                     is_test: is_path_test || is_inline_test,
