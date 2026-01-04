@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process;
 use anyhow::{Context, Result};
 
@@ -24,7 +24,6 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Analyze blast radius for a symbol OR a file path.
-    /// If the argument matches a file path, it calculates the combined impact of all symbols in that file.
     Radius {
         /// Function name, Class name, or File path (relative)
         symbol: String,
@@ -40,7 +39,7 @@ enum Commands {
         #[arg(short, long, default_value_t = 10)]
         limit: usize,
     },
-    /// Manage Workspaces (Multi-Root Support)
+    /// Manage Workspaces
     Workspace {
         #[command(subcommand)]
         action: WorkspaceAction,
@@ -60,24 +59,20 @@ enum WorkspaceAction {
     Add { root: PathBuf },
     /// Remove a root folder from the workspace
     Remove { root: PathBuf },
-    /// Refresh/Sync the workspace (Explicit command, though Sync happens automatically now)
+    /// Refresh/Sync the workspace
     Sync,
 }
 
 #[derive(Subcommand, Debug)]
 enum RecipeAction {
-    /// List all recipes defined in the workspace
     List,
-    /// Add or Overwrite a recipe. Expects a JSON string definition.
     Add { 
         #[arg(short, long)]
         json: String 
     },
-    /// Remove a recipe by name
     Remove { 
         name: String 
     },
-    /// Run a specific recipe and output the context JSON
     Run { 
         name: String 
     },
@@ -102,71 +97,69 @@ fn main() {
     }
 }
 
-/// Helper to normalize where Config and Index live based on user input
-fn resolve_paths(input: &Path) -> Result<(PathBuf, PathBuf)> {
-    if input.is_file() && input.extension().map_or(false, |e| e == "cblast") {
-        // Explicit Workspace File: ./my-project.cblast
-        let config_path = input.to_path_buf();
-        let index_path = input.with_extension("cblast.index");
-        Ok((config_path, index_path))
-    } else if input.is_dir() {
-        // Implicit Directory Workspace: ./my-project/.cblast/
-        let cblast_dir = input.join(".cblast");
-        if !cblast_dir.exists() {
-            std::fs::create_dir(&cblast_dir).ok(); 
-        }
-        let config_path = cblast_dir.join("workspace.json");
-        let index_path = cblast_dir.join("index.bin");
-        Ok((config_path, index_path))
-    } else {
-        anyhow::bail!("Path must be a directory or a .cblast file");
-    }
-}
-
 fn run() -> Result<()> {
     let cli = Cli::parse();
 
-    // 1. Resolve Paths
-    let (config_path, _) = resolve_paths(&cli.path)?;
+    // 1. Initialize Manager based on input path type
+    // This logic replaces the old `resolve_paths`
+    let mut manager = if cli.path.is_file() {
+        // Assume it's a .cblast file
+        WorkspaceManager::from_file(cli.path.clone())
+            .context("Failed to load workspace file")?
+    } else if cli.path.is_dir() {
+        // Assume Ad-Hoc directory mode
+        WorkspaceManager::new_in_memory(vec![cli.path.clone()])
+            .context("Failed to initialize workspace from directory")?
+    } else {
+        anyhow::bail!("Path must be a valid directory or .cblast file");
+    };
 
-    // 2. Load Manager (Handles Config + Index loading)
-    let mut manager = WorkspaceManager::new(config_path.clone())
-        .context("Failed to load workspace")?;
-
-    // 3. Auto-Add Root in Directory Mode
-    // If we are in directory mode and the config is empty (newly created), 
-    // automatically add the directory itself as a root.
-    if cli.path.is_dir() && manager.config.roots.is_empty() {
-        let abs_root = std::fs::canonicalize(&cli.path).unwrap_or(cli.path.clone());
-        manager.add_root(abs_root);
-    }
-
-    // 4. SYNC (Incremental Update)
-    // Always sync to ensure freshness before any operation.
-    // This is critical for Recipes to ensure AST byte offsets match disk content.
+    // 2. SYNC (Incremental Update)
+    // Always sync to ensure freshness.
     manager.sync();
-    manager.save().context("Failed to save workspace state")?;
+    
+    // Auto-save index for next time (optimization), but only if supported
+    // If we are in Ad-Hoc mode, `save()` will fail, but `sync()` internally handles 
+    // the local cache updates for ad-hoc folders now.
+    if manager.backing_file.is_some() {
+        manager.save().context("Failed to save workspace state")?;
+    }
 
     match &cli.command {
         // --- WORKSPACE MANAGEMENT ---
         Commands::Workspace { action } => {
             match action {
                 WorkspaceAction::Init { name } => {
+                    // Logic: If user passed a dir, we want to create a new file?
+                    // Or if they passed a file path that doesn't exist?
+                    // For now, let's update the name.
                     manager.config.name = name.clone();
-                    manager.save()?;
-                    println!("Initialized workspace config at {:?}", config_path);
+                    if manager.backing_file.is_some() {
+                        manager.save()?;
+                        println!("Workspace config updated.");
+                    } else {
+                        // Ad-hoc
+                        println!("Initialized in-memory workspace '{}'. Use GUI to save.", name);
+                    }
                 }
                 WorkspaceAction::Add { root } => {
                     manager.add_root(root.clone());
-                    manager.save()?;
-                    println!("Added root. Total roots: {}", manager.config.roots.len());
+                    if manager.backing_file.is_some() {
+                        manager.save()?;
+                        println!("Added root. Total roots: {}", manager.config.roots.len());
+                    } else {
+                        println!("Added root to temporary session. Changes will be lost on exit.");
+                    }
                 }
                 WorkspaceAction::Remove { root } => {
                     manager.remove_root(root.clone());
-                    manager.save()?;
-                    println!("Removed root. Total roots: {}", manager.config.roots.len());
+                    if manager.backing_file.is_some() {
+                        manager.save()?;
+                    }
+                    println!("Removed root.");
                 }
                 WorkspaceAction::Sync => {
+                    // Sync already happened at startup
                     println!("Workspace synced successfully.");
                 }
             }
@@ -184,12 +177,18 @@ fn run() -> Result<()> {
                         .context("Invalid recipe JSON")?;
                     let name = recipe.name.clone();
                     manager.config.recipes.insert(name.clone(), recipe);
-                    manager.save()?;
-                    println!("Recipe '{}' saved.", name);
+                    if manager.backing_file.is_some() {
+                        manager.save()?;
+                        println!("Recipe '{}' saved.", name);
+                    } else {
+                        eprintln!("Warning: Adding recipe to ad-hoc session. It will be lost.");
+                    }
                 }
                 RecipeAction::Remove { name } => {
                     if manager.config.recipes.remove(name).is_some() {
-                        manager.save()?;
+                        if manager.backing_file.is_some() {
+                            manager.save()?;
+                        }
                         println!("Recipe '{}' Removed.", name);
                     } else {
                         eprintln!("Recipe '{}' not found.", name);
@@ -208,12 +207,11 @@ fn run() -> Result<()> {
             }
         }
 
-        // --- QUERY: RADIUS (Smart Impact) ---
+        // --- QUERY: RADIUS ---
         Commands::Radius { symbol, no_tests } => {
             let indexer = &manager.indexer;
             
             // Step A: Check if input is a File Path
-            // We search for files ending with the input string (fuzzy path match)
             let matching_file_id = indexer.index.files.values()
                 .find(|f| f.path.ends_with(symbol) || f.path == *symbol)
                 .map(|f| f.id);
@@ -221,21 +219,12 @@ fn run() -> Result<()> {
             let mut start_ids = Vec::new();
 
             if let Some(fid) = matching_file_id {
-                // It's a file! Gather all symbols defined in this file.
                 for sym in indexer.index.symbols.values() {
                     if sym.file_id == fid {
                         start_ids.push(sym.id);
                     }
                 }
-                if start_ids.is_empty() {
-                    // Fallback: If file exists but has no symbols (e.g. pure script), 
-                    // we can't traverse graph from it, but maybe we should output the file itself?
-                    // For now, warn.
-                    eprintln!("File found, but it contains no indexed symbols to trace from.");
-                    return Ok(());
-                }
             } else {
-                // It's a Symbol Name! Lookup IDs.
                 if let Some(ids) = indexer.lookup.symbol_map.get(symbol) {
                     start_ids.extend(ids.iter());
                 } else {
@@ -251,26 +240,23 @@ fn run() -> Result<()> {
             );
             let mut related_ids = walker.walk_deep(&start_ids);
 
-            // Step C: Filter
             if *no_tests {
                 related_ids.retain(|&id| {
                     indexer.index.symbols.get(&id).map_or(true, |s| !s.is_test)
                 });
             }
 
-            // Step D: Output
             let output = generate_context_output(&indexer.index, &related_ids);
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
 
-        // --- QUERY: FIND (Fuzzy Search) ---
+        // --- QUERY: FIND ---
         Commands::Find { query, limit } => {
             let indexer = &manager.indexer;
             let mut matcher = Matcher::new(Config::DEFAULT);
             let mut results = Vec::new();
             let query_utf32 = Utf32String::from(query.as_str());
 
-            // Match Symbols
             for sym in indexer.index.symbols.values() {
                 if let Some(score) = matcher.fuzzy_match(Utf32String::from(sym.name.as_str()).slice(..), query_utf32.slice(..)) {
                     let file_path = indexer.index.files.values()
@@ -287,7 +273,6 @@ fn run() -> Result<()> {
                 }
             }
 
-            // Match Files
             for file in indexer.index.files.values() {
                 if let Some(score) = matcher.fuzzy_match(Utf32String::from(file.path.as_str()).slice(..), query_utf32.slice(..)) {
                     results.push(MatchResult {
