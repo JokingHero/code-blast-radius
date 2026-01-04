@@ -6,22 +6,30 @@ use crate::resolution::resolvers::{core, add_edge, link_modules, constants};
 
 pub fn resolve_implicit_routes(index: &mut WorkspaceIndex, staging: &StagingArea, lookup: &SymbolIndex) {
     let mut new_links = Vec::new();
+    
     let route_definitions: Vec<(String, SymbolId)> = lookup.implicit_routes
         .iter()
-        .map(|(route, &symbol_id)| (route.clone(), symbol_id))
+        .flat_map(|(route, ids)| ids.iter().map(move |&id| (route.clone(), id)))
         .collect();
         
     for (src_file_id, literals) in &staging.raw_literals {
         for lit in literals {
             let clean_lit = lit.trim_matches(constants::QUOTE_CHARS);
 
-            if let Some(&target_sym_id) = lookup.implicit_routes.get(clean_lit) {
-                if index.symbols[&target_sym_id].file_id != *src_file_id {
-                    new_links.push((*src_file_id, target_sym_id));
+            // Handle exact matches (One-to-Many)
+            if let Some(target_sym_ids) = lookup.implicit_routes.get(clean_lit) {
+                for &target_sym_id in target_sym_ids {
+                    if index.symbols[&target_sym_id].file_id != *src_file_id {
+                        new_links.push((*src_file_id, target_sym_id));
+                    }
                 }
+                // Don't continue here, as wildcards might *also* apply, 
+                // though usually exact match is preferred. 
+                // For simplicity, we can continue if exact match found to reduce noise.
                 continue;
             }
 
+            // Handle Wildcard Prefix matches
             if clean_lit.contains('*') {
                 let prefix = clean_lit.split('*').next().unwrap_or("");
                 if prefix.len() > 3 {
@@ -38,6 +46,7 @@ pub fn resolve_implicit_routes(index: &mut WorkspaceIndex, staging: &StagingArea
         }
     }
 
+    // Edge creation logic remains the same, just processing more links now
     for (src_file_id, tgt_sym_id) in new_links {
         let tgt_file_id = index.symbols[&tgt_sym_id].file_id;
         

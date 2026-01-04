@@ -151,7 +151,7 @@ pub struct SymbolIndex {
     pub symbol_map: HashMap<String, Vec<SymbolId>>, // Name -> [IDs]
     pub file_imports: HashMap<FileId, Vec<ImportNode>>,
     pub file_exports: HashMap<FileId, Vec<ExportNode>>, 
-    pub implicit_routes: HashMap<String, SymbolId>,
+    pub implicit_routes: HashMap<String, Vec<SymbolId>>, 
     pub import_mappings: HashMap<String, String>,
     pub package_path_map: HashMap<String, String>,
     pub external_symbols: HashSet<String>,

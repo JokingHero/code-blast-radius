@@ -345,13 +345,15 @@ impl FileScanner {
             // 6. Handle Route Lookups
             if let Some(route) = utils::detect_framework_route(path_obj) {
                  if let Some(mid) = module_id {
-                     lookup.implicit_routes.insert(route, mid);
+                     // Push to list instead of overwrite
+                     lookup.implicit_routes.entry(route).or_default().push(mid);
                  }
             }
             for &symbol_id in &file_symbol_ids {
                  if let Some(sym) = index.symbols.get(&symbol_id) {
                      for r in &sym.routes { 
-                         lookup.implicit_routes.insert(r.clone(), symbol_id); 
+                         // Push to list instead of overwrite
+                         lookup.implicit_routes.entry(r.clone()).or_default().push(symbol_id); 
                      }
                  }
             }
@@ -367,9 +369,15 @@ impl FileScanner {
         if let Some(node) = index.files.remove(path_key) {
             self.clear_file_symbols(node.id, index, lookup);
             index.file_dependencies.remove(&node.id);
-            lookup.implicit_routes.retain(|_, sym_id| {
-                index.symbols.get(sym_id).map_or(false, |s| s.file_id != node.id)
-            });
+
+            // Remove specific IDs belonging to this file from the vectors
+            for ids in lookup.implicit_routes.values_mut() {
+                ids.retain(|&sym_id| {
+                    index.symbols.get(&sym_id).map_or(false, |s| s.file_id != node.id)
+                });
+            }
+            // Clean up empty keys to save memory
+            lookup.implicit_routes.retain(|_, ids| !ids.is_empty());
         }
     }
 
