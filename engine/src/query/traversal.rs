@@ -31,13 +31,15 @@ impl<'a> GraphWalker<'a> {
 
         while let Some(current) = queue.pop_front() {
             let current_sym = self.index.symbols.get(&current);
-            let is_external = current_sym.map_or(false, |s| s.is_external);
             let is_module = current_sym.map_or(false, |s| s.kind == SymbolKind::Module);
-
+            
             // 1. Go Downstream (Source -> Target)
             if let Some(edges) = self.index.graph.get(&current) {
                 for edge in edges {
-                    // Skip structural module containment to avoid polluting context with siblings
+                    // GATEKEEPER: Stop "File Dump" Explosion.
+                    // If we are at a File (Module), do NOT walk down to list all its children (Contains).
+                    // We only want to traverse explicit dependencies (Calls, Imports, etc).
+                    // We DO allow traversing down from Classes (Containers) to their methods.
                     if is_module && edge.kind == EdgeKind::Contains {
                         continue;
                     }
@@ -51,6 +53,7 @@ impl<'a> GraphWalker<'a> {
 
             // 2. Go Upstream (Target -> Source)
             // SAFETY: Do not traverse upstream from External symbols
+            let is_external = current_sym.map_or(false, |s| s.is_external);
             if !is_external {
                 if let Some(edges) = self.reverse_graph.get(&current) {
                     for edge in edges {
@@ -87,8 +90,14 @@ impl<'a> GraphWalker<'a> {
         match kind {
             EdgeKind::Calls | EdgeKind::Constructs => true,
             EdgeKind::Inherits | EdgeKind::Implements | EdgeKind::TypeReference => true,
-            EdgeKind::Contains | EdgeKind::Injects | EdgeKind::Dispatches | EdgeKind::Handles | EdgeKind::Configures | EdgeKind::Related => true,
+            EdgeKind::Injects | EdgeKind::Dispatches | EdgeKind::Handles | EdgeKind::Configures | EdgeKind::Related => true,
             
+            // ENABLED: Allow finding the parent File/Module of a Function.
+            // Essential for providing file context (fixes collision_test).
+            EdgeKind::Contains => true,
+
+            // DISABLED: Prevents leaking across shared files in Monorepos.
+            // If enabled, SharedFile -> Upstream -> UnrelatedFile.
             EdgeKind::Defines | EdgeKind::Imports => false,
         }
     }
