@@ -127,7 +127,7 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
 
     // 1. Resolve Paths
-    let (config_path, _index_path) = resolve_paths(&cli.path)?;
+    let (config_path, _) = resolve_paths(&cli.path)?;
 
     // 2. Load Manager (Handles Config + Index loading)
     let mut manager = WorkspaceManager::new(config_path.clone())

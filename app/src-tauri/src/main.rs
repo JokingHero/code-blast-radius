@@ -39,6 +39,7 @@ async fn set_workspace(path: String, state: tauri::State<'_, AppState>) -> Resul
 
     if target_path.is_file() && path.ends_with(".cblast") {
         // === MULTI-ROOT MODE (Managed by WorkspaceManager) ===
+        // Uses: <project>.cblast.index
         let mut manager = WorkspaceManager::new(target_path.clone())
             .map_err(|e| e.to_string())?;
         
@@ -51,26 +52,30 @@ async fn set_workspace(path: String, state: tauri::State<'_, AppState>) -> Resul
         workspace_file_entry = Some(target_path);
         folder_path_entry = None;
     } else if target_path.is_dir() {
-        // === SINGLE FOLDER MODE (Legacy/Implicit) ===
-        // We keep this manually managed for simplicity of "Open Folder" without creating config files
+        // === SINGLE FOLDER MODE (Ad-Hoc View) ===
+        // We isolate this view by using a separate index file.
+        // This prevents overwriting a multi-root 'index.bin' that might exist
+        // if this folder is also part of a larger CLI/Workspace setup.
         indexer = Indexer::new();
         
         let cblast_dir = target_path.join(".cblast");
         let _ = std::fs::create_dir_all(&cblast_dir);
-        let index_path = cblast_dir.join("index.bin");
+        
+        // CHANGED: Use a distinct filename for ad-hoc GUI sessions
+        let index_path = cblast_dir.join("index.local.bin");
 
-        // Try load existing
+        // Try load existing local index
         if index_path.exists() {
             if let Ok(loaded) = Indexer::load_from_file(&index_path) {
                 indexer = loaded;
             }
         }
 
-        // Run Scan/Resolve
+        // Run Scan/Resolve (Scopes strictly to this folder)
         let mut pipeline = Pipeline::new();
         pipeline.run(&mut indexer, &target_path);
         
-        // Save
+        // Save to local index only
         let _ = indexer.save(&index_path);
 
         workspace_file_entry = None;
@@ -101,7 +106,9 @@ async fn refresh_workspace(state: tauri::State<'_, AppState>) -> Result<(), Stri
         *state.indexer.lock().unwrap() = Some(manager.indexer);
     } else if let Some(folder_path) = folder_opt {
         // Refresh Single Folder
-        let index_path = folder_path.join(".cblast").join("index.bin");
+        // CHANGED: Match the filename used in set_workspace
+        let index_path = folder_path.join(".cblast").join("index.local.bin");
+        
         let mut indexer = Indexer::load_from_file(&index_path).unwrap_or(Indexer::new());
         
         let mut pipeline = Pipeline::new();
