@@ -384,6 +384,12 @@ fn finalize_functions(context: &mut EnrichmentContext) {
         f.dispatched_actions.sort(); f.dispatched_actions.dedup();
         f.handled_actions.sort(); f.handled_actions.dedup();
         f.routes.sort(); f.routes.dedup();
+        f.calls.sort(); f.calls.dedup();
+        // Deduplicate fingerprint dynamic calls
+        for methods in f.fingerprints.values_mut() {
+            methods.sort();
+            methods.dedup();
+        }
     };
 
     for func in context.functions.iter_mut() {
