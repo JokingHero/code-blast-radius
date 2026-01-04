@@ -24,8 +24,14 @@ pub struct Indexer {
 
 impl Indexer {
     pub fn new() -> Self {
+        let mut index = WorkspaceIndex::default();
+        
+        //Start IDs at 1 to reserve 0 for EXTERNAL_FILE_ID
+        index.next_file_id = 1;
+        index.next_symbol_id = 1;
+
         Self {
-            index: WorkspaceIndex::default(),
+            index,
             lookup: SymbolIndex::default(),
             reverse_graph: HashMap::new(),
         }

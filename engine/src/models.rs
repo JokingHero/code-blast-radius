@@ -57,6 +57,9 @@ pub struct FileAnalysis {
 
 pub type FileId = u32;
 pub type SymbolId = u32;
+/// Reserved ID for symbols that do not belong to a physical file in the workspace
+/// (e.g., node_modules, cargo crates, built-ins).
+pub const EXTERNAL_FILE_ID: FileId = 0;
 
 #[derive(Archive, Deserialize, Serialize, Debug, Clone)]
 #[archive(check_bytes)]

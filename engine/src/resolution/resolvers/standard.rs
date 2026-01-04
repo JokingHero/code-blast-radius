@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::models::{ SymbolKind, SymbolNode, EdgeKind, WorkspaceIndex, SymbolIndex, StagingArea };
+use crate::models::{ EXTERNAL_FILE_ID, EdgeKind, StagingArea, SymbolIndex, SymbolKind, SymbolNode, WorkspaceIndex };
 use crate::resolution::resolvers::{core, add_edge};
 
 pub fn resolve_external_imports(index: &mut WorkspaceIndex, lookup: &mut SymbolIndex) {
@@ -28,7 +28,7 @@ pub fn resolve_external_imports(index: &mut WorkspaceIndex, lookup: &mut SymbolI
 
                     new_symbols.push(SymbolNode {
                         id: new_id,
-                        file_id: 0,
+                        file_id: EXTERNAL_FILE_ID,
                         parent_id: None,
                         name: sym_name.clone(),
                         kind: SymbolKind::External,
