@@ -87,11 +87,11 @@ export const SearchBar = () => {
               >
                 <div class="flex items-center space-x-2 overflow-hidden">
                   <span class="font-bold shrink-0">{item.name}</span>
-                  <span class="text-[9px] uppercase border border-matrix-border px-1 rounded opacity-60 group-hover/item:border-matrix-bg group-hover/item:opacity-100">
+                  <span class="text-tiny uppercase border border-matrix-border px-1 rounded opacity-60 group-hover/item:border-matrix-bg group-hover/item:opacity-100">
                     {item.kind}
                   </span>
                 </div>
-                <div class="opacity-50 truncate max-w-[50%] text-right font-light text-[10px]">
+                <div class="opacity-50 truncate max-w-[50%] text-right font-light text-tiny">
                     {item.path}
                 </div>
               </div>

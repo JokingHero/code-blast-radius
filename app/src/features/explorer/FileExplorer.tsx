@@ -1,40 +1,34 @@
-import { createSignal, createEffect, For, Show, createMemo } from "solid-js";
+import { createSignal, createEffect, For, Show, createMemo, onCleanup } from "solid-js";
+import { Portal } from "solid-js/web"; // Import Portal
 import { readDir, DirEntry } from "@tauri-apps/plugin-fs";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { useWorkspace } from "../../core/workspace.store";
 
 // --- Helpers ---
 
-/**
- * Robust Path Joiner (Cross-Platform).
- * Detects the OS separator from the parent path string itself.
- * This ensures C:\Windows + System32 becomes C:\Windows\System32
- * and /home/user + docs becomes /home/user/docs
- */
 const joinPath = (parent: string, name: string): string => {
-  // 1. Guess separator: if we see a backslash, assume Windows style.
   const isWindows = parent.includes('\\');
   const sep = isWindows ? '\\' : '/';
-
-  // 2. Remove trailing separator from parent to avoid "C:\\" or "//"
-  const cleanParent = parent.endsWith(sep) 
-    ? parent.slice(0, -1) 
-    : parent;
-
+  const cleanParent = parent.endsWith(sep) ? parent.slice(0, -1) : parent;
   return `${cleanParent}${sep}${name}`;
+};
+
+const getFolderName = (path: string): string => {
+    const sep = path.includes("\\") ? "\\" : "/";
+    return path.split(sep).pop() || path;
 };
 
 // --- Components ---
 
-const ExplorerItem = (props: { entry: DirEntry; parentPath: string; depth: number }) => {
+const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number }) => {
   const [isOpen, setIsOpen] = createSignal(false);
   const [children, setChildren] = createSignal<DirEntry[]>([]);
   const [isLoading, setIsLoading] = createSignal(false);
   const [errorMsg, setErrorMsg] = createSignal<string | null>(null);
 
-  // Construct full path once
   const fullPath = joinPath(props.parentPath, props.entry.name);
+  const { addToRecipe } = useWorkspace();
   
-  // Sorting: Folders first, then Files
   const sortedChildren = createMemo(() => {
     return [...children()].sort((a, b) => {
       if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
@@ -44,7 +38,6 @@ const ExplorerItem = (props: { entry: DirEntry; parentPath: string; depth: numbe
 
   const toggleNode = async (e: MouseEvent) => {
     e.stopPropagation();
-    
     if (!props.entry.isDirectory) return;
 
     if (isOpen()) {
@@ -54,14 +47,11 @@ const ExplorerItem = (props: { entry: DirEntry; parentPath: string; depth: numbe
 
     setIsLoading(true);
     setErrorMsg(null);
-    
     try {
       const entries = await readDir(fullPath);
       setChildren(entries);
       setIsOpen(true);
     } catch (err: any) {
-      console.error(`[Explorer] Failed to read ${fullPath}:`, err);
-      // Capture error for tooltip
       setErrorMsg(typeof err === "string" ? err : err.message || "Access Denied");
     } finally {
       setIsLoading(false);
@@ -70,10 +60,8 @@ const ExplorerItem = (props: { entry: DirEntry; parentPath: string; depth: numbe
 
   const handleDragStart = (e: DragEvent) => {
     if (e.dataTransfer) {
-      e.dataTransfer.setData("application/json", JSON.stringify({
-        type: "add_file",
-        value: fullPath
-      }));
+      const payload = JSON.stringify({ type: "add_file", value: fullPath });
+      e.dataTransfer.setData("application/json", payload);
       e.dataTransfer.effectAllowed = "copy";
       if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.opacity = "0.5";
     }
@@ -83,10 +71,19 @@ const ExplorerItem = (props: { entry: DirEntry; parentPath: string; depth: numbe
     if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.opacity = "1";
   }
 
+  // Double click to add file to context
+  const handleDblClick = (e: MouseEvent) => {
+    e.stopPropagation();
+    if (!props.entry.isDirectory) {
+        addToRecipe("add_file", fullPath);
+    }
+  }
+
   return (
     <div class="select-none font-mono">
       <div 
         onClick={toggleNode}
+        onDblClick={handleDblClick}
         draggable={!props.entry.isDirectory}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
@@ -97,8 +94,7 @@ const ExplorerItem = (props: { entry: DirEntry; parentPath: string; depth: numbe
           ${isOpen() ? 'border-matrix-primary bg-matrix-primary/5' : ''}
           ${isLoading() ? 'cursor-wait' : ''}
         `}
-        style={{ "padding-left": `${props.depth * 12 + 8}px` }}
-        // TOOLTIP: Hover over this to see exact path or error
+        style={{ "padding-left": `${props.depth * 12 + 12}px` }}
         title={errorMsg() ? `Error: ${errorMsg()}` : fullPath}
       >
         <Show when={props.depth > 0}>
@@ -110,7 +106,7 @@ const ExplorerItem = (props: { entry: DirEntry; parentPath: string; depth: numbe
             <div class="w-2 h-2 border border-matrix-primary border-t-transparent rounded-full animate-spin"></div>
           </Show>
           <Show when={!isLoading() && props.entry.isDirectory}>
-             <span class="text-[10px] font-bold text-matrix-primary opacity-70 group-hover:text-matrix-highlight">
+             <span class="text-tiny font-bold text-matrix-primary opacity-70 group-hover:text-matrix-highlight">
                {isOpen() ? '[-]' : '[+]'}
              </span>
           </Show>
@@ -118,37 +114,22 @@ const ExplorerItem = (props: { entry: DirEntry; parentPath: string; depth: numbe
 
         <span class={`
           truncate text-xs tracking-tight select-none
-          ${props.entry.isDirectory ? "text-matrix-primary font-bold" : "text-matrix-text group-hover:text-matrix-primary"}
+          ${props.entry.isDirectory 
+              ? "text-matrix-primary font-bold" 
+              : "text-matrix-primary/80 group-hover:text-matrix-highlight"} 
           ${errorMsg() ? "text-matrix-error line-through decoration-matrix-error opacity-70" : ""}
         `}>
           {props.entry.name}
         </span>
-        
-        <Show when={errorMsg()}>
-          <span class="ml-2 text-[8px] font-bold text-matrix-bg bg-matrix-error px-1 rounded-sm cursor-help">
-            ERR
-          </span>
-        </Show>
       </div>
 
       <Show when={isOpen()}>
-        <div class="relative">
+        <div>
           <For each={sortedChildren()}>
-            {(child) => (
-              <ExplorerItem 
-                entry={child} 
-                parentPath={fullPath} 
-                depth={props.depth + 1} 
-              />
-            )}
+            {(child) => <FileNode entry={child} parentPath={fullPath} depth={props.depth + 1} />}
           </For>
           <Show when={!isLoading() && sortedChildren().length === 0 && !errorMsg()}>
-            <div 
-              class="text-[10px] opacity-30 italic py-1"
-              style={{ "padding-left": `${(props.depth + 1) * 12 + 24}px` }}
-            >
-              (empty)
-            </div>
+            <div class="text-tiny opacity-30 italic py-1" style={{ "padding-left": `${(props.depth + 1) * 12 + 24}px` }}>(empty)</div>
           </Show>
         </div>
       </Show>
@@ -156,71 +137,273 @@ const ExplorerItem = (props: { entry: DirEntry; parentPath: string; depth: numbe
   );
 };
 
+const RootFolder = (props: { path: string, canRemove: boolean, onRemove: () => void }) => {
+    const [entries, setEntries] = createSignal<DirEntry[]>([]);
+    const [isExpanded, setIsExpanded] = createSignal(true);
+    const [error, setError] = createSignal<string | null>(null);
+    const folderName = createMemo(() => getFolderName(props.path));
+
+    createEffect(async () => {
+        try {
+            const children = await readDir(props.path);
+            setEntries(children.sort((a, b) => {
+                if (a.isDirectory === b.isDirectory) return a.name.localeCompare(b.name);
+                return a.isDirectory ? -1 : 1;
+            }));
+            setError(null);
+        } catch (e: any) {
+            setError("ACCESS DENIED");
+        }
+    });
+
+    return (
+        <div class="mb-4 group/root">
+            {/* Root Header */}
+            <div 
+                class={`
+                    flex items-center justify-between px-3 py-2 cursor-pointer transition-colors border-y border-matrix-border/50
+                    ${error() ? 'bg-matrix-error/10 border-matrix-error/50' : 'bg-matrix-panel hover:bg-matrix-panel/80'}
+                `}
+                onClick={() => setIsExpanded(!isExpanded())}
+                title={props.path}
+            >
+                <div class="flex items-center min-w-0">
+                    <span class="mr-2 text-tiny font-bold text-matrix-primary shrink-0">
+                        {isExpanded() ? "[-]" : "[+]"}
+                    </span>
+                    <div class="flex flex-col overflow-hidden min-w-0">
+                        <span class={`text-xs font-bold tracking-wide uppercase truncate ${error() ? 'text-matrix-error' : 'text-matrix-highlight'}`}>
+                            {folderName()}
+                        </span>
+                        <span class="text-micro opacity-40 truncate font-mono">
+                            {props.path}
+                        </span>
+                    </div>
+                </div>
+
+                <Show when={props.canRemove}>
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); props.onRemove(); }}
+                        class="ml-2 text-matrix-primary opacity-0 group-hover/root:opacity-100 hover:text-matrix-error hover:scale-110 transition p-1"
+                        title="Remove Folder from Workspace"
+                    >
+                        [x]
+                    </button>
+                </Show>
+            </div>
+
+            <Show when={isExpanded() && !error()}>
+                <div class="mt-1">
+                    <For each={entries()}>
+                        {(entry) => <FileNode entry={entry} parentPath={props.path} depth={0} />}
+                    </For>
+                </div>
+            </Show>
+        </div>
+    )
+}
+
+/**
+ * Main Explorer Sidebar
+ */
 export const FileExplorer = () => {
-  const { state } = useWorkspace();
-  const [rootEntries, setRootEntries] = createSignal<DirEntry[]>([]);
-  const [loadingRoot, setLoadingRoot] = createSignal(false);
-  const [rootError, setRootError] = createSignal<string | null>(null);
+  const { state, addRoot, removeRoot, saveWorkspace, loadWorkspace, refreshWorkspace, clearHistory } = useWorkspace();
+  const [showRecent, setShowRecent] = createSignal(false);
+  
+  // Ref for the button to calculate position
+  let recentBtnRef: HTMLButtonElement | undefined;
+  // State for portal positioning
+  const [coords, setCoords] = createSignal({ top: 0, left: 0, width: 0 });
 
-  createEffect(async () => {
-    const path = state.rootPath;
-    if (!path) {
-        setRootEntries([]);
-        return;
+  const handleAddRoot = async () => {
+    const selected = await open({ directory: true });
+    if (selected && typeof selected === 'string') {
+        await addRoot(selected);
     }
+  };
 
-    setLoadingRoot(true);
-    setRootError(null);
-
-    try {
-      const entries = await readDir(path);
-      const sorted = entries.sort((a, b) => {
-        if (a.isDirectory === b.isDirectory) return a.name.localeCompare(b.name);
-        return a.isDirectory ? -1 : 1;
-      });
-      setRootEntries(sorted);
-    } catch (err: any) {
-      console.error("Failed to load root:", err);
-      setRootError(err.message || "UNABLE TO READ ROOT DIRECTORY");
-    } finally {
-      setLoadingRoot(false);
+  const handleLoadWorkspace = async () => {
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'Blast Radius Workspace', extensions: ['cblast'] }]
+    });
+    if (selected && typeof selected === 'string') {
+        await loadWorkspace(selected);
     }
+  };
+
+  const handleSaveWorkspace = async () => {
+    const defaultName = state.config?.name || 'my-workspace';
+    const path = await save({
+        filters: [{ name: 'Blast Radius Workspace', extensions: ['cblast'] }],
+        defaultPath: `${defaultName}.cblast`
+    });
+    if (path) {
+        await saveWorkspace(path);
+    }
+  };
+
+  const toggleRecent = (e: MouseEvent) => {
+    e.stopPropagation();
+    if (!showRecent() && recentBtnRef) {
+        const rect = recentBtnRef.getBoundingClientRect();
+        // Capture coordinates relative to viewport
+        setCoords({ 
+            top: rect.bottom, 
+            left: rect.left, 
+            width: rect.width 
+        });
+        setShowRecent(true);
+    } else {
+        setShowRecent(false);
+    }
+  };
+
+  const handleClickOutside = (e: MouseEvent) => {
+    // If click target is NOT inside the portal menu (id=recent-menu) and NOT the trigger button
+    const target = e.target as HTMLElement;
+    if (!target.closest('#recent-menu') && !target.closest('#recent-trigger')) {
+        setShowRecent(false);
+    }
+  };
+
+  // Close on window resize to prevent floating menu in wrong place
+  const handleResize = () => setShowRecent(false);
+
+  document.addEventListener('click', handleClickOutside);
+  window.addEventListener('resize', handleResize);
+  
+  onCleanup(() => {
+    document.removeEventListener('click', handleClickOutside);
+    window.removeEventListener('resize', handleResize);
   });
 
+  const needsSave = () => state.config?.mode === 'unsaved-workspace' || state.config?.mode === 'ad-hoc';
+
   return (
-    <div class="h-full w-full flex flex-col bg-matrix-bg/50">
-      <Show when={loadingRoot()}>
-        <div class="flex flex-col items-center justify-center p-8 space-y-2 opacity-70">
-          <div class="w-6 h-6 border-2 border-matrix-primary border-t-transparent rounded-full animate-spin"></div>
-          <span class="text-[10px] animate-pulse">READING FILE SYSTEM...</span>
-        </div>
-      </Show>
+    <div class="h-full w-full flex flex-col bg-matrix-bg/50 border-r border-matrix-border">
+      
+      {/* --- TOP TOOLBAR: Workspace Actions --- */}
+      <div class="border-b border-matrix-border/50 bg-matrix-panel flex flex-col">
+          
+          {/* Row 1: Primary Actions (Load/Recent/Refresh) */}
+          <div class="flex items-center text-tiny divide-x divide-matrix-border/50">
+              <button 
+                onClick={handleLoadWorkspace}
+                class="flex-1 py-2 hover:bg-matrix-primary/10 hover:text-matrix-highlight transition text-matrix-primary"
+                title="Load existing workspace file (.cblast)"
+              >
+                [ LOAD ]
+              </button>
 
-      <Show when={rootError()}>
-        <div class="p-4 flex flex-col items-center text-center text-matrix-error border border-matrix-error/30 m-2 bg-matrix-error/5">
-          <span class="font-bold text-xl mb-2">!</span>
-          <span class="text-xs font-mono">{rootError()}</span>
-          <span class="text-[9px] opacity-50 mt-2 break-all">{state.rootPath}</span>
-        </div>
-      </Show>
+              <div class="flex-1">
+                <button 
+                    id="recent-trigger"
+                    ref={recentBtnRef}
+                    onClick={toggleRecent}
+                    class={`w-full py-2 hover:bg-matrix-primary/10 hover:text-matrix-highlight transition text-matrix-primary ${showRecent() ? 'bg-matrix-primary/20 text-matrix-highlight' : ''}`}
+                    title="Recent workspaces"
+                >
+                    [ RECENT {showRecent() ? '^' : 'v'} ]
+                </button>
 
-      <div class="flex-1 overflow-y-auto custom-scrollbar pb-10">
-        <Show when={!state.rootPath}>
-           <div class="flex flex-col items-center justify-center h-40 opacity-30 text-xs">
-              <span>WAITING FOR LINK</span>
-              <span class="text-[9px] mt-1">[ NO WORKSPACE ]</span>
+                {/* Portal moves this content to <body>, breaking out of sidebar overflow */}
+                <Show when={showRecent()}>
+                    <Portal>
+                        <div 
+                            id="recent-menu" 
+                            class="fixed bg-matrix-panel border border-matrix-primary shadow-glow z-[9999] flex flex-col"
+                            style={{
+                                top: `${coords().top}px`,
+                                left: `${coords().left}px`,
+                                "min-width": `${coords().width}px`,
+                                // w-max allows the box to expand to fit long paths
+                                // max-w prevents it from going off the right edge of screen
+                                width: "max-content",
+                                "max-width": "calc(100vw - 20px)"
+                            }}
+                        >
+                            <div class="max-h-80 overflow-y-auto custom-scrollbar">
+                                <For each={state.recentWorkspaces} fallback={<div class="p-2 opacity-50 italic text-matrix-primary whitespace-nowrap">No history</div>}>
+                                    {(path) => (
+                                        <button 
+                                            onClick={() => { loadWorkspace(path); setShowRecent(false); }}
+                                            class="w-full text-left p-2 text-matrix-primary hover:bg-matrix-primary hover:text-matrix-bg border-b border-matrix-border/30 last:border-0 whitespace-nowrap"
+                                            title={path}
+                                        >
+                                            {path}
+                                        </button>
+                                    )}
+                                </For>
+                            </div>
+                            <div class="border-t border-matrix-primary p-1 bg-matrix-bg/50">
+                                <button 
+                                    onClick={() => { clearHistory(); setShowRecent(false); }}
+                                    class="w-full text-center text-tiny text-matrix-primary hover:text-matrix-error py-1 uppercase tracking-wider"
+                                >
+                                    [ Clear History ]
+                                </button>
+                            </div>
+                        </div>
+                    </Portal>
+                </Show>
+              </div>
+
+              <button 
+                onClick={refreshWorkspace}
+                class="flex-none px-3 py-2 hover:bg-matrix-primary/10 hover:text-matrix-highlight transition text-matrix-primary"
+                title="Refresh current workspace (Scan for changes)"
+              >
+                [ R ]
+              </button>
+          </div>
+
+          {/* Row 2: Content Actions (Add Folder / Save) */}
+          <div class="flex items-center text-tiny border-t border-matrix-border/30">
+             <button 
+                onClick={handleAddRoot}
+                class="flex-1 py-2 hover:bg-matrix-primary/10 text-matrix-primary hover:text-matrix-highlight transition flex items-center justify-center gap-1 group"
+             >
+                <span class="font-bold group-hover:scale-125 transition-transform">+</span>
+                <span>ADD FOLDER</span>
+             </button>
+
+             <button 
+                onClick={handleSaveWorkspace}
+                class={`
+                    flex-1 py-2 transition flex items-center justify-center gap-1
+                    ${needsSave() 
+                        ? 'text-matrix-primary bg-matrix-primary/5 hover:bg-matrix-primary hover:text-matrix-bg animate-[pulse_3s_infinite]' 
+                        : 'text-matrix-primary/70 hover:opacity-100 hover:bg-matrix-primary/10'}
+                `}
+                title={needsSave() ? "Workspace changes unsaved!" : "Save Workspace"}
+             >
+                <span>[ SAVE ]</span>
+             </button>
+          </div>
+      </div>
+
+      {/* --- Roots Scroll View --- */}
+      <div class="flex-1 overflow-y-auto custom-scrollbar pb-10 bg-matrix-bg relative">
+        <Show when={!state.config}>
+           <div class="flex flex-col items-center justify-center h-40 opacity-30 text-xs font-mono text-matrix-primary">
+              <span>NO DATA</span>
            </div>
         </Show>
 
-        <For each={rootEntries()}>
-          {(entry) => (
-            <ExplorerItem 
-              entry={entry} 
-              parentPath={state.rootPath} 
-              depth={0} 
-            />
-          )}
-        </For>
+        <Show when={state.config}>
+            <For each={state.config?.roots}>
+                {(rootPath) => (
+                    <RootFolder 
+                        path={rootPath} 
+                        canRemove={(state.config?.roots.length || 0) > 1}
+                        onRemove={() => removeRoot(rootPath)}
+                    />
+                )}
+            </For>
+        </Show>
+        <div class="sticky bottom-0 left-0 w-full h-4 bg-gradient-to-t from-matrix-bg to-transparent pointer-events-none"></div>
       </div>
     </div>
   );

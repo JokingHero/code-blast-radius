@@ -14,7 +14,7 @@ export const ControlPanel = () => {
     <div class="h-full flex flex-col p-2 gap-2 relative">
       
       {/* Header Label for the Panel */}
-      <div class="text-[9px] uppercase tracking-widest opacity-40 mb-1 text-center border-b border-matrix-border/50 pb-1">
+      <div class="text-tiny uppercase tracking-widest opacity-40 mb-1 text-center border-b border-matrix-border/50 pb-1">
         COMMAND DECK
       </div>
 
@@ -32,19 +32,19 @@ export const ControlPanel = () => {
           title="Toggle Test Files"
         >
           <div class={`w-2 h-2 rounded-full ${!state.settings.noTests ? 'bg-matrix-primary shadow-glow' : 'bg-matrix-text/30'}`}></div>
-          <span class="text-[9px] font-bold">TESTS</span>
+          <span class="text-tiny font-bold">TESTS</span>
         </button>
 
         {/* Add Rule */}
         <button class="border border-matrix-border p-2 flex flex-col items-center justify-center gap-1 hover:border-matrix-highlight hover:bg-matrix-border/50 transition-all">
           <span class="text-xs font-bold">[+]</span>
-          <span class="text-[9px] font-bold">GREP</span>
+          <span class="text-tiny font-bold">GREP</span>
         </button>
 
         {/* Format Options */}
         <button 
           onClick={() => setShowFormatModal(!showFormatModal())}
-          class="col-span-1 lg:col-span-2 border border-matrix-border p-2 flex items-center justify-center gap-2 hover:bg-matrix-border/50 transition-all text-[10px]"
+          class="col-span-1 lg:col-span-2 border border-matrix-border p-2 flex items-center justify-center gap-2 hover:bg-matrix-border/50 transition-all text-tiny"
         >
           <span>{`{}`} FORMAT OPTIONS</span>
         </button>
@@ -64,7 +64,7 @@ export const ControlPanel = () => {
       {/* Format Modal (Positioned absolutely relative to this panel) */}
       <Show when={showFormatModal()}>
         <div class="absolute top-10 right-full mr-2 w-40 bg-matrix-bg border border-matrix-primary p-3 shadow-glow z-50">
-          <h3 class="text-[10px] font-bold border-b border-matrix-border pb-1 mb-2 text-matrix-primary">OUTPUT MODE</h3>
+          <h3 class="text-tiny font-bold border-b border-matrix-border pb-1 mb-2 text-matrix-primary">OUTPUT MODE</h3>
           <div class="space-y-1 text-xs">
              <label class="flex items-center space-x-2 cursor-pointer hover:bg-matrix-primary/10 p-1">
                <input type="radio" name="fmt" checked class="accent-matrix-primary" />
@@ -80,7 +80,7 @@ export const ControlPanel = () => {
              </label>
           </div>
           <div class="mt-2 pt-2 border-t border-matrix-border text-center">
-             <button onClick={() => setShowFormatModal(false)} class="text-[9px] hover:text-matrix-error">[CLOSE]</button>
+             <button onClick={() => setShowFormatModal(false)} class="text-tiny hover:text-matrix-error">[CLOSE]</button>
           </div>
         </div>
       </Show>

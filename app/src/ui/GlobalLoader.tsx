@@ -17,7 +17,7 @@ export const GlobalLoader = () => {
             <div class="text-matrix-primary font-mono text-sm tracking-[0.2em] font-bold uppercase drop-shadow-[0_0_5px_rgba(0,255,65,0.8)]">
               {loadingMessage()}
             </div>
-            <div class="text-matrix-primary/50 text-[10px] animate-pulse">
+            <div class="text-matrix-primary/50 text-tiny animate-pulse">
               [ PLEASE WAIT // CALCULATING DEPENDENCIES ]
             </div>
           </div>

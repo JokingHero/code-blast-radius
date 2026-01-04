@@ -18,6 +18,16 @@ module.exports = {
       },
       boxShadow: {
         'glow': '0 0 10px rgba(0, 255, 65, 0.3)',
+      },
+      fontSize: {
+        // We redefine the scale to be slightly larger overall
+        'micro': '12px',      // Replaces text-[8px]
+        'tiny': '14px',       // Replaces text-tiny and text-tiny
+        'xs': '15px',         // Replaces standard text-xs (was 12px)
+        'sm': '17px',         // Replaces standard text-sm (was 14px)
+        'base': '18px',       // Standard base
+        'lg': '20px',
+        'xl': '22px',
       }
     },
   },
