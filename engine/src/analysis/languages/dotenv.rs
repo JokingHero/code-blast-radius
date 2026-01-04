@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::Dotenv,
         &["env", "env.example", "env.template", "env.local", "env.development", "env.test", "env.production"]
     )
+    .skeleton("")
     .defs(r#"
         (variable_assignment
             name: (variable_name) @function.name

@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::C,
         &["c", "h"]
     )
+    .skeleton("{ /* ... {} ... */ }")
     .defs(r#"
         (function_definition
             declarator: [

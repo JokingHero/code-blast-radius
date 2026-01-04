@@ -91,6 +91,7 @@ pub struct LanguageConfig {
     pub queries: QueryConfig,
     pub compiled_queries: CompiledQueries,
     pub heuristics: HeuristicConfig,
+    pub skeleton_template: &'static str,
 }
 
 // --- Builder Pattern ---
@@ -100,6 +101,7 @@ pub struct LanguageConfigBuilder {
     file_extensions: &'static [&'static str],
     queries: QueryConfig,
     heuristics: HeuristicConfig,
+    skeleton_template: &'static str,
 }
 
 impl LanguageConfigBuilder {
@@ -109,6 +111,8 @@ impl LanguageConfigBuilder {
             file_extensions: extensions,
             queries: QueryConfig::default(),
             heuristics: HeuristicConfig::default(),
+            // Default safe fallback for C-like languages
+            skeleton_template: "{ /* ... {} body hidden ... */ }",
         }
     }
 
@@ -151,6 +155,11 @@ impl LanguageConfigBuilder {
         self
     }
 
+    pub fn skeleton(mut self, template: &'static str) -> Self {
+        self.skeleton_template = template;
+        self
+    }
+
     pub fn build(self) -> LanguageConfig {
         let language = get_language(self.lang);
         let mut compiled = CompiledQueries::default();
@@ -184,6 +193,7 @@ impl LanguageConfigBuilder {
             queries: self.queries,
             compiled_queries: compiled,
             heuristics: self.heuristics,
+            skeleton_template: self.skeleton_template,
         }
     }
 }

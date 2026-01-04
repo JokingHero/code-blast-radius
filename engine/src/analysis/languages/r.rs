@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::R,
         &["R", "r", "Rscript"]
     )
+    .skeleton("{}")
     .defs(r#"
         [
             ;; R functions are assignments: f <- function() {}

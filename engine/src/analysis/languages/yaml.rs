@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::Yaml,
         &["yaml", "yml"]
     )
+    .skeleton("")
     .defs(r#"
         (block_mapping_pair
           key: (_) @function.name

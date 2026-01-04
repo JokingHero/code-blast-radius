@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::Julia,
         &["jl"]
     )
+    .skeleton("# ... {} ...")
     .defs(r#"
         [
             (function_definition

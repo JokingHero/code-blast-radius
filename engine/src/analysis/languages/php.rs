@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::Php,
         &["php"]
     )
+    .skeleton("{ /* ... {} ... */ }")
     .defs(r#"
         (function_definition name: (name) @function.name body: (compound_statement) @function.body) @function.definition
         (method_declaration name: (name) @function.name body: (compound_statement) @function.body) @function.definition

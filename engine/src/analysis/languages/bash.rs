@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::Bash,
         &["sh", "bash", "zsh"]
     )
+    .skeleton(" : # {} body hidden")
     .defs(r#"
         (function_definition 
             name: (word) @function.name

@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::Rust,
         &["rs"]
     )
+    .skeleton("{ /* ... {} ... */ }")
     .defs(r#"
         ;; 1. Standard Function Definitions
         (function_item

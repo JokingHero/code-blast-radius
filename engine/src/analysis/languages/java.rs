@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::Java,
         &["java"]
     )
+    .skeleton("{ /* ... {} ... */ }")
     .defs(r#"
         [
             (class_declaration name: (identifier) @function.name body: (class_body) @function.body) @function.definition

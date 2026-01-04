@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::CSharp,
         &["cs"]
     )
+    .skeleton("{ /* ... {} ... */ }")
     .defs(r#"
         (method_declaration name: (identifier) @function.name) @function.definition
         (class_declaration name: (identifier) @function.name) @function.definition

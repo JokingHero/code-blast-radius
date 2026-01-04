@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::JavaScript,
         &["js", "jsx", "mjs", "cjs", "vue"]
     )
+    .skeleton("{ /* ... {} ... */ }")
     .defs(r#"
           (function_declaration
             name: (identifier) @function.name

@@ -74,7 +74,6 @@ fn test_recipe_transformation_focus_mode() {
         name: "Focus Logic".to_string(),
         description: None,
         operations: vec![
-            // FIX: Use "**/" prefix to match the absolute path of the file
             RecipeOperation::AddFiles { pattern: "**/logic.ts".to_string() },
         ],
         transforms,
@@ -83,24 +82,23 @@ fn test_recipe_transformation_focus_mode() {
     let executor = RecipeExecutor::new(&indexer);
     let output = executor.execute(&recipe).expect("Execution failed");
 
-    // FIX: Check for empty output to diagnose glob failures early
     assert!(!output.files.is_empty(), "Recipe matched no files. Check glob pattern.");
 
     let file_ctx = &output.files[0];
     let content = &file_ctx.content;
 
     // 3. Assertions
-    
+
     // keepMe: Should see body
     assert!(content.contains("function keepMe() {"), "Header for keepMe missing");
     assert!(content.contains("return \"I am visible\""), "Body for keepMe should be visible");
-    
+
     // hideMe: Should see header
-    // NOTE: The `{` is part of the body in TS grammar, so it gets replaced.
-    // The output looks like: function hideMe() /* ... */ }
     assert!(content.contains("function hideMe()"), "Header for hideMe missing");
     assert!(!content.contains("return \"I should be hidden\""), "Body for hideMe should be masked");
-    assert!(content.contains("body hidden"), "Mask comment should be present");
+
+    // Check for the skeleton syntax (/* ... */) instead of specific wording
+    assert!(content.contains("/* ..."), "Mask comment should be present");
 }
 
 #[test]
@@ -115,13 +113,11 @@ fn test_recipe_drift_safety() {
 
     let mut indexer = Indexer::new();
     let mut pipeline = Pipeline::new();
-    
+
     // Initial Scan
     pipeline.run(&mut indexer, &workspace.path);
 
     // 2. Modify File (Prepend lines to shift byte offsets)
-    // If the tool uses the old index (offset X) on this new content (offset X + N),
-    // it will slice incorrectly.
     let new_content = r#"
         // Line 1: Shift content down
         // Line 2: Shift content down
@@ -132,7 +128,7 @@ fn test_recipe_drift_safety() {
     // 3. Re-scan (The Critical Step to Fix Drift)
     pipeline.run(&mut indexer, &workspace.path);
 
-    // 4. Execute Recipe (Skeletonize the target)
+    // 4. Execute Recipe
     let mut transforms = HashMap::new();
     transforms.insert(file_path.to_string(), FileTransform::Skeletonize(vec!["target".to_string()]));
 
@@ -140,7 +136,6 @@ fn test_recipe_drift_safety() {
         name: "Drift Test".to_string(),
         description: None,
         operations: vec![
-            // FIX: Recursive glob for safety
             RecipeOperation::AddFiles { pattern: "**/*.ts".to_string() },
         ],
         transforms,
@@ -148,17 +143,17 @@ fn test_recipe_drift_safety() {
 
     let executor = RecipeExecutor::new(&indexer);
     let output = executor.execute(&recipe).expect("Execution failed");
-    
+
     assert!(!output.files.is_empty(), "Recipe matched no files.");
     let content = &output.files[0].content;
 
     // 5. Assertions
     // Ensure we are operating on the NEW content
     assert!(content.contains("// Line 1"), "Output should reflect updated file content");
-    
+
     // Ensure mask was applied to the correct location in the NEW content
-    // FIX: Expect the opening brace to be masked away
     assert!(content.contains("function target()"), "Function header should be present");
     assert!(!content.contains("return \"modified\""), "Target body should be masked"); 
-    assert!(content.contains("body hidden"), "Mask comment should appear");
+    // Check for the skeleton syntax
+    assert!(content.contains("/* ..."), "Mask comment should appear");
 }

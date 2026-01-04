@@ -1,14 +1,15 @@
-use std::collections::{HashSet};
+use std::collections::{ HashMap, HashSet };
 use std::fs;
 use std::path::Path;
-use anyhow::{Result, Context};
-use globset::{Glob};
+use anyhow::{ Result, Context };
+use globset::{ Glob };
 
+use crate::analysis::language::{ LanguageConfig, get_language_configs };
 use crate::resolution::Indexer;
 use crate::query::traversal::find_related_symbols;
-use crate::query::output::{ContextOutput, FileContext, LineRange};
-use crate::recipes::models::{Recipe, RecipeOperation, FileTransform};
-use crate::models::{SymbolKind, FileId};
+use crate::query::output::{ ContextOutput, FileContext, LineRange };
+use crate::recipes::models::{ Recipe, RecipeOperation, FileTransform };
+use crate::models::{ SymbolKind, FileId };
 
 /// Internal struct to track text replacements
 #[derive(Debug, Clone)]
@@ -20,11 +21,18 @@ struct RenderMask {
 
 pub struct RecipeExecutor<'a> {
     indexer: &'a Indexer,
+    config_map: HashMap<String, LanguageConfig>,
 }
 
 impl<'a> RecipeExecutor<'a> {
     pub fn new(indexer: &'a Indexer) -> Self {
-        Self { indexer }
+        let mut config_map = HashMap::new();
+        for config in get_language_configs() {
+            for &ext in config.file_extensions {
+                config_map.insert(ext.to_string(), config.clone());
+            }
+        }
+        Self { indexer, config_map }
     }
 
     /// Main entry point: Executes a recipe against the current Indexer state.
@@ -37,13 +45,14 @@ impl<'a> RecipeExecutor<'a> {
         // 2. THE LENS: Transform and render content
         let mut output_files = Vec::new();
 
-        for file_id in file_ids {
-            if let Some(file_node) = self.indexer.index.files.values().find(|f| f.id == file_id) {
+        for file_ids in file_ids {
+            if let Some(file_node) = self.indexer.index.files.values().find(|f| f.id == file_ids) {
                 // Determine if there is a transform for this specific file
                 // We match based on the file path stored in the index
                 // Note: Index paths are usually normalized. Recipe paths might be relative.
                 // We attempt a suffix match or exact match.
-                let transform = recipe.transforms.iter()
+                let transform = recipe.transforms
+                    .iter()
                     .find(|(path_key, _)| {
                         file_node.path.ends_with(*path_key) || file_node.path == **path_key
                     })
@@ -81,9 +90,14 @@ impl<'a> RecipeExecutor<'a> {
                 RecipeOperation::RemoveFiles { pattern } => {
                     let matcher = Glob::new(pattern)?.compile_matcher();
                     // We only need to iterate the current working set to remove
-                    let to_remove: Vec<FileId> = working_set.iter()
+                    let to_remove: Vec<FileId> = working_set
+                        .iter()
                         .filter(|&&fid| {
-                            if let Some(file) = self.indexer.index.files.values().find(|f| f.id == fid) {
+                            if
+                                let Some(file) = self.indexer.index.files
+                                    .values()
+                                    .find(|f| f.id == fid)
+                            {
                                 matcher.is_match(&file.path)
                             } else {
                                 false
@@ -99,12 +113,14 @@ impl<'a> RecipeExecutor<'a> {
                 RecipeOperation::BlastRadius { symbol, max_depth: _, exclude_tests } => {
                     // Note: max_depth is not currently implemented in traversal.rs (it does deep walk),
                     // but we respect the symbol resolution.
-                    if let Some(related_ids) = find_related_symbols(
-                        &self.indexer.index, 
-                        &self.indexer.lookup, 
-                        &self.indexer.reverse_graph, 
-                        symbol // &String works fine here as &str
-                    ) {
+                    if
+                        let Some(related_ids) = find_related_symbols(
+                            &self.indexer.index,
+                            &self.indexer.lookup,
+                            &self.indexer.reverse_graph,
+                            symbol // &String works fine here as &str
+                        )
+                    {
                         for sym_id in related_ids {
                             if let Some(sym) = self.indexer.index.symbols.get(&sym_id) {
                                 // FIX: Dereference exclude_tests (*exclude_tests)
@@ -128,19 +144,13 @@ impl<'a> RecipeExecutor<'a> {
     // --- PHASE 2: TRANSFORMATION ---
 
     fn process_file(
-        &self, 
-        file_node: &crate::models::FileNode, 
+        &self,
+        file_node: &crate::models::FileNode,
         transform: Option<&FileTransform>
     ) -> Result<FileContext> {
-        let raw_content = fs::read_to_string(&file_node.path)
+        let raw_content = fs
+            ::read_to_string(&file_node.path)
             .with_context(|| format!("Failed to read file: {}", file_node.path))?;
-
-        let final_content = if let Some(tr) = transform {
-            let masks = self.calculate_masks(file_node.id, tr);
-            self.apply_masks(&raw_content, masks)
-        } else {
-            raw_content.clone()
-        };
 
         // Metadata extraction
         let ext = Path::new(&file_node.path)
@@ -149,7 +159,14 @@ impl<'a> RecipeExecutor<'a> {
             .unwrap_or("txt")
             .to_string();
 
-        // Calculate line ranges (naive: generic range covering whole file for now, 
+        let final_content = if let Some(tr) = transform {
+            let masks = self.calculate_masks(file_node.id, tr, &ext);
+            self.apply_masks(&raw_content, masks)
+        } else {
+            raw_content.clone()
+        };
+
+        // Calculate line ranges (naive: generic range covering whole file for now,
         // as Recipes usually return whole files or skeletonized whole files).
         // If granular ranges are needed (like in 'cblast radius'), we would calculate them here.
         let line_count = final_content.lines().count();
@@ -164,13 +181,27 @@ impl<'a> RecipeExecutor<'a> {
         })
     }
 
-    fn calculate_masks(&self, file_id: FileId, transform: &FileTransform) -> Vec<RenderMask> {
+    fn calculate_masks(
+        &self,
+        file_id: FileId,
+        transform: &FileTransform,
+        ext: &str
+    ) -> Vec<RenderMask> {
         let mut masks = Vec::new();
-        
+
+        // Lookup skeleton template
+        // Default to C-style if extension unknown or language not configured
+        let default_template = "{ /* ... {} body hidden ... */ }";
+        let template = self.config_map
+            .get(ext)
+            .map(|c| c.skeleton_template)
+            .unwrap_or(default_template);
+
         // Retrieve all symbols for this file
-        // We iterate directly as we don't have a file_id -> [Symbol] lookup optimized, 
+        // We iterate directly as we don't have a file_id -> [Symbol] lookup optimized,
         // but index.symbols is flat map.
-        let file_symbols: Vec<_> = self.indexer.index.symbols.values()
+        let file_symbols: Vec<_> = self.indexer.index.symbols
+            .values()
             .filter(|s| s.file_id == file_id)
             .collect();
 
@@ -178,7 +209,9 @@ impl<'a> RecipeExecutor<'a> {
             // We only skeletonize things that HAVE a body
             let body_start = match sym.body_start {
                 Some(bs) => bs,
-                None => continue,
+                None => {
+                    continue;
+                }
             };
 
             // Safety: body_start cannot be after range_end
@@ -196,9 +229,12 @@ impl<'a> RecipeExecutor<'a> {
                     // "Allow-List": Hide everything EXCEPT these...
                     // ...BUT: Never hide Containers (Classes/Modules), because we need their shell
                     // to see the children inside. We only mask "leaves" (Functions/Methods).
-                    let is_container = matches!(sym.kind, SymbolKind::Container | SymbolKind::Module);
+                    let is_container = matches!(
+                        sym.kind,
+                        SymbolKind::Container | SymbolKind::Module
+                    );
                     let is_target = targets.contains(&sym.name);
-                    
+
                     !is_container && !is_target
                 }
             };
@@ -207,10 +243,7 @@ impl<'a> RecipeExecutor<'a> {
                 masks.push(RenderMask {
                     start: body_start,
                     end: sym.range_end,
-                    // Note: We might want language-specific replacements in the future.
-                    // For now, a generic C-style comment works for most supported langs (TS, Rust, C#, Java, Go, etc.)
-                    // Python/Ruby/Bash might look weird but valid syntax usually stops at the header anyway.
-                    replacement: format!(" /* ... {} body hidden ... */ }}", sym.name),
+                    replacement: template.replace("{}", &sym.name),
                 });
             }
         }
@@ -226,10 +259,10 @@ impl<'a> RecipeExecutor<'a> {
         // 1. Sort by start position to process sequentially
         masks.sort_by_key(|m| m.start);
 
-        // 2. Filter overlaps. 
+        // 2. Filter overlaps.
         // If we have nested masks (e.g. inner function inside outer function),
         // we likely want to keep the OUTER mask (which hides everything) and skip the inner one.
-        // Since we sorted by start, an outer mask will appear before an inner mask 
+        // Since we sorted by start, an outer mask will appear before an inner mask
         // (assuming outer starts before or at inner).
         let mut filtered_masks: Vec<RenderMask> = Vec::new();
         let mut max_end_so_far = 0;
@@ -237,7 +270,11 @@ impl<'a> RecipeExecutor<'a> {
         for mask in masks {
             // Validate char boundaries to prevent panics
             if !source.is_char_boundary(mask.start) || !source.is_char_boundary(mask.end) {
-                eprintln!("Warning: Skipping mask at {}-{} due to invalid char boundary", mask.start, mask.end);
+                eprintln!(
+                    "Warning: Skipping mask at {}-{} due to invalid char boundary",
+                    mask.start,
+                    mask.end
+                );
                 continue;
             }
 

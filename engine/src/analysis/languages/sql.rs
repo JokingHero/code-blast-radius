@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::Sql,
         &["sql"]
     )
+    .skeleton("( /* ... {} ... */ )")
     .defs(r#"
         (statement
             (create_table

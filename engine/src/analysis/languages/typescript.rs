@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::TypeScript,
         &["ts", "tsx"]
     )
+    .skeleton("{ /* ... {} ... */ }")
     .defs(r#"
           ;; Standard Definitions
           (function_declaration

@@ -2,6 +2,7 @@ use crate::analysis::language::{ LanguageConfig, LanguageConfigBuilder, Supporte
 
 pub fn config() -> LanguageConfig {
     LanguageConfigBuilder::new(SupportedLanguage::Prisma, &["prisma"])
+       .skeleton("{ // ... {} ... }")
         // S-Exp: (model_declaration (identifier))
         .defs(r#"
             (model_declaration

@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::Hcl,
         &["tf", "hcl", "tfvars"]
     )
+    .skeleton("{ # ... {} ... }")
     .defs(r#"
         ;; Resources and Data sources have 2 labels: type and name
         (block

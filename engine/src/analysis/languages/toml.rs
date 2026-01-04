@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::Toml,
         &["toml"]
     )
+    .skeleton("")
     .defs(r#"
         [
             (pair (bare_key) @function.name (string) @function.body)

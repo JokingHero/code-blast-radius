@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::Python,
         &["py", "pyi", "pyw"]
     )
+    .skeleton("...")
     .defs(r#"
         [
             (function_definition name: (identifier) @function.name body: (block) @function.body) @function.definition

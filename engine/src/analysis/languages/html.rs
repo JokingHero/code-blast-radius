@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::Html,
         &["html", "htm", "xhtml"]
     )
+    .skeleton("<!-- ... {} ... -->")
     // Preserved logic: treat elements with 'id' attributes as definitions
     .defs(r#"(attribute (attribute_name) @attr (#eq? @attr "id") (attribute_value) @function.name) @function.definition"#)
     

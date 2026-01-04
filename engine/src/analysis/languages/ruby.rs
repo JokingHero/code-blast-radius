@@ -5,6 +5,7 @@ pub fn config() -> LanguageConfig {
         SupportedLanguage::Ruby,
         &["rb"]
     )
+    .skeleton("# ... {} body hidden")
     .defs(r#"
         ;; Methods - body is optional for one-liners like "def foo; end"
         (method
