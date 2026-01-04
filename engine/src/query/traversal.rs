@@ -8,14 +8,29 @@ pub enum SliceDirection {
     Both,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraversalMode {
+    /// For generating context for LLMs/IDEs. 
+    /// Conservative: Avoids crossing file boundaries via Imports to prevent unrelated leaks.
+    Context,
+    /// For "Blast Radius" analysis.
+    /// Aggressive: Follows Imports to find everything that depends on the target.
+    Impact,
+}
+
 pub struct GraphWalker<'a> {
     index: &'a WorkspaceIndex,
     reverse_graph: &'a HashMap<SymbolId, Vec<Edge>>,
+    mode: TraversalMode,
 }
 
 impl<'a> GraphWalker<'a> {
-    pub fn new(index: &'a WorkspaceIndex, reverse_graph: &'a HashMap<SymbolId, Vec<Edge>>) -> Self {
-        Self { index, reverse_graph }
+    pub fn new(
+        index: &'a WorkspaceIndex, 
+        reverse_graph: &'a HashMap<SymbolId, Vec<Edge>>,
+        mode: TraversalMode
+    ) -> Self {
+        Self { index, reverse_graph, mode }
     }
 
     pub fn walk_deep(&self, start_ids: &[SymbolId]) -> Vec<SymbolId> {
@@ -32,7 +47,7 @@ impl<'a> GraphWalker<'a> {
         while let Some(current) = queue.pop_front() {
             let current_sym = self.index.symbols.get(&current);
             let is_module = current_sym.map_or(false, |s| s.kind == SymbolKind::Module);
-            
+
             // 1. Go Downstream (Source -> Target)
             if let Some(edges) = self.index.graph.get(&current) {
                 for edge in edges {
@@ -96,9 +111,15 @@ impl<'a> GraphWalker<'a> {
             // Essential for providing file context (fixes collision_test).
             EdgeKind::Contains => true,
 
-            // DISABLED: Prevents leaking across shared files in Monorepos.
-            // If enabled, SharedFile -> Upstream -> UnrelatedFile.
-            EdgeKind::Defines | EdgeKind::Imports => false,
+            // LOGIC SPLIT:
+            // Context mode: Block imports to prevent Monorepo leaks.
+            // Impact mode: Allow imports to find dependent files.
+            EdgeKind::Imports => match self.mode {
+                TraversalMode::Context => false,
+                TraversalMode::Impact => true,
+            },
+            
+            EdgeKind::Defines => false,
         }
     }
 }
@@ -112,6 +133,7 @@ pub fn find_call_chain_ids(
 }
 
 /// Decoupled from Indexer: takes only the data structures needed.
+/// Defaults to TraversalMode::Context for standard IDE/Chat usage.
 pub fn find_related_symbols(
     index: &WorkspaceIndex,
     lookup: &SymbolIndex,
@@ -123,7 +145,7 @@ pub fn find_related_symbols(
         return None;
     }
 
-    let walker = GraphWalker::new(index, reverse_graph);
+    let walker = GraphWalker::new(index, reverse_graph, TraversalMode::Context);
     Some(walker.walk_deep(targets))
 }
 

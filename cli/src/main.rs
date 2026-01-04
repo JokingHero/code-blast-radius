@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use anyhow::{Context, Result};
 
-use blast_radius_engine::query::traversal::GraphWalker;
+use blast_radius_engine::query::traversal::{GraphWalker, TraversalMode};
 use blast_radius_engine::query::output::generate_context_output;
 use blast_radius_engine::workspace::WorkspaceManager;
 use blast_radius_engine::recipes::executor::RecipeExecutor;
@@ -244,7 +244,11 @@ fn run() -> Result<()> {
             }
 
             // Step B: Traverse Graph
-            let walker = GraphWalker::new(&indexer.index, &indexer.reverse_graph);
+            let walker = GraphWalker::new(
+                &indexer.index, 
+                &indexer.reverse_graph, 
+                TraversalMode::Impact
+            );
             let mut related_ids = walker.walk_deep(&start_ids);
 
             // Step C: Filter
