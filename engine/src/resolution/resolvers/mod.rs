@@ -6,7 +6,7 @@ pub mod state;
 pub mod data;
 pub mod constants;
 
-use crate::models::{Edge, EdgeKind, SymbolId, WorkspaceIndex, SymbolKind};
+use crate::models::{Edge, EdgeKind, SymbolId, SymbolIndex, WorkspaceIndex};
 
 // Shared helper to avoid code duplication in resolvers
 pub fn add_edge(index: &mut WorkspaceIndex, source: SymbolId, target: SymbolId, kind: EdgeKind) {
@@ -19,10 +19,11 @@ pub fn add_edge(index: &mut WorkspaceIndex, source: SymbolId, target: SymbolId, 
 }
 
 // Shared helper for linking modules
-pub fn link_modules(index: &mut WorkspaceIndex, file_a: u32, file_b: u32) {
-    let mod_a = index.symbols.values().find(|s| s.file_id == file_a && s.kind == SymbolKind::Module).map(|s| s.id);
-    let mod_b = index.symbols.values().find(|s| s.file_id == file_b && s.kind == SymbolKind::Module).map(|s| s.id);
-    if let (Some(ma), Some(mb)) = (mod_a, mod_b) {
+pub fn link_modules(index: &mut WorkspaceIndex, lookup: &SymbolIndex, file_a: u32, file_b: u32) {
+    let mod_a = lookup.file_to_module.get(&file_a);
+    let mod_b = lookup.file_to_module.get(&file_b);
+    
+    if let (Some(&ma), Some(&mb)) = (mod_a, mod_b) {
         add_edge(index, ma, mb, EdgeKind::Imports);
         add_edge(index, mb, ma, EdgeKind::Imports);
     }

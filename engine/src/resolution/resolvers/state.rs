@@ -33,6 +33,7 @@ pub fn resolve_state_management(index: &mut WorkspaceIndex, staging: &StagingAre
 pub fn resolve_pubsub_wildcards(
     index: &mut WorkspaceIndex,
     staging: &StagingArea,
+    lookup: &SymbolIndex, 
     configs: &HashMap<String, LanguageConfig>
 ) {
     let mut patterns: Vec<(FileId, String)> = Vec::new();
@@ -68,7 +69,7 @@ pub fn resolve_pubsub_wildcards(
             if matches_topic(pat_str, cand_str) {
                 let deps = index.file_dependencies.entry(*cand_file).or_default();
                 if !deps.contains(pat_file) { deps.push(*pat_file); }
-                link_modules(index, *pat_file, *cand_file);
+                link_modules(index, lookup, *pat_file, *cand_file);
             }
         }
     }

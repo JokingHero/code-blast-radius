@@ -53,7 +53,7 @@ pub fn resolve_implicit_routes(index: &mut WorkspaceIndex, staging: &StagingArea
             add_edge(index, s, tgt_sym_id, EdgeKind::Calls); 
         }
         
-        link_modules(index, src_file_id, tgt_file_id);
+        link_modules(index, lookup, src_file_id, tgt_file_id);
     }
 }
 

@@ -328,6 +328,9 @@ impl FileScanner {
                 .cloned();
 
             if let Some(mid) = module_id {
+                // NEW: Update the bridge
+                lookup.file_to_module.insert(file_id, mid);
+
                 for &id in &file_symbol_ids {
                     if id != mid {
                          if let Some(sym) = index.symbols.get_mut(&id) { 
@@ -405,5 +408,6 @@ impl FileScanner {
         
         lookup.file_imports.remove(&file_id);
         lookup.file_exports.remove(&file_id);
+        lookup.file_to_module.remove(&file_id);
     }
 }

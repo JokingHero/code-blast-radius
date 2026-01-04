@@ -157,6 +157,7 @@ pub struct SymbolIndex {
     pub external_symbols: HashSet<String>,
     pub external_packages: HashSet<String>,
     pub config_definitions: HashMap<String, Vec<SymbolId>>, 
+    pub file_to_module: HashMap<FileId, SymbolId>,
 }
 
 #[derive(Archive, Deserialize, Serialize, Debug, Default)]

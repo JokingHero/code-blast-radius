@@ -55,10 +55,17 @@ impl Indexer {
 
     fn rebuild_derived_indices(&mut self) {
         self.lookup.symbol_map.clear();
+        self.lookup.file_to_module.clear(); // Clear new map
+
         for sym in self.index.symbols.values() {
              self.lookup.symbol_map.entry(sym.name.clone()).or_default().push(sym.id);
+             
+             // Populate Bridge
+             if sym.kind == crate::models::SymbolKind::Module {
+                 self.lookup.file_to_module.insert(sym.file_id, sym.id);
+             }
         }
-        // This is crucial for incremental updates!
+
         self.lookup.file_imports = self.index.file_imports.clone();
         self.lookup.file_exports = self.index.file_exports.clone();
         self.build_reverse_graph();

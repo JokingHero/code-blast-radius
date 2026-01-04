@@ -164,13 +164,13 @@ pub fn resolve_literal_dependencies(index: &mut WorkspaceIndex, staging: &Stagin
                 if !deps.contains(&target_id) {
                     deps.push(target_id);
                 }
-                link_modules(index, src_id, target_id);
+                link_modules(index, lookup, src_id, target_id);
             }
         }
     }
 }
 
-pub fn resolve_shared_literals(index: &mut WorkspaceIndex, staging: &StagingArea) {
+pub fn resolve_shared_literals(index: &mut WorkspaceIndex, staging: &StagingArea, lookup: &SymbolIndex) {
     let mut literal_map: HashMap<String, Vec<FileId>> = HashMap::new();
     let config_file_ids: HashSet<FileId> = index.files
         .iter()
@@ -206,7 +206,7 @@ pub fn resolve_shared_literals(index: &mut WorkspaceIndex, staging: &StagingArea
                 let deps_b = index.file_dependencies.entry(id_b).or_default();
                 if !deps_b.contains(&id_a) { deps_b.push(id_a); }
 
-                link_modules(index, id_a, id_b);
+                link_modules(index, lookup, id_a, id_b);
             }
         }
     }
@@ -269,6 +269,6 @@ pub fn resolve_iac_links(index: &mut WorkspaceIndex, staging: &StagingArea, look
     for (src, tgt) in new_file_links {
         let deps = index.file_dependencies.entry(src).or_default();
         if !deps.contains(&tgt) { deps.push(tgt); }
-        link_modules(index, src, tgt);
+        link_modules(index, lookup, src, tgt);
     }
 }
