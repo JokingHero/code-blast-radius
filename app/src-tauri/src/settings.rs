@@ -69,4 +69,21 @@ impl SettingsState {
         drop(settings);
         let _ = self.save();
     }
+
+    pub fn remove_recent(&self, path: &str) {
+        let mut settings = self.settings.lock().unwrap();
+        
+        // Retain only paths that do NOT match the one being removed
+        settings.recent_workspaces.retain(|p| p != path);
+        
+        // If the removed path was the last opened, clear it
+        if let Some(last) = &settings.last_opened_path {
+            if last == path {
+                settings.last_opened_path = None;
+            }
+        }
+
+        drop(settings); // Explicit unlock before saving
+        let _ = self.save();
+    }
 }

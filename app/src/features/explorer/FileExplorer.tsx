@@ -1,8 +1,9 @@
 import { createSignal, createEffect, For, Show, createMemo, onCleanup } from "solid-js";
-import { Portal } from "solid-js/web"; // Import Portal
+import { Portal } from "solid-js/web"; 
 import { readDir, DirEntry } from "@tauri-apps/plugin-fs";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useWorkspace } from "../../core/workspace.store";
+import { useRecipe } from "../../core/recipe.store";
 
 // --- Helpers ---
 
@@ -27,7 +28,7 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number })
   const [errorMsg, setErrorMsg] = createSignal<string | null>(null);
 
   const fullPath = joinPath(props.parentPath, props.entry.name);
-  const { addToRecipe } = useWorkspace();
+  const { addStep } = useRecipe(); 
   
   const sortedChildren = createMemo(() => {
     return [...children()].sort((a, b) => {
@@ -60,7 +61,14 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number })
 
   const handleDragStart = (e: DragEvent) => {
     if (e.dataTransfer) {
-      const payload = JSON.stringify({ type: "add_file", value: fullPath });
+      // Logic: If directory, append /** to act as a recursive glob
+      let value = fullPath;
+      if (props.entry.isDirectory) {
+        // Standardize separators for globbing
+        value = value.replace(/\\/g, "/") + "/**";
+      }
+
+      const payload = JSON.stringify({ type: "add_file", value });
       e.dataTransfer.setData("application/json", payload);
       e.dataTransfer.effectAllowed = "copy";
       if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.opacity = "0.5";
@@ -75,7 +83,7 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number })
   const handleDblClick = (e: MouseEvent) => {
     e.stopPropagation();
     if (!props.entry.isDirectory) {
-        addToRecipe("add_file", fullPath);
+        addStep({ type: "file", value: fullPath });
     }
   }
 
@@ -84,7 +92,7 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number })
       <div 
         onClick={toggleNode}
         onDblClick={handleDblClick}
-        draggable={!props.entry.isDirectory}
+        draggable={true} 
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         class={`
@@ -203,9 +211,6 @@ const RootFolder = (props: { path: string, canRemove: boolean, onRemove: () => v
     )
 }
 
-/**
- * Main Explorer Sidebar
- */
 export const FileExplorer = () => {
   const { state, addRoot, removeRoot, saveWorkspace, loadWorkspace, refreshWorkspace, clearHistory } = useWorkspace();
   const [showRecent, setShowRecent] = createSignal(false);
@@ -261,14 +266,12 @@ export const FileExplorer = () => {
   };
 
   const handleClickOutside = (e: MouseEvent) => {
-    // If click target is NOT inside the portal menu (id=recent-menu) and NOT the trigger button
     const target = e.target as HTMLElement;
     if (!target.closest('#recent-menu') && !target.closest('#recent-trigger')) {
         setShowRecent(false);
     }
   };
 
-  // Close on window resize to prevent floating menu in wrong place
   const handleResize = () => setShowRecent(false);
 
   document.addEventListener('click', handleClickOutside);
@@ -308,7 +311,6 @@ export const FileExplorer = () => {
                     [ RECENT {showRecent() ? '^' : 'v'} ]
                 </button>
 
-                {/* Portal moves this content to <body>, breaking out of sidebar overflow */}
                 <Show when={showRecent()}>
                     <Portal>
                         <div 
@@ -318,8 +320,6 @@ export const FileExplorer = () => {
                                 top: `${coords().top}px`,
                                 left: `${coords().left}px`,
                                 "min-width": `${coords().width}px`,
-                                // w-max allows the box to expand to fit long paths
-                                // max-w prevents it from going off the right edge of screen
                                 width: "max-content",
                                 "max-width": "calc(100vw - 20px)"
                             }}

@@ -1,16 +1,27 @@
+// File: engine/src/workspace.rs
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{PathBuf};
+use std::path::{Path, PathBuf};
 use std::fs;
 use anyhow::{Result, Context, anyhow};
 use crate::recipes::models::Recipe;
 use crate::resolution::{Indexer, pipeline::Pipeline};
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+// --- Runtime Configuration (In-Memory, Absolute Paths) ---
+#[derive(Debug, Clone, Default)]
 pub struct WorkspaceConfig {
     pub name: String,
     pub roots: Vec<PathBuf>,
     pub recipes: HashMap<String, Recipe>,
+}
+
+// --- Persisted Configuration (JSON, Relative Paths, Forward Slashes) ---
+#[derive(Serialize, Deserialize)]
+struct PersistedWorkspaceConfig {
+    name: String,
+    roots: Vec<String>, // Stored as strings to enforce unix-style separators
+    recipes: HashMap<String, Recipe>,
 }
 
 pub struct WorkspaceManager {
@@ -23,23 +34,58 @@ pub struct WorkspaceManager {
 impl WorkspaceManager {
     /// Case 1: Load from an existing .cblast file
     pub fn from_file(path: PathBuf) -> Result<Self> {
-        let content = fs::read_to_string(&path)
-            .context(format!("Could not read workspace file: {:?}", path))?;
+        let abs_path = fs::canonicalize(&path).unwrap_or(path.clone());
+        let base_dir = abs_path.parent().unwrap_or_else(|| Path::new("."));
+
+        let content = fs::read_to_string(&abs_path)
+            .context(format!("Could not read workspace file: {:?}", abs_path))?;
         
-        let config: WorkspaceConfig = serde_json::from_str(&content)
+        // Deserialize into the DTO
+        let persisted: PersistedWorkspaceConfig = serde_json::from_str(&content)
             .context("Failed to parse workspace JSON")?;
 
+        // Convert DTO -> Runtime Config
+        let mut roots = Vec::new();
+        for root_str in persisted.roots {
+            // 1. Handle OS separators (Convert forward slash to native if on Windows)
+            let os_path_str = if cfg!(windows) {
+                root_str.replace('/', "\\")
+            } else {
+                root_str
+            };
+            
+            let path_obj = PathBuf::from(os_path_str);
+
+            // 2. Resolve Relative Paths
+            let final_path = if path_obj.is_relative() {
+                base_dir.join(path_obj)
+            } else {
+                path_obj
+            };
+
+            // 3. Canonicalize (Best effort, ignore if path doesn't exist yet to allow repairing)
+            let canonical = fs::canonicalize(&final_path).unwrap_or(final_path);
+            roots.push(canonical);
+        }
+
+        let config = WorkspaceConfig {
+            name: persisted.name,
+            roots,
+            recipes: persisted.recipes,
+        };
+
         // Look for sibling index file: project.cblast -> project.cblast.index
-        let index_path = path.with_extension("cblast.index");
+        let index_path = abs_path.with_extension("cblast.index");
         let indexer = Indexer::load_from_file(&index_path).unwrap_or(Indexer::new());
 
-        // We run a sync immediately to ensure AST validity vs Disk
         let mut manager = Self { 
-            backing_file: Some(path), 
+            backing_file: Some(abs_path), 
             config, 
             indexer 
         };
-        manager.sync(); // Optional: Might be slow on startup, maybe make this lazy?
+        
+        // Ensure index matches files on disk
+        manager.sync(); 
         
         Ok(manager)
     }
@@ -49,7 +95,6 @@ impl WorkspaceManager {
         let mut indexer = Indexer::new();
         
         // Optimization: If it's a single root, try to load existing cache from `.cblast/index.local.bin`
-        // This mimics your previous GUI logic but keeps it in the engine.
         if roots.len() == 1 {
             let cache_path = roots[0].join(".cblast").join("index.local.bin");
             if cache_path.exists() {
@@ -73,7 +118,6 @@ impl WorkspaceManager {
         let mut staging = pipeline.hydrate_staging(&indexer.index);
         pipeline.resolve(&mut indexer, &mut staging);
 
-        // Create Config
         let name = abs_roots.first()
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().to_string())
@@ -95,8 +139,29 @@ impl WorkspaceManager {
         let path = self.backing_file.as_ref()
             .ok_or_else(|| anyhow!("Cannot save an in-memory workspace. Use save_as() first."))?;
         
+        let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+
+        // Convert Runtime Config -> Persisted DTO
+        let mut persisted_roots = Vec::new();
+        for root in &self.config.roots {
+            // 1. Calculate relative path from .cblast file to root
+            let relative_path = pathdiff::diff_paths(root, base_dir).unwrap_or_else(|| root.clone());
+            
+            // 2. Normalize to Forward Slashes (Portable JSON)
+            let path_str = relative_path.to_string_lossy().to_string();
+            let portable_path = path_str.replace('\\', "/");
+            
+            persisted_roots.push(portable_path);
+        }
+
+        let persisted_config = PersistedWorkspaceConfig {
+            name: self.config.name.clone(),
+            roots: persisted_roots,
+            recipes: self.config.recipes.clone(),
+        };
+
         // 1. Save Config
-        let json = serde_json::to_string_pretty(&self.config)?;
+        let json = serde_json::to_string_pretty(&persisted_config)?;
         fs::write(path, json).context("Failed to write config")?;
 
         // 2. Save Index
@@ -108,17 +173,15 @@ impl WorkspaceManager {
 
     /// Promote In-Memory to File-Backed, OR Save As new path
     pub fn save_as(&mut self, path: PathBuf) -> Result<()> {
-        self.backing_file = Some(path);
-        // Ensure the config name matches the filename (optional UX choice)
+        let abs_path = fs::canonicalize(&path).unwrap_or(path);
+        self.backing_file = Some(abs_path);
+        
         if let Some(stem) = self.backing_file.as_ref().unwrap().file_stem() {
             self.config.name = stem.to_string_lossy().to_string();
         }
         self.save()
     }
 
-    // ... [add_root, remove_root, sync, rebuild_graph remain mostly the same] ...
-    // ... just ensure add_root calls sync/rebuild ...
-    
     pub fn add_root(&mut self, root: PathBuf) {
         let abs_root = fs::canonicalize(&root).unwrap_or(root);
         if !self.config.roots.contains(&abs_root) {
