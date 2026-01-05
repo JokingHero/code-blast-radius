@@ -115,8 +115,8 @@ function App() {
         <Show when={!state.isInitializing}>
           <Show when={state.isLoaded} fallback={<WelcomeScreen />}>
             <div class="flex-1 flex overflow-hidden">
-              {/* LEFT: File Explorer */}
-              <div class="w-64 border-r border-matrix-border flex flex-col bg-black/40 relative z-50">
+              {/* LEFT: File Explorer (WIDER) */}
+              <div class="w-80 border-r border-matrix-border flex flex-col bg-black/40 relative z-50">
                 <div class="h-12 shrink-0 flex items-center px-3 border-b border-matrix-border bg-matrix-panel select-none justify-between">
                   <div class="flex items-center">
                     <div class="w-2 h-2 bg-matrix-text rounded-full mr-2 opacity-50"></div>
@@ -125,13 +125,19 @@ function App() {
                     </span>
                   </div>
                   <div class="flex gap-1">
-                    <Show when={state.config?.mode === "project"}>
-                      <span class="text-micro border border-matrix-border px-1 opacity-50 rounded bg-matrix-panel text-matrix-highlight">
+                    <Show when={state.config?.mode === 'project'}>
+                      <span 
+                        class="text-micro border border-matrix-border px-1 opacity-50 rounded bg-matrix-panel text-matrix-highlight"
+                        title="This is a saved workspace project (.cblast)."
+                      >
                         PROJ
                       </span>
                     </Show>
-                    <Show when={state.config?.mode === "unsaved-workspace"}>
-                      <span class="text-micro border border-matrix-error px-1 rounded bg-matrix-error/10 text-matrix-error animate-pulse">
+                    <Show when={state.config?.mode === 'unsaved-workspace'}>
+                      <span 
+                        class="text-micro border border-matrix-error px-1 rounded bg-matrix-error/10 text-matrix-error animate-pulse"
+                        title="Unsaved multi-root workspace. Use '[ SAVE ]' to create a .cblast file."
+                      >
                         UNSAVED
                       </span>
                     </Show>
