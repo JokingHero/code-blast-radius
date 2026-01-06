@@ -8,6 +8,44 @@ pub struct ContextOutput {
     pub files: Vec<FileContext>,
 }
 
+impl ContextOutput {
+    pub fn to_xml(&self) -> String {
+        let mut xml = String::from("<documents>\n");
+        
+        for file in &self.files {
+            xml.push_str(&format!(
+                "  <document path=\"{}\" language=\"{}\">\n",
+                escape_xml_attribute(&file.path),
+                escape_xml_attribute(&file.language)
+            ));
+            
+            xml.push_str("    <source_code>\n");
+            xml.push_str(&escape_xml_content(&file.content));
+            xml.push_str("\n    </source_code>\n");
+            
+            xml.push_str("  </document>\n");
+        }
+        
+        xml.push_str("</documents>");
+        xml
+    }
+}
+
+fn escape_xml_attribute(input: &str) -> String {
+    input.replace('&', "&amp;")
+         .replace('<', "&lt;")
+         .replace('>', "&gt;")
+         .replace('"', "&quot;")
+         .replace('\'', "&apos;")
+}
+
+fn escape_xml_content(input: &str) -> String {
+    // For content, quotes don't strictly need escaping, but <, >, & do.
+    input.replace('&', "&amp;")
+         .replace('<', "&lt;")
+         .replace('>', "&gt;")
+}
+
 #[derive(Serialize)]
 pub struct FileContext {
     pub path: String,
@@ -32,7 +70,7 @@ pub fn generate_context_output(
     index: &WorkspaceIndex, 
     symbol_ids: &[u32]
 ) -> ContextOutput {
-    
+    // ... (Existing implementation remains unchanged)
     // 1. Identify Target
     let mut target_name = "Unknown".to_string();
     if let Some(first) = symbol_ids.first() {

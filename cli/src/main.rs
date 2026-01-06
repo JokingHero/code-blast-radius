@@ -101,7 +101,6 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
 
     // 1. Initialize Manager based on input path type
-    // This logic replaces the old `resolve_paths`
     let mut manager = if cli.path.is_file() {
         // Assume it's a .cblast file
         WorkspaceManager::from_file(cli.path.clone())
@@ -115,12 +114,9 @@ fn run() -> Result<()> {
     };
 
     // 2. SYNC (Incremental Update)
-    // Always sync to ensure freshness.
     manager.sync();
     
-    // Auto-save index for next time (optimization), but only if supported
-    // If we are in Ad-Hoc mode, `save()` will fail, but `sync()` internally handles 
-    // the local cache updates for ad-hoc folders now.
+    // Auto-save index for next time (optimization)
     if manager.backing_file.is_some() {
         manager.save().context("Failed to save workspace state")?;
     }
@@ -130,15 +126,11 @@ fn run() -> Result<()> {
         Commands::Workspace { action } => {
             match action {
                 WorkspaceAction::Init { name } => {
-                    // Logic: If user passed a dir, we want to create a new file?
-                    // Or if they passed a file path that doesn't exist?
-                    // For now, let's update the name.
                     manager.config.name = name.clone();
                     if manager.backing_file.is_some() {
                         manager.save()?;
                         println!("Workspace config updated.");
                     } else {
-                        // Ad-hoc
                         println!("Initialized in-memory workspace '{}'. Use GUI to save.", name);
                     }
                 }
@@ -159,7 +151,6 @@ fn run() -> Result<()> {
                     println!("Removed root.");
                 }
                 WorkspaceAction::Sync => {
-                    // Sync already happened at startup
                     println!("Workspace synced successfully.");
                 }
             }
@@ -202,7 +193,8 @@ fn run() -> Result<()> {
                     let executor = RecipeExecutor::new(&manager.indexer);
                     let output = executor.execute(recipe)?;
                     
-                    println!("{}", serde_json::to_string_pretty(&output)?);
+                    // Uses the XML method defined in the engine
+                    println!("{}", output.to_xml());
                 }
             }
         }
