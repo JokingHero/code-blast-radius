@@ -1,14 +1,38 @@
 import { For, Show, createSignal, createEffect } from "solid-js";
 import { useWorkspace, ContextFile } from "../../core/workspace.store";
 
+/**
+ * Matches Rust's escape_xml_attribute
+ * Escapes: & < > " '
+ */
+const escapeXmlAttribute = (input: string): string => {
+  return input
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+};
+
+/**
+ * Matches Rust's escape_xml_content
+ * Escapes: & < >
+ * (Quotes are technically allowed in XML content, only strictly required in attributes)
+ */
+const escapeXmlContent = (input: string): string => {
+  return input
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+};
+
 const ContextFileItem = (props: { 
   file: ContextFile; 
-  forceState?: boolean | null; // null = ignore, true = open, false = close
+  forceState?: boolean | null; 
 }) => {
   const [isExpanded, setIsExpanded] = createSignal(false);
   const [copied, setCopied] = createSignal(false);
 
-  // React to global expand/collapse signals
   createEffect(() => {
     if (props.forceState !== null && props.forceState !== undefined) {
       setIsExpanded(props.forceState);
@@ -24,7 +48,7 @@ const ContextFileItem = (props: {
 
   return (
     <div class="border border-matrix-border/50 rounded bg-matrix-bg overflow-hidden animate-[fadeIn_0.3s_ease-out]">
-      {/* Header (Click to toggle) */}
+      {/* Header */}
       <div 
         onClick={() => setIsExpanded(!isExpanded())}
         class={`
@@ -35,24 +59,16 @@ const ContextFileItem = (props: {
         `}
       >
         <div class="flex items-center gap-3 min-w-0">
-          {/* Chevron */}
           <div class={`
             w-4 h-4 flex items-center justify-center transition-transform duration-200 text-tiny text-matrix-primary/70
             ${isExpanded() ? 'rotate-90' : 'rotate-0'}
           `}>
              ▶
           </div>
-
-          {/* Badge */}
           <span class="text-[10px] font-bold uppercase text-matrix-bg bg-matrix-primary/40 px-1.5 rounded-sm">
             {props.file.language}
           </span>
-          
-          {/* Path */}
-          <span 
-            class="font-bold text-xs font-mono text-matrix-primary truncate" 
-            title={props.file.path}
-          >
+          <span class="font-bold text-xs font-mono text-matrix-primary truncate" title={props.file.path}>
             {props.file.path.split(/[/\\]/).slice(-2).join('/')}
           </span>
         </div>
@@ -61,8 +77,6 @@ const ContextFileItem = (props: {
             <span class="text-[10px] opacity-40 font-mono hidden sm:inline-block">
                 {props.file.relevant_lines?.length || 0} BLOCKS
             </span>
-            
-            {/* Copy Individual File Button */}
             <button
                 onClick={handleCopyFile}
                 class={`
@@ -77,7 +91,6 @@ const ContextFileItem = (props: {
         </div>
       </div>
 
-      {/* Content - Only rendered into DOM when isExpanded is true */}
       <Show when={isExpanded()}>
         <div class="relative group/code">
             <div class="absolute top-0 right-0 p-1 opacity-0 group-hover/code:opacity-100 transition-opacity pointer-events-none">
@@ -97,14 +110,30 @@ const ContextFileItem = (props: {
 export const ContextComposer = () => {
   const { state } = useWorkspace();
   const [forceExpand, setForceExpand] = createSignal<boolean | null>(null);
+  const [isCopiedAll, setIsCopiedAll] = createSignal(false);
 
+  // --- 2. Updated Copy Logic ---
   const handleCopyAll = () => {
-    const text = state.contextFiles.map(f => `// File: ${f.path}\n${f.content}`).join("\n\n");
-    navigator.clipboard.writeText(text);
+    let xml = "<documents>\n";
+
+    state.contextFiles.forEach(file => {
+        // Match Rust formatting exactly
+        xml += `  <document path="${escapeXmlAttribute(file.path)}" language="${escapeXmlAttribute(file.language)}">\n`;
+        xml += `    <source_code>\n`;
+        xml += escapeXmlContent(file.content);
+        xml += `\n    </source_code>\n`;
+        xml += `  </document>\n`;
+    });
+
+    xml += "</documents>";
+
+    navigator.clipboard.writeText(xml);
+    setIsCopiedAll(true);
+    setTimeout(() => setIsCopiedAll(false), 2000);
   };
+  // -----------------------------
 
   const toggleAll = () => {
-    // If currently force expanded, collapse. Otherwise expand.
     setForceExpand((prev) => prev === true ? false : true);
   }
 
@@ -147,7 +176,7 @@ export const ContextComposer = () => {
                         : 'border-transparent text-matrix-primary/20 cursor-not-allowed'}
                 `}
             >
-                {state.isSyncing ? "SYNCING..." : "[ COPY ALL ]"}
+                {state.isSyncing ? "SYNCING..." : (isCopiedAll() ? "XML COPIED!" : "[ COPY XML ]")}
             </button>
         </div>
       </div>
