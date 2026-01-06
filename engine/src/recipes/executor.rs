@@ -6,7 +6,7 @@ use globset::{ Glob };
 
 use crate::analysis::language::{ LanguageConfig, get_language_configs };
 use crate::resolution::Indexer;
-use crate::query::traversal::find_related_symbols;
+use crate::query::traversal::{ GraphWalker, TraversalMode };
 use crate::query::output::{ ContextOutput, FileContext, LineRange };
 use crate::recipes::models::{ Recipe, RecipeOperation, FileTransform };
 use crate::models::{ SymbolKind, FileId };
@@ -135,24 +135,51 @@ impl<'a> RecipeExecutor<'a> {
                         Some(*max_depth as usize) 
                     };
 
-                    if
-                        let Some(related_ids) = find_related_symbols(
+                    let mut found_ids = Vec::new();
+
+                    // A. Attempt to find matching symbols directly (Functions, Classes, etc.)
+                    if let Some(ids) = self.indexer.lookup.symbol_map.get(symbol) {
+                        let walker = GraphWalker::new(
                             &self.indexer.index,
-                            &self.indexer.lookup,
                             &self.indexer.reverse_graph,
-                            symbol, // &String works fine here as &str
+                            TraversalMode::Context,
                             depth_opt
-                        )
-                    {
-                        for sym_id in related_ids {
-                            if let Some(sym) = self.indexer.index.symbols.get(&sym_id) {
-                                if *exclude_tests && sym.is_test {
-                                    continue;
+                        );
+                        found_ids = walker.walk_deep(ids);
+                    } 
+                    // B. Fallback: Check if the 'symbol' string is actually a File Path
+                    else {
+                        let matching_file_id = self.indexer.index.files.values()
+                            .find(|f| f.path == *symbol || f.path.ends_with(symbol)) // Exact or suffix match
+                            .map(|f| f.id);
+
+                        if let Some(fid) = matching_file_id {
+                            // If it's a file, seed the traversal with ALL symbols defined in that file.
+                            let mut seed_ids = Vec::new();
+                            for sym in self.indexer.index.symbols.values() {
+                                if sym.file_id == fid {
+                                    seed_ids.push(sym.id);
                                 }
-                                // Don't add external library "files" (which have ID 0 usually or virtual)
-                                if !sym.is_external {
-                                    working_set.insert(sym.file_id);
-                                }
+                            }
+                            
+                            let walker = GraphWalker::new(
+                                &self.indexer.index,
+                                &self.indexer.reverse_graph,
+                                TraversalMode::Context,
+                                depth_opt
+                            );
+                            found_ids = walker.walk_deep(&seed_ids);
+                        }
+                    }
+
+                    for sym_id in found_ids {
+                        if let Some(sym) = self.indexer.index.symbols.get(&sym_id) {
+                            if *exclude_tests && sym.is_test {
+                                continue;
+                            }
+                            // Don't add external library "files" (which have ID 0 usually or virtual)
+                            if !sym.is_external {
+                                working_set.insert(sym.file_id);
                             }
                         }
                     }

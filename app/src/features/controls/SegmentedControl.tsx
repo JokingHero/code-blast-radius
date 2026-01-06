@@ -15,7 +15,7 @@ interface SegmentedControlProps<T> {
 
 export function SegmentedControl<T>(props: SegmentedControlProps<T>) {
   return (
-    <div class="flex h-5 border border-matrix-border rounded-sm overflow-hidden shrink-0">
+    <div class="flex h-5 border border-matrix-border overflow-hidden shrink-0">
       <For each={props.options}>
         {(opt, i) => (
           <>

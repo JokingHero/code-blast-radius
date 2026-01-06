@@ -66,7 +66,7 @@ const ContextFileItem = (props: {
   };
 
   return (
-    <div class="border border-matrix-border/50 rounded bg-matrix-bg overflow-hidden animate-[fadeIn_0.3s_ease-out]">
+    <div class="border border-matrix-border/50 bg-matrix-bg overflow-hidden animate-[fadeIn_0.3s_ease-out]">
       {/* Header */}
       <div 
         onClick={() => setIsExpanded(!isExpanded())}
@@ -84,7 +84,7 @@ const ContextFileItem = (props: {
           `}>
              ▶
           </div>
-          <span class="text-sm font-bold uppercase text-matrix-bg bg-matrix-primary/40 px-1.5 rounded-sm">
+          <span class="text-sm font-bold uppercase text-matrix-bg bg-matrix-primary/40 px-1.5">
             {props.file.language}
           </span>
           <span class="font-bold text-base font-mono text-matrix-primary truncate" title={props.file.path}>
@@ -99,7 +99,7 @@ const ContextFileItem = (props: {
             <button
                 onClick={handleCopyFile}
                 class={`
-                    text-lg uppercase font-bold tracking-wider px-2 py-0.5 rounded border transition-all
+                    text-lg uppercase font-bold tracking-wider px-2 py-0.5 border transition-all
                     ${copied() 
                         ? 'border-matrix-primary text-matrix-primary bg-matrix-primary/10' 
                         : 'border-transparent text-matrix-primary/40 hover:text-matrix-highlight hover:border-matrix-primary/30'}

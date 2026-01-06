@@ -41,7 +41,7 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
         onMouseEnter={() => setIsHovering(true)}
         onMouseLeave={() => setIsHovering(false)}
         class="
-            border border-matrix-border bg-matrix-bg rounded p-2 text-sm 
+            border border-matrix-border bg-matrix-bg p-2 text-sm 
             transition-colors hover:border-matrix-primary/50 cursor-grab active:cursor-grabbing
             relative group/item
         "
@@ -58,7 +58,7 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
                 class="
                     w-5 h-5 flex items-center justify-center 
                     text-matrix-bg bg-matrix-primary font-bold 
-                    hover:bg-matrix-highlight transition-colors rounded-sm
+                    hover:bg-matrix-highlight transition-colors
                 "
                 title="Include Mode (Click to Exclude)"
               >
@@ -71,7 +71,7 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
                 class="
                     w-5 h-5 flex items-center justify-center 
                     text-matrix-bg bg-matrix-primary font-bold 
-                    hover:bg-matrix-highlight transition-colors rounded-sm
+                    hover:bg-matrix-highlight transition-colors
                 "
                 title="Exclude Mode (Click to Include)"
               >
@@ -79,8 +79,8 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
               </button>
             </Match>
             <Match when={props.step.op.type === 'BlastRadius'}>
-<div class="w-5 h-5 flex items-center justify-center text-matrix-primary border border-matrix-primary rounded-sm">
-                   <span class="text-sm font-bold">R</span>
+<div class="w-5 h-5 flex items-center justify-center text-matrix-primary border border-matrix-primary">
+                   <span class="text-sm font-bold">?</span>
                </div>
             </Match>
           </Switch>
@@ -124,7 +124,7 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
                 <Show 
                     when={!isInfinite()}
                     fallback={
-<div class="flex items-center justify-center w-16 h-4 bg-matrix-primary/5 rounded border border-matrix-primary/20">
+<div class="flex items-center justify-center w-16 h-4 bg-matrix-primary/5 border border-matrix-primary/20">
                               <span class="text-base font-bold text-matrix-primary">∞</span>
                          </div>
                     }
@@ -137,11 +137,10 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
                             value={depth()}
                             onInput={(e) => updateStepParams(props.step.id, { max_depth: parseInt(e.currentTarget.value) })}
                             class="
-                                w-16 h-1 appearance-none bg-matrix-border/50 cursor-pointer rounded-full
+                                w-16 h-1 appearance-none bg-matrix-border/50 cursor-pointer
                                 [&::-webkit-slider-thumb]:appearance-none 
                                 [&::-webkit-slider-thumb]:w-2.5 
-                                [&::-webkit-slider-thumb]:h-2.5 
-                                [&::-webkit-slider-thumb]:rounded-full
+                                [&::-webkit-slider-thumb]:h-2.5
                                 [&::-webkit-slider-thumb]:bg-matrix-primary 
                                 [&::-webkit-slider-thumb]:hover:scale-125
                                 [&::-webkit-slider-thumb]:transition-transform
@@ -160,7 +159,7 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
             <button
                 onClick={() => updateStepParams(props.step.id, { exclude_tests: !props.step.op.params.exclude_tests })}
                 class={`
-                    h-5 px-2 text-lg font-bold uppercase tracking-wider border transition-all rounded-sm flex items-center
+                    h-5 px-2 text-lg font-bold uppercase tracking-wider border transition-all flex items-center
                     ${!props.step.op.params.exclude_tests 
                         ? "bg-matrix-primary text-matrix-bg border-matrix-primary" 
                         : "bg-transparent text-matrix-primary/50 border-matrix-border hover:border-matrix-primary/50 hover:text-matrix-primary"}
@@ -220,7 +219,7 @@ export const RecipeBuilder = () => {
                  class="
                      flex items-center gap-1 text-lg font-bold uppercase tracking-wider 
                      text-matrix-primary hover:bg-matrix-primary hover:text-matrix-bg
-                     px-2 py-1 transition-all border border-transparent hover:border-matrix-primary rounded-sm
+                     px-2 py-1 transition-all border border-transparent hover:border-matrix-primary
                  "
               >
                  [ CLEAR ]

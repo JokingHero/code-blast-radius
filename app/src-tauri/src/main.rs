@@ -274,6 +274,7 @@ async fn search_symbols(
     let mut results = Vec::new();
     let query_utf32 = Utf32String::from(query.as_str());
 
+    // 1. Search Symbols
     for sym in indexer.index.symbols.values() {
         if
             let Some(score) = matcher.fuzzy_match(
@@ -296,8 +297,25 @@ async fn search_symbols(
         }
     }
 
+    // 2. Search Files
+    for file in indexer.index.files.values() {
+        if
+            let Some(score) = matcher.fuzzy_match(
+                Utf32String::from(file.path.as_str()).slice(..),
+                query_utf32.slice(..)
+            )
+        {
+            results.push(SearchResult {
+                name: file.path.clone(),
+                kind: "File".to_string(),
+                path: file.path.clone(),
+                score,
+            });
+        }
+    }
+
     results.sort_by(|a, b| b.score.cmp(&a.score));
-    results.truncate(10);
+    results.truncate(20);
     Ok(results)
 }
 

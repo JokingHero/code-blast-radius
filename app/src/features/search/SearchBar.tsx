@@ -78,11 +78,10 @@ export const SearchBar = () => {
                     </div>
                 }
             >
-                <span class="text-matrix-primary font-bold mr-3">{">"}</span>
+                <span class="text-matrix-primary font-bold mr-3 animate-[pulse_1s_infinite]">{">"}</span>
                 <span class="text-matrix-primary/30 text-base tracking-[0.15em] font-mono">
-                  QUERY_DATABASE
+                  BLAST SYMBOLS OR FILES
                 </span>
-                <span class="ml-2 w-2 h-4 bg-matrix-primary/50 animate-[pulse_1s_infinite]"></span>
             </Show>
             </div>
         </Show>
@@ -123,7 +122,7 @@ export const SearchBar = () => {
             <Show 
                 when={limitRadius()}
                 fallback={
-                    <div class="flex items-center justify-center w-20 h-4 bg-matrix-primary/5 rounded border border-matrix-primary/20">
+                    <div class="flex items-center justify-center w-20 h-4 bg-matrix-primary/5 border border-matrix-primary/20">
                          <span class="text-base font-bold text-matrix-primary">∞</span>
                     </div>
                 }
@@ -137,11 +136,10 @@ export const SearchBar = () => {
                         disabled={isLocked()}
                         onInput={(e) => setRadius(parseInt(e.currentTarget.value))}
                         class="
-                        w-14 h-1 appearance-none bg-matrix-border/50 cursor-pointer rounded-full
+                        w-14 h-1 appearance-none bg-matrix-border/50 cursor-pointer
                         [&::-webkit-slider-thumb]:appearance-none 
                         [&::-webkit-slider-thumb]:w-2.5 
-                        [&::-webkit-slider-thumb]:h-2.5 
-                        [&::-webkit-slider-thumb]:rounded-full
+                        [&::-webkit-slider-thumb]:h-2.5
                         [&::-webkit-slider-thumb]:bg-matrix-primary 
                         [&::-webkit-slider-thumb]:shadow-[0_0_5px_#00ff41]
                         [&::-webkit-slider-thumb]:hover:scale-125
@@ -160,7 +158,7 @@ export const SearchBar = () => {
             onClick={() => setIncludeTests(!includeTests())}
             disabled={isLocked()}
             class={`
-                h-5 px-2 text-lg font-bold uppercase tracking-wider border transition-all flex items-center rounded-sm
+                h-5 px-2 text-lg font-bold uppercase tracking-wider border transition-all flex items-center
                 ${includeTests() 
                     ? "bg-matrix-primary text-matrix-bg border-matrix-primary" 
                     : "bg-transparent text-matrix-primary/50 border-matrix-border hover:border-matrix-primary/50 hover:text-matrix-primary"}
@@ -184,7 +182,7 @@ export const SearchBar = () => {
               >
                 <div class="flex items-center gap-3 overflow-hidden">
                   <span class="font-mono font-bold text-base shrink-0">{item.name}</span>
-                  <span class="text-sm uppercase tracking-wider border border-matrix-border px-1.5 py-px rounded-sm opacity-60 group-hover/item:border-matrix-bg group-hover/item:opacity-100">
+                  <span class="text-sm uppercase tracking-wider border border-matrix-border px-1.5 py-px opacity-60 group-hover/item:border-matrix-bg group-hover/item:opacity-100">
                     {item.kind}
                   </span>
                 </div>
