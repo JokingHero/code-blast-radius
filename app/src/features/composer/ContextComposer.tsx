@@ -1,4 +1,4 @@
-import { For, Show, createSignal, createEffect } from "solid-js";
+import { For, Show, createSignal, createEffect, createMemo } from "solid-js";
 import { useWorkspace, ContextFile } from "../../core/workspace.store";
 
 /**
@@ -24,6 +24,25 @@ const escapeXmlContent = (input: string): string => {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+};
+
+/**
+ * Heuristic for token estimation.
+ * Standard approx: 4 chars ~= 1 token.
+ * We add overhead for the XML wrapper tags (<document path="...">...</document>).
+ */
+const estimateTokens = (content: string, path: string) => {
+  const contentTokens = Math.ceil(content.length / 4);
+  const pathTokens = Math.ceil(path.length / 4);
+  // Approx 25 tokens for XML tags structure and newlines per file
+  return contentTokens + pathTokens + 25;
+};
+
+const formatTokenCount = (num: number) => {
+  return new Intl.NumberFormat('en-US', { 
+    notation: "compact", 
+    maximumFractionDigits: 1 
+  }).format(num);
 };
 
 const ContextFileItem = (props: { 
@@ -112,7 +131,13 @@ export const ContextComposer = () => {
   const [forceExpand, setForceExpand] = createSignal<boolean | null>(null);
   const [isCopiedAll, setIsCopiedAll] = createSignal(false);
 
-  // --- 2. Updated Copy Logic ---
+  // Calculate tokens reactively when contextFiles changes
+  const totalTokens = createMemo(() => {
+    return state.contextFiles.reduce((acc, file) => {
+      return acc + estimateTokens(file.content, file.path);
+    }, 0);
+  });
+
   const handleCopyAll = () => {
     let xml = "<documents>\n";
 
@@ -131,7 +156,6 @@ export const ContextComposer = () => {
     setIsCopiedAll(true);
     setTimeout(() => setIsCopiedAll(false), 2000);
   };
-  // -----------------------------
 
   const toggleAll = () => {
     setForceExpand((prev) => prev === true ? false : true);
@@ -149,9 +173,18 @@ export const ContextComposer = () => {
                 Output Stream
             </span>
             <Show when={state.contextFiles.length > 0}>
-                <span class="text-[10px] text-matrix-primary/50 font-mono">
-                    ({state.contextFiles.length} FILES)
-                </span>
+                <div class="flex items-center gap-3">
+                  <span class="text-[10px] text-matrix-primary/50 font-mono">
+                      ({state.contextFiles.length} FILES)
+                  </span>
+                  <div class="w-px h-3 bg-matrix-border/50"></div>
+                  <span 
+                    class="text-[10px] text-matrix-highlight/70 font-mono font-bold"
+                    title="Estimated ~4 chars/token + XML markup overhead"
+                  >
+                      ~{formatTokenCount(totalTokens())} TOKENS
+                  </span>
+                </div>
             </Show>
         </div>
         
