@@ -15,11 +15,10 @@ export const SavedRecipes = () => {
   const [filter, setFilter] = createSignal("");
   const [showSaveModal, setShowSaveModal] = createSignal(false);
   const [saveName, setSaveName] = createSignal("");
-  const [errorMsg, setErrorMsg] = createSignal(""); // Collision error state
+  const [errorMsg, setErrorMsg] = createSignal("");
   
   let inputRef: HTMLInputElement | undefined;
 
-  // Refresh list when workspace loads
   createEffect(() => {
     if (workspaceState.isLoaded) {
       fetchSavedRecipes();
@@ -33,8 +32,6 @@ export const SavedRecipes = () => {
       r.name.toLowerCase().includes(term)
     );
   };
-
-  // --- Actions ---
 
   const handleUpdate = async () => {
     if (recipeState.activeRecipeName) {
@@ -74,7 +71,7 @@ export const SavedRecipes = () => {
   return (
     <div class="flex flex-col h-full bg-matrix-panel/50 border-l border-matrix-border relative">
       
-      {/* --- HEADER: Actions --- */}
+      {/* HEADER: Actions */}
       <div class="shrink-0 flex divide-x divide-matrix-border border-b border-matrix-border h-10 bg-matrix-panel">
             <button
                 onClick={handleUpdate}
@@ -104,7 +101,7 @@ export const SavedRecipes = () => {
             </button>
       </div>
 
-      {/* --- SEARCH BAR (File Explorer Style) --- */}
+      {/* SEARCH BAR */}
       <div class="p-2 border-b border-matrix-border/50 bg-matrix-bg/80 shrink-0 flex gap-2">
           <div class="relative flex-1 group">
             <input 
@@ -114,7 +111,6 @@ export const SavedRecipes = () => {
                 onInput={(e) => setFilter(e.currentTarget.value)}
                 class="w-full bg-matrix-panel border border-matrix-border/50 text-matrix-highlight px-2 pl-7 py-1 text-xs outline-none focus:border-matrix-primary focus:shadow-glow font-mono transition-all"
             />
-            {/* Search Icon */}
             <div class="absolute left-2 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none group-focus-within:opacity-100 group-focus-within:text-matrix-primary">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
                     <circle cx="11" cy="11" r="8"></circle>
@@ -132,7 +128,7 @@ export const SavedRecipes = () => {
           </div>
       </div>
 
-      {/* --- LIST --- */}
+      {/* LIST */}
       <div class="flex-1 overflow-y-auto custom-scrollbar p-0">
         <For
           each={filteredRecipes()}
@@ -178,7 +174,7 @@ export const SavedRecipes = () => {
         </For>
       </div>
 
-      {/* --- SAVE MODAL --- */}
+      {/* SAVE MODAL */}
       <Show when={showSaveModal()}>
         <div class="absolute inset-0 z-50 bg-matrix-bg/95 backdrop-blur flex items-center justify-center p-4 animate-[fadeIn_0.1s_ease-out]">
             <div class="w-full max-w-xs border border-matrix-primary p-1 bg-matrix-panel shadow-glow">
@@ -192,7 +188,7 @@ export const SavedRecipes = () => {
                     value={saveName()}
                     onInput={(e) => {
                         setSaveName(e.currentTarget.value);
-                        setErrorMsg(""); // clear error on type
+                        setErrorMsg("");
                     }}
                     onKeyDown={(e) => {
                         if (e.key === 'Enter') confirmSaveAs();
@@ -207,7 +203,6 @@ export const SavedRecipes = () => {
                     placeholder="Recipe Name"
                 />
                 
-                {/* Error Message Display */}
                 <div class="h-4 mb-1 text-[10px] text-matrix-error font-bold text-center uppercase tracking-wider">
                     {errorMsg()}
                 </div>

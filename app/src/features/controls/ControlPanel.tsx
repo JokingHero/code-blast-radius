@@ -4,7 +4,7 @@ import { useRecipe } from "../../core/recipe.store";
 
 export const ControlPanel = () => {
   const { state: workspaceState } = useWorkspace();
-  const { recipeState, setViewMode, saveCurrentRecipe } = useRecipe();
+  const { recipeState, saveCurrentRecipe } = useRecipe();
   const [showSaveModal, setShowSaveModal] = createSignal(false);
   const [saveName, setSaveName] = createSignal("");
   let inputRef: HTMLInputElement | undefined;
@@ -34,24 +34,6 @@ export const ControlPanel = () => {
       {/* Header */}
       <div class="text-tiny uppercase tracking-widest opacity-40 mb-1 text-center border-b border-matrix-border/50 pb-1 select-none">
         COMMAND DECK
-      </div>
-
-      {/* --- VIEW MODES --- */}
-      <div class="flex border border-matrix-border rounded overflow-hidden select-none">
-        <button 
-          onClick={() => setViewMode('full')}
-          class={`flex-1 py-1 text-tiny font-bold transition-colors ${recipeState.viewMode === 'full' ? 'bg-matrix-primary text-matrix-bg' : 'hover:bg-matrix-primary/10'}`}
-          title="Full Text: Show complete file content"
-        >
-          FULL
-        </button>
-        <button 
-          onClick={() => setViewMode('skeleton')}
-          class={`flex-1 py-1 text-tiny font-bold transition-colors ${recipeState.viewMode === 'skeleton' ? 'bg-matrix-primary text-matrix-bg' : 'hover:bg-matrix-primary/10'}`}
-          title="X-Ray Mode: Hides function bodies to reduce token count"
-        >
-          X-RAY
-        </button>
       </div>
 
       <button 

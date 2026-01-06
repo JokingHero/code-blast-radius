@@ -4,14 +4,13 @@ import {
   EngineRecipe,
   SavedRecipe,
   UiRecipeStep,
-  FileTransformMode,
 } from "./types";
 import { useWorkspace } from "./workspace.store";
 
 interface RecipeState {
   steps: UiRecipeStep[];
   savedRecipes: SavedRecipe[];
-  viewMode: "full" | "skeleton";
+  // viewMode removed
   isExecuting: boolean;
   activeRecipeName: string | null;
   isDirty: boolean;
@@ -20,7 +19,6 @@ interface RecipeState {
 const [state, setState] = createStore<RecipeState>({
   steps: [],
   savedRecipes: [],
-  viewMode: "full",
   isExecuting: false,
   activeRecipeName: null,
   isDirty: false,
@@ -60,11 +58,8 @@ export const useRecipe = () => {
       };
     }
 
-    // --- BUG FIX START ---
     const exists = state.steps.find((s) => {
         if (s.op.type !== newStep.op.type) return false;
-        
-        // Check specifically based on type to avoid undefined===undefined false positives
         if (s.op.type === 'AddFiles' || s.op.type === 'RemoveFiles') {
             return s.op.params.pattern === newStep.op.params.pattern;
         }
@@ -73,7 +68,6 @@ export const useRecipe = () => {
         }
         return false;
     });
-    // --- BUG FIX END ---
 
     if (!exists) {
       setState("steps", (prev) => [...prev, newStep]);
@@ -88,10 +82,8 @@ export const useRecipe = () => {
     runAnalysis();
   };
 
-  // New Action for Reordering
   const moveStep = (fromIndex: number, toIndex: number) => {
       if (fromIndex === toIndex) return;
-      
       setState("steps", (prev) => {
           const newSteps = [...prev];
           const [moved] = newSteps.splice(fromIndex, 1);
@@ -128,12 +120,6 @@ export const useRecipe = () => {
     runAnalysis();
   };
 
-  const setViewMode = (mode: "full" | "skeleton") => {
-    setState("viewMode", mode);
-    markDirty();
-    runAnalysis();
-  };
-
   const runAnalysis = async () => {
     if (state.steps.length === 0) {
       setContextFiles([]);
@@ -141,17 +127,12 @@ export const useRecipe = () => {
     }
     setState("isExecuting", true);
 
-    let defaultTransform: FileTransformMode | null = null;
-    if (state.viewMode === "skeleton") {
-      defaultTransform = { mode: "FocusOn", symbols: [] };
-    }
-
     const payload: EngineRecipe = {
       name: "Interactive Session",
       description: null,
       operations: state.steps.map((s) => s.op),
       transforms: {},
-      default_transform: defaultTransform,
+      default_transform: null, // Always Full Text for V1
     };
 
     try {
@@ -183,8 +164,7 @@ export const useRecipe = () => {
       description: "Saved via GUI",
       operations: state.steps.map((s) => s.op),
       transforms: {},
-      default_transform:
-        state.viewMode === "skeleton" ? { mode: "FocusOn", symbols: [] } : null,
+      default_transform: null, // Always Full Text for V1
     };
     try {
       setLoading(true);
@@ -204,11 +184,9 @@ export const useRecipe = () => {
       id: crypto.randomUUID(),
       op,
     }));
-    const newViewMode = recipe.default_transform ? "skeleton" : "full";
-
+    
     setState({
       steps: newSteps,
-      viewMode: newViewMode,
       activeRecipeName: recipe.name,
       isDirty: false,
     });
@@ -232,7 +210,6 @@ export const useRecipe = () => {
   const resetRecipe = () => {
       setState({
           steps: [],
-          viewMode: 'full',
           activeRecipeName: null,
           isDirty: false
       });
@@ -243,10 +220,9 @@ export const useRecipe = () => {
     recipeState: state,
     addStep,
     removeStep,
-    moveStep, // Exported
+    moveStep,
     updateStepParams,
     toggleStepType,
-    setViewMode,
     runAnalysis,
     fetchSavedRecipes,
     saveCurrentRecipe,

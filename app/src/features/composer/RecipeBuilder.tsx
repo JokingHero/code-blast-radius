@@ -6,7 +6,7 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
   const { removeStep, updateStepParams, toggleStepType } = useRecipe();
   const [isHovering, setIsHovering] = createSignal(false);
 
-  // DnD Handlers for Reordering
+  // DnD Handlers
   const handleDragStart = (e: DragEvent) => {
     e.dataTransfer?.setData("text/plain", props.index.toString());
     e.dataTransfer?.setData("type", "reorder_step");
@@ -14,7 +14,7 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
   };
 
   const handleDragOver = (e: DragEvent) => {
-    e.preventDefault(); // Necessary to allow dropping
+    e.preventDefault(); 
     e.dataTransfer!.dropEffect = "move";
   };
 
@@ -23,17 +23,13 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
     e.stopPropagation();
     const fromIndexStr = e.dataTransfer?.getData("text/plain");
     const type = e.dataTransfer?.getData("type");
-    
     if (type === "reorder_step" && fromIndexStr !== undefined) {
         const fromIndex = parseInt(fromIndexStr);
-        if (!isNaN(fromIndex)) {
-            props.onMove(fromIndex, props.index);
-        }
+        if (!isNaN(fromIndex)) props.onMove(fromIndex, props.index);
     }
   };
 
-  // Helper for Blast Radius Params
-  const isInfinite = () => (props.step.op.params.max_depth || 0) > 20; // Assuming >20 is "infinite" logic
+  const isInfinite = () => (props.step.op.params.max_depth || 0) > 20;
   const depth = () => isInfinite() ? 5 : (props.step.op.params.max_depth || 5);
 
   return (
@@ -50,7 +46,7 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
             relative group/item
         "
     >
-      {/* Header Row: Type | Name | Delete */}
+      {/* Header Row */}
       <div class="flex items-center justify-between gap-2">
         
         {/* Left: Indicator & Name */}
@@ -74,8 +70,8 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
                 onClick={() => toggleStepType(props.step.id)}
                 class="
                     w-5 h-5 flex items-center justify-center 
-                    text-matrix-bg bg-matrix-error font-bold 
-                    hover:bg-red-400 transition-colors rounded-sm
+                    text-matrix-bg bg-matrix-primary font-bold 
+                    hover:bg-matrix-highlight transition-colors rounded-sm
                 "
                 title="Exclude Mode (Click to Include)"
               >
@@ -83,7 +79,6 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
               </button>
             </Match>
             <Match when={props.step.op.type === 'BlastRadius'}>
-               {/* Icon for Blast Radius */}
                <div class="w-5 h-5 flex items-center justify-center text-matrix-primary border border-matrix-primary rounded-sm">
                   <span class="text-[10px] font-bold">R</span>
                </div>
@@ -98,24 +93,23 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
           </span>
         </div>
         
-        {/* Right: Delete Button (File Explorer Style) */}
+        {/* Right: Delete Button */}
         <button 
           onClick={() => removeStep(props.step.id)}
           class={`
             text-matrix-primary hover:text-matrix-error font-bold px-1 shrink-0 transition-opacity
             ${isHovering() ? 'opacity-100' : 'opacity-0'}
           `}
-          title="Remove Step"
         >
           [x]
         </button>
       </div>
 
-      {/* Controls Row (Only for BlastRadius) - Styled to match SearchBar Deck */}
+      {/* Controls Row */}
       <Show when={props.step.op.type === 'BlastRadius'}>
         <div class="mt-2 pt-2 border-t border-matrix-border/30 flex items-center gap-3 animate-[fadeIn_0.2s_ease-out]">
           
-            {/* Radius Control */}
+            {/* Radius */}
             <div class="flex items-center gap-2">
                  <button 
                     onClick={() => updateStepParams(props.step.id, { max_depth: isInfinite() ? 5 : 100 })}
@@ -123,7 +117,6 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
                         text-[10px] uppercase font-bold tracking-wider transition-colors
                         ${!isInfinite() ? "text-matrix-primary" : "text-matrix-primary/40 line-through decoration-matrix-primary/40"}
                     `}
-                    title="Toggle Infinite Radius"
                 >
                     RAD
                 </button>
@@ -163,16 +156,15 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
 
             <div class="w-px h-3 bg-matrix-border/50"></div>
 
-            {/* Tests Toggle */}
+            {/* Tests */}
             <button
                 onClick={() => updateStepParams(props.step.id, { exclude_tests: !props.step.op.params.exclude_tests })}
                 class={`
-                    px-2 py-px text-[10px] font-bold uppercase tracking-wider border transition-all rounded-sm
+                    h-5 px-2 text-[10px] font-bold uppercase tracking-wider border transition-all rounded-sm flex items-center
                     ${!props.step.op.params.exclude_tests 
                         ? "bg-matrix-primary text-matrix-bg border-matrix-primary" 
                         : "bg-transparent text-matrix-primary/50 border-matrix-border hover:border-matrix-primary/50 hover:text-matrix-primary"}
                 `}
-                title="Toggle Tests Inclusion"
             >
                 TESTS
             </button>
@@ -186,23 +178,18 @@ export const RecipeBuilder = () => {
   const { recipeState, addStep, resetRecipe, moveStep } = useRecipe();
   const [isDraggingFile, setIsDraggingFile] = createSignal(false);
 
-  // Handlers for "Outer" Drop (Adding new files from Explorer)
+  // Outer Drop (New Files)
   const handleOuterDrop = (e: DragEvent) => {
     e.preventDefault();
     setIsDraggingFile(false);
-    
     if (e.dataTransfer) {
-      // Check if it's a reorder vs a new file
       const type = e.dataTransfer.getData("type");
-      if (type === "reorder_step") return; // Handled by child
-
+      if (type === "reorder_step") return;
       const rawData = e.dataTransfer.getData("application/json");
       if (rawData) {
         try {
           const data = JSON.parse(rawData);
-          if (data.type === 'add_file') {
-            addStep({ type: 'file', value: data.value });
-          }
+          if (data.type === 'add_file') addStep({ type: 'file', value: data.value });
         } catch (err) {
           console.error("Invalid drop data");
         }
@@ -223,16 +210,20 @@ export const RecipeBuilder = () => {
                 {recipeState.activeRecipeName || "Untitled"}
             </span>
             <Show when={recipeState.isDirty}>
-                <span class="text-matrix-highlight font-bold animate-pulse" title="Unsaved Changes">*</span>
+                <span class="text-matrix-highlight font-bold animate-pulse">*</span>
             </Show>
          </div>
 
          <Show when={recipeState.steps.length > 0}>
              <button 
                 onClick={resetRecipe}
-                class="text-[10px] text-matrix-error hover:underline uppercase tracking-widest font-bold"
+                class="
+                    flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider 
+                    text-matrix-primary hover:bg-matrix-primary hover:text-matrix-bg
+                    px-2 py-1 transition-all border border-transparent hover:border-matrix-primary rounded-sm
+                "
              >
-                Clear All
+                [ CLEAR ]
              </button>
          </Show>
       </div>
@@ -248,24 +239,14 @@ export const RecipeBuilder = () => {
       >
         <For each={recipeState.steps}>
             {(step, index) => (
-                <StepItem 
-                    step={step} 
-                    index={index()} 
-                    onMove={moveStep} 
-                />
+                <StepItem step={step} index={index()} onMove={moveStep} />
             )}
         </For>
 
         {recipeState.steps.length === 0 && !isDraggingFile() && (
             <div class="flex flex-col items-center justify-center h-full opacity-30 select-none pointer-events-none">
-            <div class="text-sm tracking-widest font-bold">[ WORKBENCH EMPTY ]</div>
-            <div class="text-xs mt-1 font-mono">DROP FILES OR SEARCH SYMBOLS</div>
-            </div>
-        )}
-        
-        {isDraggingFile() && (
-            <div class="flex items-center justify-center h-full text-matrix-primary text-sm font-bold animate-pulse pointer-events-none">
-            [ RELEASE TO ADD FILE ]
+                <div class="text-sm tracking-widest font-bold">[ WORKBENCH EMPTY ]</div>
+                <div class="text-xs mt-1 font-mono">DROP FILES OR SEARCH SYMBOLS</div>
             </div>
         )}
       </div>
