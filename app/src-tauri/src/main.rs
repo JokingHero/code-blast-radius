@@ -317,7 +317,7 @@ async fn execute_recipe(
     let executor = RecipeExecutor::new(indexer);
     let output = executor.execute(&recipe).map_err(|e| format!("Execution failed: {}", e))?;
 
-    serde_json::to_string_pretty(&output).map_err(|e| e.to_string())
+    Ok(output.to_xml())
 }
 
 #[tauri::command]
