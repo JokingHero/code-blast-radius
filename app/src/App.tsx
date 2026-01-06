@@ -8,7 +8,6 @@ import { SearchBar } from "./features/search/SearchBar";
 import { FileExplorer } from "./features/explorer/FileExplorer";
 import { RecipeBuilder } from "./features/composer/RecipeBuilder";
 import { ContextComposer } from "./features/composer/ContextComposer";
-import { ControlPanel } from "./features/controls/ControlPanel";
 import { SavedRecipes } from "./features/library/SavedRecipes"; 
 
 function App() {
@@ -115,7 +114,8 @@ function App() {
         <Show when={!state.isInitializing}>
           <Show when={state.isLoaded} fallback={<WelcomeScreen />}>
             <div class="flex-1 flex overflow-hidden">
-              {/* LEFT: File Explorer (WIDER) */}
+              
+              {/* LEFT: File Explorer */}
               <div class="w-80 border-r border-matrix-border flex flex-col bg-black/40 relative z-50">
                 <div class="h-12 shrink-0 flex items-center px-3 border-b border-matrix-border bg-matrix-panel select-none justify-between">
                   <div class="flex items-center">
@@ -126,20 +126,10 @@ function App() {
                   </div>
                   <div class="flex gap-1">
                     <Show when={state.config?.mode === 'project'}>
-                      <span 
-                        class="text-micro border border-matrix-border px-1 opacity-50 rounded bg-matrix-panel text-matrix-highlight"
-                        title="This is a saved workspace project (.cblast)."
-                      >
-                        PROJ
-                      </span>
+                      <span class="text-micro border border-matrix-border px-1 opacity-50 rounded bg-matrix-panel text-matrix-highlight">PROJ</span>
                     </Show>
                     <Show when={state.config?.mode === 'unsaved-workspace'}>
-                      <span 
-                        class="text-micro border border-matrix-error px-1 rounded bg-matrix-error/10 text-matrix-error animate-pulse"
-                        title="Unsaved multi-root workspace. Use '[ SAVE ]' to create a .cblast file."
-                      >
-                        UNSAVED
-                      </span>
+                      <span class="text-micro border border-matrix-error px-1 rounded bg-matrix-error/10 text-matrix-error animate-pulse">UNSAVED</span>
                     </Show>
                   </div>
                 </div>
@@ -151,45 +141,32 @@ function App() {
 
               {/* MIDDLE: Composer Area */}
               <div class="flex-1 flex flex-col min-w-0 border-r border-matrix-border bg-matrix-bg relative">
+                {/* Search Header */}
                 <div class="h-12 shrink-0 border-b border-matrix-border bg-matrix-panel relative z-30">
                   <SearchBar />
                 </div>
-                <div class="flex flex-row border-b border-matrix-border max-h-[40%] min-h-[180px] shrink-0 bg-matrix-bg/50">
-                  <div class="flex-1 flex flex-col border-r border-matrix-border overflow-hidden relative">
-                    <div class="sticky top-0 bg-matrix-bg/95 backdrop-blur z-10 px-4 py-1 border-b border-matrix-border/30 flex justify-between items-center h-8 shrink-0">
-                      <span class="text-tiny uppercase tracking-widest opacity-40">
-                        Active Recipe
-                      </span>
-                    </div>
-                    <div class="p-2 overflow-y-auto custom-scrollbar flex-1">
-                      <RecipeBuilder />
-                    </div>
-                  </div>
-                  <div class="w-36 lg:w-44 bg-matrix-panel/30 shrink-0 overflow-y-auto custom-scrollbar">
-                    <ControlPanel />
-                  </div>
+                
+                {/* Top Half: Recipe Builder (Full Width now) */}
+                <div class="border-b border-matrix-border h-[40%] min-h-[200px] shrink-0 bg-matrix-bg/50 flex flex-col">
+                   <RecipeBuilder />
                 </div>
-                <div class="flex-1 flex flex-col min-h-0 bg-matrix-panel/20">
-                  <div class="sticky top-0 bg-matrix-panel/90 backdrop-blur z-10 px-4 py-1 border-b border-matrix-border/30 h-8 flex items-center shrink-0">
-                    <span class="text-tiny uppercase tracking-widest opacity-40">
-                      Context Output Stream
-                    </span>
-                  </div>
-                  <div class="flex-1 p-4 pt-2 overflow-y-auto custom-scrollbar">
-                    <ContextComposer />
-                  </div>
+
+                {/* Bottom Half: Context Output */}
+                <div class="flex-1 flex flex-col min-h-0">
+                   <ContextComposer />
                 </div>
               </div>
 
               {/* RIGHT: Saved Recipes */}
-              <div class="w-64 bg-matrix-panel/50 flex flex-col">
-                <div class="h-12 shrink-0 flex items-center px-3 border-b border-matrix-border bg-matrix-panel select-none justify-between">
+              <div class="w-72 bg-matrix-panel/50 flex flex-col">
+                <div class="h-12 shrink-0 flex items-center px-3 border-b border-matrix-border bg-matrix-panel select-none">
                   <span class="text-tiny font-bold tracking-wider opacity-70 text-matrix-primary">
-                    SAVED RECIPES
+                    LIBRARY
                   </span>
                 </div>
                 <SavedRecipes />
               </div>
+
             </div>
           </Show>
         </Show>

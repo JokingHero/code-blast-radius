@@ -2,85 +2,180 @@ import { For, createSignal, Show, Switch, Match } from "solid-js";
 import { useRecipe } from "../../core/recipe.store";
 import { UiRecipeStep } from "../../core/types";
 
-const StepItem = (props: { step: UiRecipeStep }) => {
+const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: number, to: number) => void }) => {
   const { removeStep, updateStepParams, toggleStepType } = useRecipe();
+  const [isHovering, setIsHovering] = createSignal(false);
+
+  // DnD Handlers for Reordering
+  const handleDragStart = (e: DragEvent) => {
+    e.dataTransfer?.setData("text/plain", props.index.toString());
+    e.dataTransfer?.setData("type", "reorder_step");
+    e.dataTransfer!.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: DragEvent) => {
+    e.preventDefault(); // Necessary to allow dropping
+    e.dataTransfer!.dropEffect = "move";
+  };
+
+  const handleDrop = (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const fromIndexStr = e.dataTransfer?.getData("text/plain");
+    const type = e.dataTransfer?.getData("type");
+    
+    if (type === "reorder_step" && fromIndexStr !== undefined) {
+        const fromIndex = parseInt(fromIndexStr);
+        if (!isNaN(fromIndex)) {
+            props.onMove(fromIndex, props.index);
+        }
+    }
+  };
+
+  // Helper for Blast Radius Params
+  const isInfinite = () => (props.step.op.params.max_depth || 0) > 20; // Assuming >20 is "infinite" logic
+  const depth = () => isInfinite() ? 5 : (props.step.op.params.max_depth || 5);
 
   return (
-    <div class="border border-matrix-border bg-matrix-bg rounded p-2 text-xs group transition-colors hover:border-matrix-primary/50">
-      
-      {/* Header Row */}
-      <div class="flex items-center justify-between mb-1">
-        <div class="flex items-center gap-2 overflow-hidden">
+    <div 
+        draggable={true}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        onMouseEnter={() => setIsHovering(true)}
+        onMouseLeave={() => setIsHovering(false)}
+        class="
+            border border-matrix-border bg-matrix-bg rounded p-2 text-sm 
+            transition-colors hover:border-matrix-primary/50 cursor-grab active:cursor-grabbing
+            relative group/item
+        "
+    >
+      {/* Header Row: Type | Name | Delete */}
+      <div class="flex items-center justify-between gap-2">
+        
+        {/* Left: Indicator & Name */}
+        <div class="flex items-center gap-3 overflow-hidden min-w-0 flex-1">
           <Switch>
             <Match when={props.step.op.type === 'AddFiles'}>
               <button 
                 onClick={() => toggleStepType(props.step.id)}
-                class="text-matrix-highlight font-bold shrink-0 hover:underline decoration-dashed underline-offset-4 cursor-pointer"
-                title="Click to Switch to EXCLUDE"
+                class="
+                    w-5 h-5 flex items-center justify-center 
+                    text-matrix-bg bg-matrix-primary font-bold 
+                    hover:bg-matrix-highlight transition-colors rounded-sm
+                "
+                title="Include Mode (Click to Exclude)"
               >
-                [ INCLUDE ]
+                +
               </button>
             </Match>
             <Match when={props.step.op.type === 'RemoveFiles'}>
               <button 
                 onClick={() => toggleStepType(props.step.id)}
-                class="text-matrix-error font-bold shrink-0 hover:underline decoration-dashed underline-offset-4 cursor-pointer"
-                title="Click to Switch to INCLUDE"
+                class="
+                    w-5 h-5 flex items-center justify-center 
+                    text-matrix-bg bg-matrix-error font-bold 
+                    hover:bg-red-400 transition-colors rounded-sm
+                "
+                title="Exclude Mode (Click to Include)"
               >
-                [ EXCLUDE ]
+                -
               </button>
             </Match>
             <Match when={props.step.op.type === 'BlastRadius'}>
-              <span class="text-matrix-primary font-bold shrink-0">[ RADIUS ]</span>
+               {/* Icon for Blast Radius */}
+               <div class="w-5 h-5 flex items-center justify-center text-matrix-primary border border-matrix-primary rounded-sm">
+                  <span class="text-[10px] font-bold">R</span>
+               </div>
             </Match>
           </Switch>
           
           <span 
-            class="opacity-70 truncate font-mono" 
+            class="truncate font-mono font-bold text-matrix-highlight/90 text-xs flex-1" 
             title={props.step.op.params.pattern || props.step.op.params.symbol}
           >
             {props.step.op.params.pattern || props.step.op.params.symbol}
           </span>
         </div>
         
+        {/* Right: Delete Button (File Explorer Style) */}
         <button 
           onClick={() => removeStep(props.step.id)}
-          class="text-matrix-border hover:text-matrix-error transition font-bold px-1 shrink-0"
+          class={`
+            text-matrix-primary hover:text-matrix-error font-bold px-1 shrink-0 transition-opacity
+            ${isHovering() ? 'opacity-100' : 'opacity-0'}
+          `}
           title="Remove Step"
         >
-          x
+          [x]
         </button>
       </div>
 
-      {/* Controls Row (Only for BlastRadius) */}
+      {/* Controls Row (Only for BlastRadius) - Styled to match SearchBar Deck */}
       <Show when={props.step.op.type === 'BlastRadius'}>
-        <div class="flex items-center gap-4 mt-2 pl-2 border-l border-matrix-border/30 animate-[fadeIn_0.2s_ease-out]">
+        <div class="mt-2 pt-2 border-t border-matrix-border/30 flex items-center gap-3 animate-[fadeIn_0.2s_ease-out]">
           
-          {/* Depth Slider */}
-          <div class="flex items-center gap-2" title="Traversal Depth">
-            <span class="opacity-50 text-[10px] uppercase">Depth</span>
-            <input 
-              type="range" 
-              min="1" 
-              max="10" 
-              value={props.step.op.params.max_depth || 5}
-              onInput={(e) => updateStepParams(props.step.id, { max_depth: parseInt(e.currentTarget.value) })}
-              class="w-16 accent-matrix-primary h-1 bg-matrix-border rounded-lg appearance-none cursor-pointer"
-            />
-            <span class="font-bold font-mono">{props.step.op.params.max_depth || 5}</span>
-          </div>
+            {/* Radius Control */}
+            <div class="flex items-center gap-2">
+                 <button 
+                    onClick={() => updateStepParams(props.step.id, { max_depth: isInfinite() ? 5 : 100 })}
+                    class={`
+                        text-[10px] uppercase font-bold tracking-wider transition-colors
+                        ${!isInfinite() ? "text-matrix-primary" : "text-matrix-primary/40 line-through decoration-matrix-primary/40"}
+                    `}
+                    title="Toggle Infinite Radius"
+                >
+                    RAD
+                </button>
 
-          {/* Tests Toggle */}
-          <label class="flex items-center gap-2 cursor-pointer select-none group/toggle">
-            <input 
-              type="checkbox"
-              checked={props.step.op.params.exclude_tests ?? true}
-              onChange={(e) => updateStepParams(props.step.id, { exclude_tests: e.currentTarget.checked })}
-              class="accent-matrix-primary w-3 h-3 cursor-pointer bg-transparent border border-matrix-primary"
-            />
-            <span class="opacity-50 text-[10px] uppercase group-hover/toggle:text-matrix-primary transition-colors">No Tests</span>
-          </label>
+                <Show 
+                    when={!isInfinite()}
+                    fallback={
+                         <div class="flex items-center justify-center w-16 h-4 bg-matrix-primary/5 rounded border border-matrix-primary/20">
+                             <span class="text-xs font-bold text-matrix-primary">∞</span>
+                        </div>
+                    }
+                >
+                    <div class="flex items-center gap-2">
+                        <input 
+                            type="range" 
+                            min="1" 
+                            max="10" 
+                            value={depth()}
+                            onInput={(e) => updateStepParams(props.step.id, { max_depth: parseInt(e.currentTarget.value) })}
+                            class="
+                                w-16 h-1 appearance-none bg-matrix-border/50 cursor-pointer rounded-full
+                                [&::-webkit-slider-thumb]:appearance-none 
+                                [&::-webkit-slider-thumb]:w-2.5 
+                                [&::-webkit-slider-thumb]:h-2.5 
+                                [&::-webkit-slider-thumb]:rounded-full
+                                [&::-webkit-slider-thumb]:bg-matrix-primary 
+                                [&::-webkit-slider-thumb]:hover:scale-125
+                                [&::-webkit-slider-thumb]:transition-transform
+                            "
+                        />
+                        <span class="text-[10px] font-mono font-bold text-matrix-primary w-3 text-right">
+                            {depth()}
+                        </span>
+                    </div>
+                </Show>
+            </div>
 
+            <div class="w-px h-3 bg-matrix-border/50"></div>
+
+            {/* Tests Toggle */}
+            <button
+                onClick={() => updateStepParams(props.step.id, { exclude_tests: !props.step.op.params.exclude_tests })}
+                class={`
+                    px-2 py-px text-[10px] font-bold uppercase tracking-wider border transition-all rounded-sm
+                    ${!props.step.op.params.exclude_tests 
+                        ? "bg-matrix-primary text-matrix-bg border-matrix-primary" 
+                        : "bg-transparent text-matrix-primary/50 border-matrix-border hover:border-matrix-primary/50 hover:text-matrix-primary"}
+                `}
+                title="Toggle Tests Inclusion"
+            >
+                TESTS
+            </button>
         </div>
       </Show>
     </div>
@@ -88,14 +183,19 @@ const StepItem = (props: { step: UiRecipeStep }) => {
 }
 
 export const RecipeBuilder = () => {
-  const { recipeState, addStep } = useRecipe();
-  const [isDragging, setIsDragging] = createSignal(false);
+  const { recipeState, addStep, resetRecipe, moveStep } = useRecipe();
+  const [isDraggingFile, setIsDraggingFile] = createSignal(false);
 
-  const handleDrop = (e: DragEvent) => {
+  // Handlers for "Outer" Drop (Adding new files from Explorer)
+  const handleOuterDrop = (e: DragEvent) => {
     e.preventDefault();
-    setIsDragging(false);
+    setIsDraggingFile(false);
     
     if (e.dataTransfer) {
+      // Check if it's a reorder vs a new file
+      const type = e.dataTransfer.getData("type");
+      if (type === "reorder_step") return; // Handled by child
+
       const rawData = e.dataTransfer.getData("application/json");
       if (rawData) {
         try {
@@ -110,41 +210,65 @@ export const RecipeBuilder = () => {
     }
   };
 
-  const handleDragOver = (e: DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
-
   return (
-    <div 
-      class={`
-        space-y-2 min-h-[100px] transition-colors rounded p-2
-        ${isDragging() ? 'bg-matrix-primary/10 border-2 border-dashed border-matrix-primary' : ''}
-      `}
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-    >
-      <For each={recipeState.steps}>
-        {(step) => <StepItem step={step} />}
-      </For>
+    <div class="flex flex-col h-full bg-matrix-bg/50 relative">
+        
+      {/* Header */}
+      <div class="sticky top-0 bg-matrix-bg/95 backdrop-blur z-10 px-4 h-10 border-b border-matrix-border/30 flex justify-between items-center shrink-0">
+         <div class="flex items-center gap-2">
+            <span class="text-xs uppercase tracking-widest opacity-40 font-bold">
+                Active Session:
+            </span>
+            <span class={`text-sm font-bold font-mono ${recipeState.activeRecipeName ? 'text-matrix-highlight' : 'text-matrix-primary/50 italic'}`}>
+                {recipeState.activeRecipeName || "Untitled"}
+            </span>
+            <Show when={recipeState.isDirty}>
+                <span class="text-matrix-highlight font-bold animate-pulse" title="Unsaved Changes">*</span>
+            </Show>
+         </div>
 
-      {recipeState.steps.length === 0 && !isDragging() && (
-        <div class="flex flex-col items-center justify-center h-24 opacity-30 select-none pointer-events-none">
-          <div class="text-xs tracking-widest">[ WORKBENCH EMPTY ]</div>
-          <div class="text-[10px] mt-1">DROP FILES OR SEARCH SYMBOLS</div>
-        </div>
-      )}
-      
-      {isDragging() && (
-        <div class="flex items-center justify-center h-24 text-matrix-primary text-xs font-bold animate-pulse pointer-events-none">
-          [ RELEASE TO ADD FILE ]
-        </div>
-      )}
+         <Show when={recipeState.steps.length > 0}>
+             <button 
+                onClick={resetRecipe}
+                class="text-[10px] text-matrix-error hover:underline uppercase tracking-widest font-bold"
+             >
+                Clear All
+             </button>
+         </Show>
+      </div>
+
+      <div 
+        class={`
+            flex-1 p-2 overflow-y-auto custom-scrollbar space-y-2 transition-colors
+            ${isDraggingFile() ? 'bg-matrix-primary/10 border-2 border-dashed border-matrix-primary' : ''}
+        `}
+        onDrop={handleOuterDrop}
+        onDragOver={(e) => { e.preventDefault(); setIsDraggingFile(true); }}
+        onDragLeave={() => setIsDraggingFile(false)}
+      >
+        <For each={recipeState.steps}>
+            {(step, index) => (
+                <StepItem 
+                    step={step} 
+                    index={index()} 
+                    onMove={moveStep} 
+                />
+            )}
+        </For>
+
+        {recipeState.steps.length === 0 && !isDraggingFile() && (
+            <div class="flex flex-col items-center justify-center h-full opacity-30 select-none pointer-events-none">
+            <div class="text-sm tracking-widest font-bold">[ WORKBENCH EMPTY ]</div>
+            <div class="text-xs mt-1 font-mono">DROP FILES OR SEARCH SYMBOLS</div>
+            </div>
+        )}
+        
+        {isDraggingFile() && (
+            <div class="flex items-center justify-center h-full text-matrix-primary text-sm font-bold animate-pulse pointer-events-none">
+            [ RELEASE TO ADD FILE ]
+            </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -21,11 +21,11 @@ module.exports = {
       },
       fontSize: {
         // We redefine the scale to be slightly larger overall
-        'micro': '12px',      // Replaces text-[8px]
-        'tiny': '14px',       // Replaces text-tiny and text-tiny
-        'xs': '15px',         // Replaces standard text-xs (was 12px)
-        'sm': '17px',         // Replaces standard text-sm (was 14px)
-        'base': '18px',       // Standard base
+        'micro': '12px',      
+        'tiny': '14px',       
+        'xs': '15px',       
+        'sm': '17px',        
+        'base': '18px',
         'lg': '20px',
         'xl': '22px',
       }

@@ -50,6 +50,8 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number; f
 
   const toggleNode = async (e: MouseEvent) => {
     e.stopPropagation();
+    const { state } = useWorkspace(); 
+    if (state.isSyncing) return; 
     if (!props.entry.isDirectory) return;
 
     if (isOpen()) {
