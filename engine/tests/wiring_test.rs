@@ -43,7 +43,7 @@ fn test_typescript_nestjs_injection() {
     pipeline.run(&mut indexer, &workspace.path);
 
     // 4. Trace Context
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "CatsService").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "CatsService", None).unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -86,7 +86,7 @@ fn test_java_spring_injection() {
     let mut pipeline = Pipeline::new();
     pipeline.run(&mut indexer, &workspace.path);
 
-     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "UserController").unwrap();
+     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "UserController", None).unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();

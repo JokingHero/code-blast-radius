@@ -22,29 +22,44 @@ pub struct GraphWalker<'a> {
     index: &'a WorkspaceIndex,
     reverse_graph: &'a HashMap<SymbolId, Vec<Edge>>,
     mode: TraversalMode,
+    /// Optional limit on traversal depth. 
+    /// None = Infinite
+    /// Some(0) = Start nodes only
+    /// Some(1) = Start nodes + Immediate neighbors
+    max_depth: Option<usize>,
 }
 
 impl<'a> GraphWalker<'a> {
     pub fn new(
         index: &'a WorkspaceIndex, 
         reverse_graph: &'a HashMap<SymbolId, Vec<Edge>>,
-        mode: TraversalMode
+        mode: TraversalMode,
+        max_depth: Option<usize>
     ) -> Self {
-        Self { index, reverse_graph, mode }
+        Self { index, reverse_graph, mode, max_depth }
     }
 
     pub fn walk_deep(&self, start_ids: &[SymbolId]) -> Vec<SymbolId> {
         let mut visited = HashSet::new();
+        // Queue stores (SymbolId, Depth)
         let mut queue = VecDeque::new();
         let mut results = Vec::new();
 
         for &id in start_ids {
             visited.insert(id);
-            queue.push_back(id);
+            queue.push_back((id, 0));
             results.push(id);
         }
 
-        while let Some(current) = queue.pop_front() {
+        while let Some((current, depth)) = queue.pop_front() {
+            // Check Depth Limit: If we are at the limit, do not expand further.
+            if let Some(limit) = self.max_depth {
+                if depth >= limit {
+                    continue;
+                }
+            }
+
+            let next_depth = depth + 1;
             let current_sym = self.index.symbols.get(&current);
             let is_module = current_sym.map_or(false, |s| s.kind == SymbolKind::Module);
 
@@ -61,7 +76,7 @@ impl<'a> GraphWalker<'a> {
 
                     if self.should_follow_downstream(edge.kind) && visited.insert(edge.target_id) {
                         results.push(edge.target_id);
-                        queue.push_back(edge.target_id);
+                        queue.push_back((edge.target_id, next_depth));
                     }
                 }
             }
@@ -74,7 +89,7 @@ impl<'a> GraphWalker<'a> {
                     for edge in edges {
                         if self.should_follow_upstream(edge.kind) && visited.insert(edge.target_id) {
                             results.push(edge.target_id);
-                            queue.push_back(edge.target_id);
+                            queue.push_back((edge.target_id, next_depth));
                         }
                     }
                 }
@@ -138,14 +153,15 @@ pub fn find_related_symbols(
     index: &WorkspaceIndex,
     lookup: &SymbolIndex,
     reverse_graph: &HashMap<SymbolId, Vec<Edge>>,
-    target_name: &str
+    target_name: &str,
+    max_depth: Option<usize>
 ) -> Option<Vec<SymbolId>> {
     let targets = lookup.symbol_map.get(target_name)?;
     if targets.is_empty() {
         return None;
     }
 
-    let walker = GraphWalker::new(index, reverse_graph, TraversalMode::Context);
+    let walker = GraphWalker::new(index, reverse_graph, TraversalMode::Context, max_depth);
     Some(walker.walk_deep(targets))
 }
 

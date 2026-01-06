@@ -173,7 +173,7 @@ fn test_monorepo_vertical_isolation() {
     pipeline.run(&mut indexer, &workspace.path);
 
     // We query the Frontend Component for Users
-    let related_ids = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "UserProfileComponent")
+    let related_ids = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "UserProfileComponent", None)
         .expect("Should find UserProfileComponent");
 
     // ==========================================

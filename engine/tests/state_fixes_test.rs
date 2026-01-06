@@ -37,7 +37,7 @@ fn test_redux_constant_propagation() {
     pipeline.run(&mut indexer, &workspace.path);
 
     // 3. Verify linkage
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "doLogin").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "doLogin", None).unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -77,7 +77,7 @@ fn test_vuex_commit_support() {
     pipeline.run(&mut indexer, &workspace.path);
 
     // 3. Verify linkage
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "increment").expect("...");
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "increment", None).expect("...");
     
     // We expect to find the file where 'INCREMENT_COUNT' is handled.
     let store_file_id = indexer.index.files.values()
@@ -117,7 +117,7 @@ fn test_mixed_dispatch_variable() {
     let mut pipeline = Pipeline::new();
     pipeline.run(&mut indexer, &workspace.path);
 
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "run").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "run", None).unwrap();
     
     // Check if we found the definition file in the related context
     let events_file_found = related.iter().any(|id| {

@@ -45,8 +45,8 @@ impl<'a> RecipeExecutor<'a> {
         // 2. THE LENS: Transform and render content
         let mut output_files = Vec::new();
 
-        for file_ids in file_ids {
-            if let Some(file_node) = self.indexer.index.files.values().find(|f| f.id == file_ids) {
+        for file_id in file_ids {
+            if let Some(file_node) = self.indexer.index.files.values().find(|f| f.id == file_id) {
                 // Determine if there is a transform for this specific file
                 // We match based on the file path stored in the index
                 // Note: Index paths are usually normalized. Recipe paths might be relative.
@@ -107,12 +107,10 @@ impl<'a> RecipeExecutor<'a> {
                                 let path_str = file.path.as_str();
 
                                 // Remove Windows "\\?\" prefix if it exists
-                                // (e.g. "\\?\C:\User" becomes "C:\User")
                                 let clean_start = if path_str.starts_with("\\\\?\\") { 4 } else { 0 };
                                 let clean_path = &path_str[clean_start..];
 
                                 // Normalize slashes to match the pattern format
-                                // (e.g. "C:\User" becomes "C:/User")
                                 let normalized_path = clean_path.replace('\\', "/");
 
                                 matcher.is_match(&normalized_path)
@@ -127,15 +125,23 @@ impl<'a> RecipeExecutor<'a> {
                         working_set.remove(&fid);
                     }
                 }
-                RecipeOperation::BlastRadius { symbol, max_depth: _, exclude_tests } => {
-                    // Note: max_depth is not currently implemented in traversal.rs (it does deep walk),
-                    // but we respect the symbol resolution.
+                RecipeOperation::BlastRadius { symbol, max_depth, exclude_tests } => {
+                    // Convert u32 to Option<usize> for the walker.
+                    // 0 = Infinite (None)
+                    // >0 = Specific depth limit (Some(n))
+                    let depth_opt = if *max_depth == 0 { 
+                        None 
+                    } else { 
+                        Some(*max_depth as usize) 
+                    };
+
                     if
                         let Some(related_ids) = find_related_symbols(
                             &self.indexer.index,
                             &self.indexer.lookup,
                             &self.indexer.reverse_graph,
-                            symbol // &String works fine here as &str
+                            symbol, // &String works fine here as &str
+                            depth_opt
                         )
                     {
                         for sym_id in related_ids {
@@ -184,7 +190,6 @@ impl<'a> RecipeExecutor<'a> {
 
         // Calculate line ranges (naive: generic range covering whole file for now,
         // as Recipes usually return whole files or skeletonized whole files).
-        // If granular ranges are needed (like in 'cblast radius'), we would calculate them here.
         let line_count = final_content.lines().count();
         let relevant_lines = vec![LineRange { start: 1, end: line_count.max(1) }];
 

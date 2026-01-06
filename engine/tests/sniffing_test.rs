@@ -43,7 +43,7 @@ fn test_return_type_bridge_sniffing() {
     let connect_ids = indexer.lookup.symbol_map.get("connect").expect("Should find 'connect' symbol");
     let _connect_id = connect_ids[0];
 
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "connect").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "connect", None).unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();

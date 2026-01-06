@@ -29,7 +29,7 @@ fn test_java_spring_annotation() {
     pipeline.run(&mut indexer, &workspace.path);
 
     // 3. Search for "Transactional" -> Should find "createUser"
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "Transactional").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "Transactional", None).unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -37,7 +37,7 @@ fn test_java_spring_annotation() {
     assert!(names.contains(&"createUser".to_string()), "Searching for annotation should find decorated methods");
     
     // 4. Search for "createUser" -> Should find "Transactional"
-    let related_func = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "createUser").unwrap();
+    let related_func = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "createUser", None).unwrap();
     let func_names: Vec<String> = related_func.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();

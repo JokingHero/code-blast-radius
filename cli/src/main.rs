@@ -30,6 +30,11 @@ enum Commands {
 
         #[arg(long, default_value_t = true)]
         no_tests: bool,
+
+        /// Max depth of graph traversal. If missing or 0, traversal is infinite.
+        /// 1 = Immediate neighbors only.
+        #[arg(short, long)]
+        depth: Option<usize>,
     },
     /// Find symbols or files using fuzzy search
     Find {
@@ -200,7 +205,7 @@ fn run() -> Result<()> {
         }
 
         // --- QUERY: RADIUS ---
-        Commands::Radius { symbol, no_tests } => {
+        Commands::Radius { symbol, no_tests, depth } => {
             let indexer = &manager.indexer;
             
             // Step A: Check if input is a File Path
@@ -228,8 +233,10 @@ fn run() -> Result<()> {
             let walker = GraphWalker::new(
                 &indexer.index, 
                 &indexer.reverse_graph, 
-                TraversalMode::Impact
+                TraversalMode::Impact,
+                *depth
             );
+            
             let mut related_ids = walker.walk_deep(&start_ids);
 
             if *no_tests {

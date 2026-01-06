@@ -31,7 +31,7 @@ fn test_sql_schema_linking() {
     pipeline.run(&mut indexer, &workspace.path);
 
     // 3. Context Slice
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "findUser").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "findUser", None).unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -67,7 +67,7 @@ fn test_prisma_linking() {
     let mut pipeline = Pipeline::new();
     pipeline.run(&mut indexer, &workspace.path);
 
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "getOrders").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "getOrders", None).unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();

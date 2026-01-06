@@ -29,7 +29,7 @@ fn test_node_event_emitter() {
     let mut pipeline = Pipeline::new();
     pipeline.run(&mut indexer, &workspace.path);
 
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "createUser").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "createUser", None).unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -59,7 +59,7 @@ fn test_python_django_signals() {
     let mut pipeline = Pipeline::new();
     pipeline.run(&mut indexer, &workspace.path);
 
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "register").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "register", None).unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -89,7 +89,7 @@ fn test_rust_match_handler() {
     let mut pipeline = Pipeline::new();
     pipeline.run(&mut indexer, &workspace.path);
 
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "run_event").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "run_event", None).unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();

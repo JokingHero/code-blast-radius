@@ -31,7 +31,7 @@ fn test_name_collision() {
     assert!(indexer.lookup.symbol_map.contains_key("duplicate_func"), "Should have indexed 'duplicate_func'");
     assert!(indexer.lookup.symbol_map.contains_key("main"), "Should have indexed 'main'");
 
-    let ids_option = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "duplicate_func");
+    let ids_option = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "duplicate_func", None);
     
     assert!(ids_option.is_some(), "Should find related symbols for duplicate_func");
     let symbol_ids = ids_option.unwrap();

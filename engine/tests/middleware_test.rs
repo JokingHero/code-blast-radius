@@ -46,7 +46,7 @@ fn test_express_middleware_context() {
     // If I search for "getUser", I must see "AuthMiddleware" in the context,
     // even though "users.ts" never imports "auth.ts".
     
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "getUser").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "getUser", None).unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();
@@ -110,7 +110,7 @@ MIDDLEWARE = [
     let mut pipeline = Pipeline::new();
     pipeline.run(&mut indexer, &workspace.path);
 
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "my_view").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "my_view", None).unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();

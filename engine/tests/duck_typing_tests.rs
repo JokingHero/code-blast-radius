@@ -59,7 +59,7 @@ fn test_polymorphism_and_specificity() {
 
     // --- Test Case 3: Context Retrieval ---
     // We check that the primary target is correct.
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "calculateCircle").unwrap();
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "calculateCircle", None).unwrap();
     let names: Vec<String> = related.iter()
         .map(|id| indexer.index.symbols.get(id).unwrap().name.clone())
         .collect();

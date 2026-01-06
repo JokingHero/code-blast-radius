@@ -33,7 +33,7 @@ fn test_typescript_call_chain() {
     assert!(has_func(&indexer.index, "calculateTotal"), "Function 'calculateTotal' not found");
 
     // Verify Semantic Cluster Finding (Bidirectional)
-    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "add");
+    let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "add", None);
     assert!(related.is_some(), "Related symbols not found");
     let symbol_ids = related.unwrap();
     
