@@ -28,12 +28,12 @@ const escapeXmlContent = (input: string): string => {
 
 /**
  * Heuristic for token estimation.
- * Standard approx: 4 chars ~= 1 token.
+ * Standard approx: 3 chars ~= 1 token.
  * We add overhead for the XML wrapper tags (<document path="...">...</document>).
  */
 const estimateTokens = (content: string, path: string) => {
-  const contentTokens = Math.ceil(content.length / 4);
-  const pathTokens = Math.ceil(path.length / 4);
+  const contentTokens = Math.ceil(content.length / 3);
+  const pathTokens = Math.ceil(path.length / 3);
   // Approx 25 tokens for XML tags structure and newlines per file
   return contentTokens + pathTokens + 25;
 };
