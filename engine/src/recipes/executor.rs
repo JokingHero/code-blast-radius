@@ -80,25 +80,42 @@ impl<'a> RecipeExecutor<'a> {
         for op in operations {
             match op {
                 RecipeOperation::AddFiles { pattern } => {
-                    let matcher = Glob::new(pattern)?.compile_matcher();
+                    let normalized_pattern = pattern.replace('\\', "/"); 
+                    let matcher = Glob::new(&normalized_pattern)?.compile_matcher();
+
                     for file in self.indexer.index.files.values() {
-                        if matcher.is_match(&file.path) {
+                        let path_str = file.path.as_str();
+                        
+                        // Remove Windows "\\?\" prefix if it exists
+                        let clean_start = if path_str.starts_with("\\\\?\\") { 4 } else { 0 };
+                        let clean_path = &path_str[clean_start..];
+
+                        let normalized_path = clean_path.replace('\\', "/");
+
+                        if matcher.is_match(&normalized_path) {
                             working_set.insert(file.id);
                         }
                     }
                 }
                 RecipeOperation::RemoveFiles { pattern } => {
-                    let matcher = Glob::new(pattern)?.compile_matcher();
-                    // We only need to iterate the current working set to remove
+                    let normalized_pattern = pattern.replace('\\', "/");
+                    let matcher = Glob::new(&normalized_pattern)?.compile_matcher();
                     let to_remove: Vec<FileId> = working_set
                         .iter()
                         .filter(|&&fid| {
-                            if
-                                let Some(file) = self.indexer.index.files
-                                    .values()
-                                    .find(|f| f.id == fid)
-                            {
-                                matcher.is_match(&file.path)
+                            if let Some(file) = self.indexer.index.files.values().find(|f| f.id == fid) {
+                                let path_str = file.path.as_str();
+
+                                // Remove Windows "\\?\" prefix if it exists
+                                // (e.g. "\\?\C:\User" becomes "C:\User")
+                                let clean_start = if path_str.starts_with("\\\\?\\") { 4 } else { 0 };
+                                let clean_path = &path_str[clean_start..];
+
+                                // Normalize slashes to match the pattern format
+                                // (e.g. "C:\User" becomes "C:/User")
+                                let normalized_path = clean_path.replace('\\', "/");
+
+                                matcher.is_match(&normalized_path)
                             } else {
                                 false
                             }
@@ -123,7 +140,6 @@ impl<'a> RecipeExecutor<'a> {
                     {
                         for sym_id in related_ids {
                             if let Some(sym) = self.indexer.index.symbols.get(&sym_id) {
-                                // FIX: Dereference exclude_tests (*exclude_tests)
                                 if *exclude_tests && sym.is_test {
                                     continue;
                                 }

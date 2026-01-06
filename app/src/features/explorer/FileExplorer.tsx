@@ -7,6 +7,10 @@ import { useRecipe } from "../../core/recipe.store";
 
 // --- Helpers ---
 
+const normalizePath = (path: string): string => {
+  return path.replace(/\\/g, "/");
+};
+
 const joinPath = (parent: string, name: string): string => {
   const isWindows = parent.includes('\\');
   const sep = isWindows ? '\\' : '/';
@@ -78,11 +82,10 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number; f
 
   const handleDragStart = (e: DragEvent) => {
     if (e.dataTransfer) {
-      // Logic: If directory, append /** to act as a recursive glob
-      let value = fullPath;
+      let value = normalizePath(fullPath);
+      
       if (props.entry.isDirectory) {
-        // Standardize separators for globbing
-        value = value.replace(/\\/g, "/") + "/**";
+        value = value.endsWith("/") ? `${value}**` : `${value}/**`;
       }
 
       const payload = JSON.stringify({ type: "add_file", value });
@@ -100,7 +103,7 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number; f
   const handleDblClick = (e: MouseEvent) => {
     e.stopPropagation();
     if (!props.entry.isDirectory) {
-        addStep({ type: "file", value: fullPath });
+        addStep({ type: "file", value: normalizePath(fullPath) });
     }
   }
 
