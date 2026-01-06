@@ -43,22 +43,22 @@ export const TitleBar = () => {
         
         {/* Title & Version */}
         <div class="flex items-baseline gap-2">
-            <span class="text-xs font-bold tracking-widest text-matrix-primary">Code Blast Radius</span>
-            <span class="text-[10px] text-matrix-primary/40 font-mono">v{version()}</span>
+            <span class="text-base font-bold tracking-widest text-matrix-primary">Code Blast Radius</span>
+            <span class="text-sm text-matrix-primary/40 font-mono">v{version()}</span>
         </div>
         
         {/* Status: Syncing */}
         <Show when={state.isSyncing}>
             <div class="flex items-center space-x-2 ml-4 px-2 py-0.5 bg-matrix-primary/10 border border-matrix-primary/30 rounded">
                 <div class="w-2 h-2 border border-matrix-primary border-t-transparent rounded-full animate-spin"></div>
-                <span class="text-[10px] text-matrix-primary animate-pulse">SYNCING...</span>
+                <span class="text-sm text-matrix-primary animate-pulse">SYNCING...</span>
             </div>
         </Show>
 
         {/* Status: Out of Sync (Dirty) */}
         <Show when={state.isDirty && !state.isSyncing}>
              <div class="flex items-center space-x-2 ml-4 px-2 py-0.5 bg-matrix-error/10 border border-matrix-error/50 rounded animate-[pulse_3s_infinite]">
-                <span class="text-[10px] text-matrix-error font-bold tracking-wider">⚠ OUT OF SYNC</span>
+                <span class="text-sm text-matrix-error font-bold tracking-wider">⚠ OUT OF SYNC</span>
             </div>
         </Show>
       </div>

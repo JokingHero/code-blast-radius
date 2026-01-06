@@ -79,27 +79,27 @@ const ContextFileItem = (props: {
       >
         <div class="flex items-center gap-3 min-w-0">
           <div class={`
-            w-4 h-4 flex items-center justify-center transition-transform duration-200 text-tiny text-matrix-primary/70
+            w-4 h-4 flex items-center justify-center transition-transform duration-200 text-sm text-matrix-primary/70
             ${isExpanded() ? 'rotate-90' : 'rotate-0'}
           `}>
              ▶
           </div>
-          <span class="text-[10px] font-bold uppercase text-matrix-bg bg-matrix-primary/40 px-1.5 rounded-sm">
+          <span class="text-sm font-bold uppercase text-matrix-bg bg-matrix-primary/40 px-1.5 rounded-sm">
             {props.file.language}
           </span>
-          <span class="font-bold text-xs font-mono text-matrix-primary truncate" title={props.file.path}>
+          <span class="font-bold text-base font-mono text-matrix-primary truncate" title={props.file.path}>
             {props.file.path.split(/[/\\]/).slice(-2).join('/')}
           </span>
         </div>
         
         <div class="flex items-center gap-3">
-            <span class="text-[10px] opacity-40 font-mono hidden sm:inline-block">
+            <span class="text-sm opacity-40 font-mono hidden sm:inline-block">
                 {props.file.relevant_lines?.length || 0} BLOCKS
             </span>
             <button
                 onClick={handleCopyFile}
                 class={`
-                    text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded border transition-all
+                    text-lg uppercase font-bold tracking-wider px-2 py-0.5 rounded border transition-all
                     ${copied() 
                         ? 'border-matrix-primary text-matrix-primary bg-matrix-primary/10' 
                         : 'border-transparent text-matrix-primary/40 hover:text-matrix-highlight hover:border-matrix-primary/30'}
@@ -113,11 +113,11 @@ const ContextFileItem = (props: {
       <Show when={isExpanded()}>
         <div class="relative group/code">
             <div class="absolute top-0 right-0 p-1 opacity-0 group-hover/code:opacity-100 transition-opacity pointer-events-none">
-                 <div class="text-[10px] bg-black/80 text-matrix-primary px-2 border border-matrix-border">
-                    {props.file.path}
-                 </div>
+<div class="text-sm bg-black/80 text-matrix-primary px-2 border border-matrix-border">
+                     {props.file.path}
+                  </div>
             </div>
-            <pre class="p-3 overflow-x-auto text-xs opacity-80 max-h-[600px] scrollbar-thin leading-relaxed font-mono selection:bg-matrix-primary selection:text-matrix-bg bg-black/20">
+            <pre class="p-3 overflow-x-auto text-base opacity-80 max-h-[600px] scrollbar-thin leading-relaxed font-mono selection:bg-matrix-primary selection:text-matrix-bg bg-black/20">
             {props.file.content}
             </pre>
         </div>
@@ -169,17 +169,17 @@ export const ContextComposer = () => {
       {/* Toolbar */}
       <div class="sticky top-0 bg-matrix-panel/90 backdrop-blur z-10 px-3 h-10 border-b border-matrix-border/30 flex justify-between items-center shrink-0">
         <div class="flex items-center gap-3">
-            <span class="text-xs uppercase tracking-widest opacity-40 font-bold">
+            <span class="text-base uppercase tracking-widest opacity-40 font-bold">
                 Output Stream
             </span>
             <Show when={state.contextFiles.length > 0}>
                 <div class="flex items-center gap-3">
-                  <span class="text-[10px] text-matrix-primary/50 font-mono">
+                  <span class="text-sm text-matrix-primary/50 font-mono">
                       ({state.contextFiles.length} FILES)
                   </span>
                   <div class="w-px h-3 bg-matrix-border/50"></div>
                   <span 
-                    class="text-[10px] text-matrix-highlight/70 font-mono font-bold"
+                    class="text-sm text-matrix-highlight/70 font-mono font-bold"
                     title="Estimated ~4 chars/token + XML markup overhead"
                   >
                       ~{formatTokenCount(totalTokens())} TOKENS
@@ -192,7 +192,7 @@ export const ContextComposer = () => {
             <Show when={canAction()}>
                 <button
                     onClick={toggleAll}
-                    class="text-[10px] font-bold uppercase tracking-wider px-2 py-1 text-matrix-primary/50 hover:text-matrix-primary transition-colors"
+                    class="text-lg font-bold uppercase tracking-wider px-2 py-1 text-matrix-primary/50 hover:text-matrix-primary transition-colors"
                 >
                     {forceExpand() === true ? "Collapse All" : "Expand All"}
                 </button>
@@ -203,7 +203,7 @@ export const ContextComposer = () => {
                 onClick={handleCopyAll}
                 disabled={!canAction()}
                 class={`
-                    text-xs font-bold uppercase tracking-widest px-3 py-1 border transition-all flex items-center gap-2
+                    text-lg font-bold uppercase tracking-widest px-3 py-1 border transition-all flex items-center gap-2
                     ${canAction() 
                         ? 'border-matrix-primary text-matrix-primary hover:bg-matrix-primary hover:text-matrix-bg hover:shadow-glow' 
                         : 'border-transparent text-matrix-primary/20 cursor-not-allowed'}
@@ -217,10 +217,10 @@ export const ContextComposer = () => {
       {/* List Area */}
       <div class="flex-1 p-3 overflow-y-auto custom-scrollbar">
         <Show when={state.contextFiles.length === 0}>
-            <div class="flex flex-col items-center justify-center h-full opacity-20 text-xs font-mono tracking-widest text-center select-none">
+            <div class="flex flex-col items-center justify-center h-full opacity-20 text-base font-mono tracking-widest text-center select-none">
                 <div class="mb-2 text-4xl opacity-50">∅</div>
                 <div>AWAITING INPUT</div>
-                <div class="text-[10px] mt-2">ADD SYMBOLS TO GENERATE CONTEXT</div>
+                <div class="text-sm mt-2">ADD SYMBOLS TO GENERATE CONTEXT</div>
             </div>
         </Show>
 

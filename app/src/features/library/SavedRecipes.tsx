@@ -77,7 +77,7 @@ export const SavedRecipes = () => {
                 onClick={handleUpdate}
                 disabled={!recipeState.activeRecipeName || workspaceState.isSyncing}
                 class={`
-                    flex-1 font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2
+                    flex-1 font-bold text-lg uppercase tracking-wider transition-all flex items-center justify-center gap-2
                     ${!recipeState.activeRecipeName 
                         ? 'text-matrix-primary/30 cursor-not-allowed' 
                         : 'text-matrix-primary hover:bg-matrix-primary hover:text-matrix-bg'}
@@ -90,7 +90,7 @@ export const SavedRecipes = () => {
                 onClick={openSaveModal}
                 disabled={recipeState.steps.length === 0 || workspaceState.isSyncing}
                 class={`
-                    flex-1 font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2
+                    flex-1 font-bold text-lg uppercase tracking-wider transition-all flex items-center justify-center gap-2
                     ${recipeState.steps.length === 0
                         ? 'text-matrix-primary/30 cursor-not-allowed' 
                         : 'text-matrix-primary hover:bg-matrix-primary hover:text-matrix-bg'}
@@ -109,7 +109,7 @@ export const SavedRecipes = () => {
                 placeholder="Filter recipes..."
                 value={filter()}
                 onInput={(e) => setFilter(e.currentTarget.value)}
-                class="w-full bg-matrix-panel border border-matrix-border/50 text-matrix-highlight px-2 pl-7 py-1 text-xs outline-none focus:border-matrix-primary focus:shadow-glow font-mono transition-all"
+                class="w-full bg-matrix-panel border border-matrix-border/50 text-matrix-highlight px-2 pl-7 py-1 text-base outline-none focus:border-matrix-primary focus:shadow-glow font-mono transition-all"
             />
             <div class="absolute left-2 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none group-focus-within:opacity-100 group-focus-within:text-matrix-primary">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
@@ -133,7 +133,7 @@ export const SavedRecipes = () => {
         <For
           each={filteredRecipes()}
           fallback={
-            <div class="text-center opacity-30 text-xs font-mono pt-8 tracking-widest">
+            <div class="text-center opacity-30 text-base font-mono pt-8 tracking-widest">
               {filter() ? "NO MATCHES" : "LIBRARY EMPTY"}
             </div>
           }
@@ -150,15 +150,15 @@ export const SavedRecipes = () => {
                 onClick={() => loadSavedRecipe(recipe)}
             >
                 {/* Left: Name */}
-                <div class="font-bold text-sm font-mono truncate mr-2 flex-1" title={recipe.name}>
+                <div class="font-bold text-base font-mono truncate mr-2 flex-1" title={recipe.name}>
                     {recipe.name}
                 </div>
 
                 {/* Right: Meta & Actions */}
                 <div class="flex items-center gap-3 shrink-0">
-                    <div class="flex items-center gap-1 opacity-50 text-xs font-mono" title={`${recipe.operations.length} Operations`}>
+                    <div class="flex items-center gap-1 opacity-50 text-sm font-mono" title={`${recipe.operations.length} Operations`}>
                         <span class="font-bold">{recipe.operations.length}</span>
-                        <span class="text-[10px]">⚡</span> 
+                        <span class="text-sm">⚡</span> 
                     </div>
 
                     <button
@@ -178,7 +178,7 @@ export const SavedRecipes = () => {
       <Show when={showSaveModal()}>
         <div class="absolute inset-0 z-50 bg-matrix-bg/95 backdrop-blur flex items-center justify-center p-4 animate-[fadeIn_0.1s_ease-out]">
             <div class="w-full max-w-xs border border-matrix-primary p-1 bg-matrix-panel shadow-glow">
-                <div class="text-xs font-bold text-matrix-highlight bg-matrix-primary/20 p-2 mb-2 text-center uppercase tracking-widest">
+                <div class="text-base font-bold text-matrix-highlight bg-matrix-primary/20 p-2 mb-2 text-center uppercase tracking-widest">
                     Name Recipe
                 </div>
                 
@@ -203,14 +203,14 @@ export const SavedRecipes = () => {
                     placeholder="Recipe Name"
                 />
                 
-                <div class="h-4 mb-1 text-[10px] text-matrix-error font-bold text-center uppercase tracking-wider">
+                <div class="h-4 mb-1 text-sm text-matrix-error font-bold text-center uppercase tracking-wider">
                     {errorMsg()}
                 </div>
 
                 <div class="flex gap-2">
                     <button 
                         onClick={() => setShowSaveModal(false)}
-                        class="flex-1 py-2 text-xs font-bold border border-matrix-border hover:bg-matrix-error hover:text-matrix-bg transition"
+                        class="flex-1 py-2 text-lg font-bold border border-matrix-border hover:bg-matrix-error hover:text-matrix-bg transition"
                     >
                         CANCEL
                     </button>
@@ -218,7 +218,7 @@ export const SavedRecipes = () => {
                         onClick={confirmSaveAs}
                         disabled={!!errorMsg()}
                         class={`
-                            flex-1 py-2 text-xs font-bold transition
+                            flex-1 py-2 text-lg font-bold transition
                             ${errorMsg() 
                                 ? 'bg-matrix-border text-matrix-primary/30 cursor-not-allowed' 
                                 : 'bg-matrix-primary text-matrix-bg hover:bg-matrix-highlight'}

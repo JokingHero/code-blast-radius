@@ -55,7 +55,7 @@ function App() {
         <h1 class="text-5xl font-bold tracking-[0.2em] text-matrix-primary drop-shadow-glow mb-2">
           BLAST RADIUS
         </h1>
-        <p class="text-xs text-matrix-primary/50 tracking-[0.5em] uppercase">
+        <p class="text-base text-matrix-primary/50 tracking-[0.5em] uppercase">
           Visual Code Dependency Analyzer
         </p>
       </div>
@@ -86,7 +86,7 @@ function App() {
 
       <Show when={state.recentWorkspaces.length > 0}>
         <div class="mt-16 text-center z-10 animate-[fadeIn_1s_ease-out]">
-          <p class="text-[10px] text-matrix-primary/30 uppercase tracking-widest mb-4">
+          <p class="text-sm text-matrix-primary/30 uppercase tracking-widest mb-4">
             Recent Sessions
           </p>
           <div class="flex flex-col gap-2 items-center">
@@ -94,7 +94,7 @@ function App() {
               {(path) => (
                 <button
                   onClick={() => loadWorkspace(path)}
-                  class="text-xs text-matrix-primary/60 hover:text-matrix-highlight hover:underline decoration-matrix-primary/30 underline-offset-4 truncate max-w-md transition-colors font-mono"
+                  class="text-base text-matrix-primary/60 hover:text-matrix-highlight hover:underline decoration-matrix-primary/30 underline-offset-4 truncate max-w-md transition-colors font-mono"
                 >
                   {path}
                 </button>
@@ -120,16 +120,16 @@ function App() {
                 <div class="h-12 shrink-0 flex items-center px-3 border-b border-matrix-border bg-matrix-panel select-none justify-between">
                   <div class="flex items-center">
                     <div class="w-2 h-2 bg-matrix-text rounded-full mr-2 opacity-50"></div>
-                    <span class="text-tiny font-bold tracking-wider opacity-70 text-matrix-primary">
+                    <span class="text-sm font-bold tracking-wider opacity-70 text-matrix-primary">
                       EXPLORER
                     </span>
                   </div>
                   <div class="flex gap-1">
                     <Show when={state.config?.mode === 'project'}>
-                      <span class="text-micro border border-matrix-border px-1 opacity-50 rounded bg-matrix-panel text-matrix-highlight">PROJ</span>
+                      <span class="text-sm border border-matrix-border px-1 opacity-50 rounded bg-matrix-panel text-matrix-highlight">PROJ</span>
                     </Show>
                     <Show when={state.config?.mode === 'unsaved-workspace'}>
-                      <span class="text-micro border border-matrix-error px-1 rounded bg-matrix-error/10 text-matrix-error animate-pulse">UNSAVED</span>
+                      <span class="text-sm border border-matrix-error px-1 rounded bg-matrix-error/10 text-matrix-error animate-pulse">UNSAVED</span>
                     </Show>
                   </div>
                 </div>
@@ -160,7 +160,7 @@ function App() {
               {/* RIGHT: Saved Recipes */}
               <div class="w-72 bg-matrix-panel/50 flex flex-col">
                 <div class="h-12 shrink-0 flex items-center px-3 border-b border-matrix-border bg-matrix-panel select-none">
-                  <span class="text-tiny font-bold tracking-wider opacity-70 text-matrix-primary">
+                  <span class="text-sm font-bold tracking-wider opacity-70 text-matrix-primary">
                     LIBRARY
                   </span>
                 </div>

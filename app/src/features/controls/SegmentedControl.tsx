@@ -25,7 +25,7 @@ export function SegmentedControl<T>(props: SegmentedControlProps<T>) {
               disabled={props.disabled}
               title={opt.title}
               class={`
-                px-2 flex items-center justify-center text-[10px] font-bold uppercase tracking-wider transition-all
+                px-2 flex items-center justify-center text-lg font-bold uppercase tracking-wider transition-all
                 ${props.value === opt.value
                   ? "bg-matrix-primary text-matrix-bg shadow-[inset_0_0_5px_rgba(0,0,0,0.2)]"
                   : "bg-transparent text-matrix-primary/50 hover:text-matrix-primary hover:bg-matrix-primary/5"}

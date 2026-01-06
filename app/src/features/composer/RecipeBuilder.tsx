@@ -79,14 +79,14 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
               </button>
             </Match>
             <Match when={props.step.op.type === 'BlastRadius'}>
-               <div class="w-5 h-5 flex items-center justify-center text-matrix-primary border border-matrix-primary rounded-sm">
-                  <span class="text-[10px] font-bold">R</span>
+<div class="w-5 h-5 flex items-center justify-center text-matrix-primary border border-matrix-primary rounded-sm">
+                   <span class="text-sm font-bold">R</span>
                </div>
             </Match>
           </Switch>
           
           <span 
-            class="truncate font-mono font-bold text-matrix-highlight/90 text-xs flex-1" 
+            class="truncate font-mono font-bold text-matrix-highlight/90 text-base flex-1" 
             title={props.step.op.params.pattern || props.step.op.params.symbol}
           >
             {props.step.op.params.pattern || props.step.op.params.symbol}
@@ -111,22 +111,22 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
           
             {/* Radius */}
             <div class="flex items-center gap-2">
-                 <button 
-                    onClick={() => updateStepParams(props.step.id, { max_depth: isInfinite() ? 5 : 100 })}
-                    class={`
-                        text-[10px] uppercase font-bold tracking-wider transition-colors
-                        ${!isInfinite() ? "text-matrix-primary" : "text-matrix-primary/40 line-through decoration-matrix-primary/40"}
-                    `}
-                >
-                    RAD
-                </button>
+<button 
+                     onClick={() => updateStepParams(props.step.id, { max_depth: isInfinite() ? 5 : 100 })}
+                     class={`
+                         text-lg uppercase font-bold tracking-wider transition-colors
+                         ${!isInfinite() ? "text-matrix-primary" : "text-matrix-primary/40 line-through decoration-matrix-primary/40"}
+                     `}
+                 >
+                     RAD
+                 </button>
 
                 <Show 
                     when={!isInfinite()}
                     fallback={
-                         <div class="flex items-center justify-center w-16 h-4 bg-matrix-primary/5 rounded border border-matrix-primary/20">
-                             <span class="text-xs font-bold text-matrix-primary">∞</span>
-                        </div>
+<div class="flex items-center justify-center w-16 h-4 bg-matrix-primary/5 rounded border border-matrix-primary/20">
+                              <span class="text-base font-bold text-matrix-primary">∞</span>
+                         </div>
                     }
                 >
                     <div class="flex items-center gap-2">
@@ -147,7 +147,7 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
                                 [&::-webkit-slider-thumb]:transition-transform
                             "
                         />
-                        <span class="text-[10px] font-mono font-bold text-matrix-primary w-3 text-right">
+                        <span class="text-sm font-mono font-bold text-matrix-primary w-3 text-right">
                             {depth()}
                         </span>
                     </div>
@@ -160,7 +160,7 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
             <button
                 onClick={() => updateStepParams(props.step.id, { exclude_tests: !props.step.op.params.exclude_tests })}
                 class={`
-                    h-5 px-2 text-[10px] font-bold uppercase tracking-wider border transition-all rounded-sm flex items-center
+                    h-5 px-2 text-lg font-bold uppercase tracking-wider border transition-all rounded-sm flex items-center
                     ${!props.step.op.params.exclude_tests 
                         ? "bg-matrix-primary text-matrix-bg border-matrix-primary" 
                         : "bg-transparent text-matrix-primary/50 border-matrix-border hover:border-matrix-primary/50 hover:text-matrix-primary"}
@@ -203,10 +203,10 @@ export const RecipeBuilder = () => {
       {/* Header */}
       <div class="sticky top-0 bg-matrix-bg/95 backdrop-blur z-10 px-4 h-10 border-b border-matrix-border/30 flex justify-between items-center shrink-0">
          <div class="flex items-center gap-2">
-            <span class="text-xs uppercase tracking-widest opacity-40 font-bold">
+            <span class="text-base uppercase tracking-widest opacity-40 font-bold">
                 Active Session:
             </span>
-            <span class={`text-sm font-bold font-mono ${recipeState.activeRecipeName ? 'text-matrix-highlight' : 'text-matrix-primary/50 italic'}`}>
+            <span class={`text-base font-bold font-mono ${recipeState.activeRecipeName ? 'text-matrix-highlight' : 'text-matrix-primary/50 italic'}`}>
                 {recipeState.activeRecipeName || "Untitled"}
             </span>
             <Show when={recipeState.isDirty}>
@@ -215,16 +215,16 @@ export const RecipeBuilder = () => {
          </div>
 
          <Show when={recipeState.steps.length > 0}>
-             <button 
-                onClick={resetRecipe}
-                class="
-                    flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider 
-                    text-matrix-primary hover:bg-matrix-primary hover:text-matrix-bg
-                    px-2 py-1 transition-all border border-transparent hover:border-matrix-primary rounded-sm
-                "
-             >
-                [ CLEAR ]
-             </button>
+<button 
+                 onClick={resetRecipe}
+                 class="
+                     flex items-center gap-1 text-lg font-bold uppercase tracking-wider 
+                     text-matrix-primary hover:bg-matrix-primary hover:text-matrix-bg
+                     px-2 py-1 transition-all border border-transparent hover:border-matrix-primary rounded-sm
+                 "
+              >
+                 [ CLEAR ]
+              </button>
          </Show>
       </div>
 
@@ -245,8 +245,8 @@ export const RecipeBuilder = () => {
 
         {recipeState.steps.length === 0 && !isDraggingFile() && (
             <div class="flex flex-col items-center justify-center h-full opacity-30 select-none pointer-events-none">
-                <div class="text-sm tracking-widest font-bold">[ WORKBENCH EMPTY ]</div>
-                <div class="text-xs mt-1 font-mono">DROP FILES OR SEARCH SYMBOLS</div>
+<div class="text-base tracking-widest font-bold">[ WORKBENCH EMPTY ]</div>
+                 <div class="text-sm mt-1 font-mono">DROP FILES OR SEARCH SYMBOLS</div>
             </div>
         )}
       </div>

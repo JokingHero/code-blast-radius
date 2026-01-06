@@ -74,12 +74,12 @@ export const SearchBar = () => {
                 fallback={
                     <div class="flex items-center text-matrix-primary/50 animate-pulse font-mono">
                         <span class="mr-2">::</span>
-                        <span class="text-xs tracking-widest">SYSTEM_INDEXING...</span>
+                        <span class="text-base tracking-widest">SYSTEM_INDEXING...</span>
                     </div>
                 }
             >
                 <span class="text-matrix-primary font-bold mr-3">{">"}</span>
-                <span class="text-matrix-primary/30 text-xs tracking-[0.15em] font-mono">
+                <span class="text-matrix-primary/30 text-base tracking-[0.15em] font-mono">
                   QUERY_DATABASE
                 </span>
                 <span class="ml-2 w-2 h-4 bg-matrix-primary/50 animate-[pulse_1s_infinite]"></span>
@@ -105,7 +105,7 @@ export const SearchBar = () => {
       </div>
 
       {/* RIGHT: CONTROL DECK */}
-      <div class="flex items-center h-full bg-black/20 px-3 gap-3 shrink-0 text-tiny">
+      <div class="flex items-center h-full bg-black/20 px-3 gap-3 shrink-0 text-sm">
         
         {/* RADIUS */}
         <div class="flex items-center gap-2 group/radius">
@@ -113,7 +113,7 @@ export const SearchBar = () => {
                 onClick={() => setLimitRadius(!limitRadius())}
                 disabled={isLocked()}
                 class={`
-                    text-[10px] uppercase font-bold tracking-wider transition-colors cursor-pointer hover:text-matrix-highlight
+                    text-lg uppercase font-bold tracking-wider transition-colors cursor-pointer hover:text-matrix-highlight
                     ${limitRadius() ? "text-matrix-primary" : "text-matrix-primary/40 line-through decoration-matrix-primary/40"}
                 `}
             >
@@ -124,7 +124,7 @@ export const SearchBar = () => {
                 when={limitRadius()}
                 fallback={
                     <div class="flex items-center justify-center w-20 h-4 bg-matrix-primary/5 rounded border border-matrix-primary/20">
-                         <span class="text-xs font-bold text-matrix-primary">∞</span>
+                         <span class="text-base font-bold text-matrix-primary">∞</span>
                     </div>
                 }
             >
@@ -148,7 +148,7 @@ export const SearchBar = () => {
                         [&::-webkit-slider-thumb]:transition-transform
                         "
                     />
-                    <span class="text-[10px] font-mono font-bold text-matrix-primary w-4 text-right">
+                    <span class="text-sm font-mono font-bold text-matrix-primary w-4 text-right">
                         {radius()}
                     </span>
                 </div>
@@ -160,7 +160,7 @@ export const SearchBar = () => {
             onClick={() => setIncludeTests(!includeTests())}
             disabled={isLocked()}
             class={`
-                h-5 px-2 text-[10px] font-bold uppercase tracking-wider border transition-all flex items-center rounded-sm
+                h-5 px-2 text-lg font-bold uppercase tracking-wider border transition-all flex items-center rounded-sm
                 ${includeTests() 
                     ? "bg-matrix-primary text-matrix-bg border-matrix-primary" 
                     : "bg-transparent text-matrix-primary/50 border-matrix-border hover:border-matrix-primary/50 hover:text-matrix-primary"}
@@ -183,12 +183,12 @@ export const SearchBar = () => {
                 class="flex justify-between items-center p-2 border-b border-matrix-border/50 cursor-pointer hover:bg-matrix-primary hover:text-matrix-bg transition-colors group/item"
               >
                 <div class="flex items-center gap-3 overflow-hidden">
-                  <span class="font-mono font-bold text-xs shrink-0">{item.name}</span>
-                  <span class="text-[10px] uppercase tracking-wider border border-matrix-border px-1.5 py-px rounded-sm opacity-60 group-hover/item:border-matrix-bg group-hover/item:opacity-100">
+                  <span class="font-mono font-bold text-base shrink-0">{item.name}</span>
+                  <span class="text-sm uppercase tracking-wider border border-matrix-border px-1.5 py-px rounded-sm opacity-60 group-hover/item:border-matrix-bg group-hover/item:opacity-100">
                     {item.kind}
                   </span>
                 </div>
-                <div class="text-[10px] font-mono opacity-50 truncate max-w-[50%] text-right group-hover/item:opacity-80">
+                <div class="text-sm font-mono opacity-50 truncate max-w-[50%] text-right group-hover/item:opacity-80">
                   {item.path}
                 </div>
               </div>

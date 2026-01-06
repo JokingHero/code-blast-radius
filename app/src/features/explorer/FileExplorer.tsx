@@ -136,14 +136,14 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number; f
             <div class="w-2 h-2 border border-matrix-primary border-t-transparent rounded-full animate-spin"></div>
           </Show>
           <Show when={!isLoading() && props.entry.isDirectory}>
-             <span class="text-tiny font-bold text-matrix-primary opacity-70 group-hover:text-matrix-highlight">
-               {isOpen() ? '[-]' : '[+]'}
-             </span>
+<span class="text-sm font-bold text-matrix-primary opacity-70 group-hover:text-matrix-highlight">
+                {isOpen() ? '[-]' : '[+]'}
+              </span>
           </Show>
         </div>
 
         <span class={`
-          truncate text-xs tracking-tight select-none
+          truncate text-base tracking-tight select-none
           ${props.entry.isDirectory 
               ? "text-matrix-primary font-bold" 
               : "text-matrix-primary/80 group-hover:text-matrix-highlight"} 
@@ -159,7 +159,7 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number; f
             {(child) => <FileNode entry={child} parentPath={fullPath} depth={props.depth + 1} filter={props.filter} />}
           </For>
           <Show when={!isLoading() && filteredChildren().length === 0 && !errorMsg()}>
-            <div class="text-tiny opacity-30 italic py-1" style={{ "padding-left": `${(props.depth + 1) * 12 + 24}px` }}>
+            <div class="text-sm opacity-30 italic py-1" style={{ "padding-left": `${(props.depth + 1) * 12 + 24}px` }}>
               { sortedChildren().length > 0 ? '(No matches)' : '(empty)' }
             </div>
           </Show>
@@ -207,14 +207,14 @@ const RootFolder = (props: { path: string; canRemove: boolean; onRemove: () => v
                 title={props.path}
             >
                 <div class="flex items-center min-w-0">
-                    <span class="mr-2 text-tiny font-bold text-matrix-primary shrink-0">
+                    <span class="mr-2 text-sm font-bold text-matrix-primary shrink-0">
                         {isExpanded() ? "[-]" : "[+]"}
                     </span>
                     <div class="flex flex-col overflow-hidden min-w-0">
-                        <span class={`text-xs font-bold tracking-wide uppercase truncate ${error() ? 'text-matrix-error' : 'text-matrix-highlight'}`}>
+                        <span class={`text-base font-bold tracking-wide uppercase truncate ${error() ? 'text-matrix-error' : 'text-matrix-highlight'}`}>
                             {folderName()}
                         </span>
-                        <span class="text-micro opacity-40 truncate font-mono">
+                        <span class="text-sm opacity-40 truncate font-mono">
                             {props.path}
                         </span>
                     </div>
@@ -317,7 +317,7 @@ export const FileExplorer = () => {
       <div class="border-b border-matrix-border/50 bg-matrix-panel flex flex-col shrink-0">
           
           {/* Row 1: Primary Actions (Load/Recent/Refresh) */}
-          <div class="flex items-center text-tiny divide-x divide-matrix-border/50">
+          <div class="flex items-center text-sm divide-x divide-matrix-border/50">
               <button 
                 onClick={handleLoadWorkspace}
                 class="flex-1 py-2 hover:bg-matrix-primary/10 hover:text-matrix-highlight transition text-matrix-primary"
@@ -359,26 +359,26 @@ export const FileExplorer = () => {
                             }}
                         >
                             <div class="max-h-80 overflow-y-auto custom-scrollbar">
-                                <For each={state.recentWorkspaces} fallback={<div class="p-4 opacity-50 italic text-matrix-primary text-xs text-center">No recent history</div>}>
+                                <For each={state.recentWorkspaces} fallback={<div class="p-4 opacity-50 italic text-matrix-primary text-base text-center">No recent history</div>}>
                                     {(path) => (
                                         <button 
                                             onClick={() => { loadWorkspace(path); setShowRecent(false); }}
                                             class="w-full text-left p-3 text-matrix-primary hover:bg-matrix-primary hover:text-matrix-bg border-b border-matrix-border/30 last:border-0 transition-colors group"
                                             title={path}
                                         >
-                                            <div class="text-xs font-bold truncate group-hover:text-black">{getFolderName(path)}</div>
-                                            <div class="text-[10px] opacity-50 truncate font-mono group-hover:text-black">{path}</div>
+<div class="text-base font-bold truncate group-hover:text-black">{getFolderName(path)}</div>
+                                             <div class="text-sm opacity-50 truncate font-mono group-hover:text-black">{path}</div>
                                         </button>
                                     )}
                                 </For>
                             </div>
                             <div class="border-t border-matrix-primary p-1 bg-matrix-bg">
-                                <button 
-                                    onClick={() => { clearHistory(); setShowRecent(false); }}
-                                    class="w-full text-center text-[10px] text-matrix-primary hover:bg-matrix-error hover:text-matrix-bg py-1.5 uppercase tracking-wider transition-colors"
-                                >
-                                    [ Clear History ]
-                                </button>
+<button 
+                                     onClick={() => { clearHistory(); setShowRecent(false); }}
+                                     class="w-full text-center text-lg text-matrix-primary hover:bg-matrix-error hover:text-matrix-bg py-1.5 uppercase tracking-wider transition-colors"
+                                 >
+                                     [ Clear History ]
+                                 </button>
                             </div>
                         </div>
                     </Portal>
@@ -400,14 +400,14 @@ export const FileExplorer = () => {
           </div>
 
           {/* Row 2: Content Actions (Add Folder / Save) */}
-          <div class="flex items-center text-tiny border-t border-matrix-border/30">
+          <div class="flex items-center text-sm border-t border-matrix-border/30">
              <button 
                 onClick={handleAddRoot}
                 class="flex-1 py-2 hover:bg-matrix-primary/10 text-matrix-primary hover:text-matrix-highlight transition flex items-center justify-center gap-1 group"
                 title="Add another folder root to workspace"
              >
                 <span class="font-bold group-hover:scale-125 transition-transform text-lg leading-none">+</span>
-                <span class="text-xs font-bold tracking-wide">ADD FOLDER</span>
+                <span class="text-base font-bold tracking-wide">ADD FOLDER</span>
              </button>
 
              <div class="w-px h-full bg-matrix-border/30"></div>
@@ -422,7 +422,7 @@ export const FileExplorer = () => {
                 `}
                 title={needsSave() ? "Workspace changes unsaved! Click to create .cblast file" : "Save Workspace"}
              >
-                <span class="text-xs font-bold tracking-wide">[ SAVE ]</span>
+                <span class="text-base font-bold tracking-wide">[ SAVE ]</span>
              </button>
           </div>
       </div>
@@ -436,7 +436,7 @@ export const FileExplorer = () => {
                 placeholder="Filter files..."
                 value={filter()}
                 onInput={(e) => setFilter(e.currentTarget.value)}
-                class="w-full bg-matrix-panel border border-matrix-border/50 text-matrix-highlight px-2 pl-7 py-1 text-xs outline-none focus:border-matrix-primary focus:shadow-glow font-mono transition-all"
+                class="w-full bg-matrix-panel border border-matrix-border/50 text-matrix-highlight px-2 pl-7 py-1 text-base outline-none focus:border-matrix-primary focus:shadow-glow font-mono transition-all"
             />
             <div class="absolute left-2 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none group-focus-within:opacity-100 group-focus-within:text-matrix-primary">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
@@ -459,16 +459,16 @@ export const FileExplorer = () => {
       {/* --- Roots Scroll View --- */}
       <div class="flex-1 overflow-y-auto custom-scrollbar pb-10 bg-matrix-bg relative">
         <Show when={!state.config || state.config.roots.length === 0}>
-           <div class="flex flex-col items-center justify-center h-64 opacity-60 text-xs font-mono text-matrix-primary p-6 text-center select-none">
-              <div class="text-4xl mb-4 opacity-50 text-matrix-primary animate-pulse">∅</div>
-              <div class="mb-4 tracking-widest font-bold">NO FOLDERS OPEN</div>
-              <button 
-                onClick={handleAddRoot}
-                class="px-6 py-3 border border-matrix-primary/50 bg-matrix-panel hover:bg-matrix-primary hover:text-matrix-bg transition-all uppercase tracking-widest font-bold text-[10px] shadow-glow"
-              >
-                Add Folder to Begin
-              </button>
-           </div>
+<div class="flex flex-col items-center justify-center h-64 opacity-60 text-base font-mono text-matrix-primary p-6 text-center select-none">
+               <div class="text-4xl mb-4 opacity-50 text-matrix-primary animate-pulse">∅</div>
+               <div class="mb-4 tracking-widest font-bold">NO FOLDERS OPEN</div>
+               <button 
+                 onClick={handleAddRoot}
+                 class="px-6 py-3 border border-matrix-primary/50 bg-matrix-panel hover:bg-matrix-primary hover:text-matrix-bg transition-all uppercase tracking-widest font-bold text-lg shadow-glow"
+               >
+                 Add Folder to Begin
+               </button>
+            </div>
         </Show>
 
         <Show when={state.config}>
