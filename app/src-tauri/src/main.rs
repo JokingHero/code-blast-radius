@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
 use blast_radius_engine::recipes::executor::RecipeExecutor;
 use blast_radius_engine::recipes::models::Recipe;
@@ -269,6 +269,7 @@ async fn search_symbols(
     let guard = state.manager.read().await;
     let manager = guard.as_ref().ok_or("Workspace not loaded")?;
     let indexer = &manager.indexer;
+    let roots = &manager.config.roots; // Access roots to calculate relative paths
 
     let mut matcher = Matcher::new(Config::DEFAULT);
     let mut results = Vec::new();
@@ -276,12 +277,10 @@ async fn search_symbols(
 
     // 1. Search Symbols
     for sym in indexer.index.symbols.values() {
-        if
-            let Some(score) = matcher.fuzzy_match(
-                Utf32String::from(sym.name.as_str()).slice(..),
-                query_utf32.slice(..)
-            )
-        {
+        if let Some(score) = matcher.fuzzy_match(
+            Utf32String::from(sym.name.as_str()).slice(..),
+            query_utf32.slice(..)
+        ) {
             let file_path = indexer.index.files
                 .values()
                 .find(|f| f.id == sym.file_id)
@@ -291,24 +290,37 @@ async fn search_symbols(
             results.push(SearchResult {
                 name: sym.name.clone(),
                 kind: format!("{:?}", sym.kind),
-                path: file_path,
+                path: file_path, // Full path is fine for display/debug info
                 score,
             });
         }
     }
 
-    // 2. Search Files
+    // 2. Search Files (with Relative Path Logic)
     for file in indexer.index.files.values() {
-        if
-            let Some(score) = matcher.fuzzy_match(
-                Utf32String::from(file.path.as_str()).slice(..),
-                query_utf32.slice(..)
-            )
-        {
+        // Try to make the path relative for better UX and portable Recipes
+        let path_obj = Path::new(&file.path);
+        let mut display_name = file.path.clone();
+
+        // Attempt to strip prefix of any known root
+        for root in roots {
+            if let Ok(rel) = path_obj.strip_prefix(root) {
+                // Force Unix separators for consistency in Recipes (JSON)
+                display_name = rel.to_string_lossy().replace('\\', "/");
+                break;
+            }
+        }
+
+        // Fuzzy match against the RELATIVE path (better for user intent)
+        // e.g. User types "utils.ts", matches "src/utils.ts" better than "/Users/.../utils.ts"
+        if let Some(score) = matcher.fuzzy_match(
+            Utf32String::from(display_name.as_str()).slice(..),
+            query_utf32.slice(..)
+        ) {
             results.push(SearchResult {
-                name: file.path.clone(),
+                name: display_name, // Store RELATIVE path in 'name' (used as value)
                 kind: "File".to_string(),
-                path: file.path.clone(),
+                path: file.path.clone(), // Keep absolute for tooltip/debug
                 score,
             });
         }
