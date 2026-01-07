@@ -1,9 +1,25 @@
 import { createSignal, createEffect, For, Show, createMemo, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web"; 
-import { readDir, DirEntry } from "@tauri-apps/plugin-fs";
+import { readDir, readTextFile, DirEntry } from "@tauri-apps/plugin-fs";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useWorkspace } from "../../core/workspace.store";
 import { useRecipe } from "../../core/recipe.store";
+
+// --- Configuration ---
+
+// 1. Static Blocklist (High-priority performance filter)
+const IGNORED_NAMES = new Set([
+  "node_modules", "jspm_packages", "bower_components", 
+  "venv", ".venv", "env", ".env",
+  "target", "vendor", 
+  "dist", "build", "out", "bin", "obj",
+  "__pycache__", ".pytest_cache",
+  ".git", ".svn", ".hg", 
+  ".idea", ".vscode", ".vs", ".DS_Store", "Thumbs.db",
+  "coverage"
+]);
+
+const RENDER_CHUNK_SIZE = 100;
 
 // --- Helpers ---
 
@@ -23,13 +39,52 @@ const getFolderName = (path: string): string => {
     return path.split(sep).pop() || path;
 };
 
+// 2. Simple .gitignore Parser
+// Extracts simple names (e.g., "dist") and extensions (e.g., "*.log")
+// Ignores complex globs to keep UI traversal fast.
+const parseSimpleGitIgnore = (content: string) => {
+    const names = new Set<string>();
+    const extensions = new Set<string>();
+
+    const lines = content.split(/\r?\n/);
+    for (let line of lines) {
+        line = line.trim();
+        if (!line || line.startsWith("#")) continue;
+
+        if (line.startsWith("*.") && !line.includes("/")) {
+            extensions.add(line.slice(1)); // Store "log" for "*.log"
+            continue;
+        }
+
+        const cleanName = line.replace(/^\/+|\/+$/g, "");
+        if (!cleanName.includes("*") && !cleanName.includes("/")) {
+            names.add(cleanName);
+        }
+    }
+    return { names, extensions };
+};
+
+interface IgnoreRules {
+    names: Set<string>;
+    extensions: Set<string>;
+}
+
 // --- Components ---
 
-const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number; filter: string }) => {
+const FileNode = (props: { 
+    entry: DirEntry; 
+    parentPath: string; 
+    depth: number; 
+    filter: string;
+    ignoreRules?: IgnoreRules; // Pass down rules
+}) => {
   const [isOpen, setIsOpen] = createSignal(false);
   const [children, setChildren] = createSignal<DirEntry[]>([]);
   const [isLoading, setIsLoading] = createSignal(false);
   const [errorMsg, setErrorMsg] = createSignal<string | null>(null);
+  
+  // Pagination State
+  const [renderLimit, setRenderLimit] = createSignal(RENDER_CHUNK_SIZE);
 
   const fullPath = joinPath(props.parentPath, props.entry.name);
   const { addStep } = useRecipe(); 
@@ -41,12 +96,27 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number; f
     });
   });
 
-  // Filter logic: Only show children that match the filter (if set)
   const filteredChildren = createMemo(() => {
     const term = props.filter.toLowerCase();
-    if (!term) return sortedChildren();
-    return sortedChildren().filter(child => child.name.toLowerCase().includes(term));
+    const all = sortedChildren();
+    if (!term) return all;
+    return all.filter(child => child.name.toLowerCase().includes(term));
   });
+
+  // Pagination Logic
+  const visibleChildren = createMemo(() => filteredChildren().slice(0, renderLimit()));
+  const remainingCount = createMemo(() => Math.max(0, filteredChildren().length - renderLimit()));
+
+  const shouldHide = (name: string) => {
+      if (IGNORED_NAMES.has(name)) return true;
+      if (props.ignoreRules) {
+          if (props.ignoreRules.names.has(name)) return true;
+          for (const ext of props.ignoreRules.extensions) {
+              if (name.endsWith(ext)) return true;
+          }
+      }
+      return false;
+  };
 
   const toggleNode = async (e: MouseEvent) => {
     e.stopPropagation();
@@ -56,14 +126,17 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number; f
 
     if (isOpen()) {
       setIsOpen(false);
+      setRenderLimit(RENDER_CHUNK_SIZE); // Reset pagination on collapse
       return;
     }
 
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      const entries = await readDir(fullPath);
-      setChildren(entries);
+      const rawEntries = await readDir(fullPath);
+      // Filter applied here based on Blocklist + GitIgnore
+      const validEntries = rawEntries.filter(e => !shouldHide(e.name));
+      setChildren(validEntries);
       setIsOpen(true);
     } catch (err: any) {
       setErrorMsg(typeof err === "string" ? err : err.message || "Access Denied");
@@ -71,25 +144,15 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number; f
       setIsLoading(false);
     }
   };
-  
-  // Auto-expand folder if it matches filter (primitive auto-expand)
-  createEffect(() => {
-    if (props.filter && !isOpen() && props.entry.isDirectory && props.entry.name.toLowerCase().includes(props.filter.toLowerCase())) {
-       // We only trigger if the folder name *itself* matches, giving user a hint
-       // Ideally we'd recursively check children, but that requires pre-loading the FS which is expensive.
-       // For now, this is a "shallow" filter match.
-       toggleNode(new MouseEvent('click'));
-    }
-  });
+
+  // NOTE: Auto-expand createEffect removed here to prevent Filesystem DOS
 
   const handleDragStart = (e: DragEvent) => {
     if (e.dataTransfer) {
       let value = normalizePath(fullPath);
-      
       if (props.entry.isDirectory) {
         value = value.endsWith("/") ? `${value}**` : `${value}/**`;
       }
-
       const payload = JSON.stringify({ type: "add_file", value });
       e.dataTransfer.setData("application/json", payload);
       e.dataTransfer.effectAllowed = "copy";
@@ -101,7 +164,6 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number; f
     if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.opacity = "1";
   }
 
-  // Double click to add file to context
   const handleDblClick = (e: MouseEvent) => {
     e.stopPropagation();
     if (!props.entry.isDirectory) {
@@ -136,7 +198,7 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number; f
             <div class="w-2 h-2 border border-matrix-primary border-t-transparent rounded-full animate-spin"></div>
           </Show>
           <Show when={!isLoading() && props.entry.isDirectory}>
-<span class="text-sm font-bold text-matrix-primary opacity-70 group-hover:text-matrix-highlight">
+             <span class="text-sm font-bold text-matrix-primary opacity-70 group-hover:text-matrix-highlight">
                 {isOpen() ? '[-]' : '[+]'}
               </span>
           </Show>
@@ -155,10 +217,31 @@ const FileNode = (props: { entry: DirEntry; parentPath: string; depth: number; f
 
       <Show when={isOpen()}>
         <div>
-          <For each={filteredChildren()}>
-            {(child) => <FileNode entry={child} parentPath={fullPath} depth={props.depth + 1} filter={props.filter} />}
+          <For each={visibleChildren()}>
+            {(child) => (
+                <FileNode 
+                    entry={child} 
+                    parentPath={fullPath} 
+                    depth={props.depth + 1} 
+                    filter={props.filter} 
+                    ignoreRules={props.ignoreRules}
+                />
+            )}
           </For>
-          <Show when={!isLoading() && filteredChildren().length === 0 && !errorMsg()}>
+
+          {/* Pagination Control (Minimalist UI) */}
+          <Show when={remainingCount() > 0}>
+              <div 
+                onClick={(e) => { e.stopPropagation(); setRenderLimit(p => p + RENDER_CHUNK_SIZE); }}
+                class="hover:bg-matrix-primary/20 cursor-pointer py-1 text-tiny font-bold text-matrix-primary/50 hover:text-matrix-primary flex items-center gap-2 select-none"
+                style={{ "padding-left": `${(props.depth + 1) * 12 + 24}px` }}
+              >
+                  <span class="opacity-50">...</span> 
+                  <span>SHOW {remainingCount()} MORE</span>
+              </div>
+          </Show>
+
+          <Show when={!isLoading() && visibleChildren().length === 0 && !errorMsg()}>
             <div class="text-sm opacity-30 italic py-1" style={{ "padding-left": `${(props.depth + 1) * 12 + 24}px` }}>
               { sortedChildren().length > 0 ? '(No matches)' : '(empty)' }
             </div>
@@ -173,12 +256,37 @@ const RootFolder = (props: { path: string; canRemove: boolean; onRemove: () => v
     const [entries, setEntries] = createSignal<DirEntry[]>([]);
     const [isExpanded, setIsExpanded] = createSignal(true);
     const [error, setError] = createSignal<string | null>(null);
+    const [ignoreRules, setIgnoreRules] = createSignal<IgnoreRules | undefined>(undefined);
+    const [renderLimit, setRenderLimit] = createSignal(RENDER_CHUNK_SIZE);
+
     const folderName = createMemo(() => getFolderName(props.path));
 
     createEffect(async () => {
         try {
-            const children = await readDir(props.path);
-            setEntries(children.sort((a, b) => {
+            // 1. Attempt to read root .gitignore
+            try {
+                const gitignorePath = joinPath(props.path, ".gitignore");
+                const content = await readTextFile(gitignorePath);
+                setIgnoreRules(parseSimpleGitIgnore(content));
+            } catch (e) { /* ignore missing file */ }
+
+            // 2. Read Root Entries
+            const rawChildren = await readDir(props.path);
+            
+            // 3. Initial Filtering
+            const currentRules = ignoreRules();
+            const valid = rawChildren.filter(e => {
+                if (IGNORED_NAMES.has(e.name)) return false;
+                if (currentRules) {
+                    if (currentRules.names.has(e.name)) return false;
+                    for (const ext of currentRules.extensions) {
+                        if (e.name.endsWith(ext)) return false;
+                    }
+                }
+                return true;
+            });
+            
+            setEntries(valid.sort((a, b) => {
                 if (a.isDirectory === b.isDirectory) return a.name.localeCompare(b.name);
                 return a.isDirectory ? -1 : 1;
             }));
@@ -188,12 +296,15 @@ const RootFolder = (props: { path: string; canRemove: boolean; onRemove: () => v
         }
     });
 
-    // Filter direct children of the root
     const filteredEntries = createMemo(() => {
         const term = props.filter.toLowerCase();
-        if (!term) return entries();
-        return entries().filter(e => e.name.toLowerCase().includes(term));
+        const all = entries();
+        if (!term) return all;
+        return all.filter(e => e.name.toLowerCase().includes(term));
     });
+
+    const visibleEntries = createMemo(() => filteredEntries().slice(0, renderLimit()));
+    const remainingCount = createMemo(() => Math.max(0, filteredEntries().length - renderLimit()));
 
     return (
         <div class="mb-4 group/root">
@@ -233,9 +344,25 @@ const RootFolder = (props: { path: string; canRemove: boolean; onRemove: () => v
 
             <Show when={isExpanded() && !error()}>
                 <div class="mt-1">
-                    <For each={filteredEntries()}>
-                        {(entry) => <FileNode entry={entry} parentPath={props.path} depth={0} filter={props.filter} />}
+                    <For each={visibleEntries()}>
+                        {(entry) => (
+                            <FileNode 
+                                entry={entry} 
+                                parentPath={props.path} 
+                                depth={0} 
+                                filter={props.filter} 
+                                ignoreRules={ignoreRules()}
+                            />
+                        )}
                     </For>
+                    <Show when={remainingCount() > 0}>
+                        <div 
+                            onClick={() => setRenderLimit(prev => prev + RENDER_CHUNK_SIZE)}
+                            class="pl-4 hover:bg-matrix-primary/20 cursor-pointer py-2 text-tiny font-bold text-matrix-primary/50 hover:text-matrix-primary flex items-center gap-2 border-l border-transparent hover:border-matrix-primary select-none"
+                        >
+                            <span>... SHOW {remainingCount()} MORE</span>
+                        </div>
+                    </Show>
                 </div>
             </Show>
         </div>
