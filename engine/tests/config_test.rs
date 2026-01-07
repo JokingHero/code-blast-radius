@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::{Indexer};
 use blast_radius_engine::query::traversal::find_related_symbols;
 
 #[test]
@@ -33,8 +33,7 @@ db_url: "postgres://localhost:5432"
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // Verification A: Check if 'api_key' in YAML is a recognized config definition
     assert!(indexer.lookup.config_definitions.contains_key("api_key"), "api_key should be indexed from YAML");
@@ -77,8 +76,7 @@ fn test_config_linkage_json_and_dotenv() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "start", None).unwrap();
     let names: Vec<String> = related.iter()

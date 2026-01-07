@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::{resolution::{Indexer, pipeline::Pipeline}};
+use blast_radius_engine::resolution::Indexer;
 
 use crate::common::get_calls;
 
@@ -33,8 +33,7 @@ fn test_namespace_import_resolution() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // 3. Verification
     // We expect the 'runCalculation' symbol to have a resolved call to 'add'.
@@ -73,8 +72,7 @@ fn test_namespace_resolution_deep_scope() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     let start_id = indexer.lookup.symbol_map.get("start").unwrap()[0];
     let log_id = indexer.lookup.symbol_map.get("log").unwrap()[0];

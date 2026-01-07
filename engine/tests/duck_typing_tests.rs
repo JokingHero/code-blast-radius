@@ -1,6 +1,6 @@
 mod common;
 use common::{TestWorkspace, get_type_refs};
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 use blast_radius_engine::query::traversal::find_related_symbols;
 
 #[test]
@@ -36,8 +36,7 @@ fn test_polymorphism_and_specificity() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     let circle_id = indexer.lookup.symbol_map.get("Circle").unwrap()[0];
     let square_id = indexer.lookup.symbol_map.get("Square").unwrap()[0];
@@ -88,8 +87,7 @@ fn test_shared_interface_duck_typing() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     let run_id = indexer.lookup.symbol_map.get("run").unwrap()[0];
     let interface_id = indexer.lookup.symbol_map.get("ILogger").unwrap()[0];

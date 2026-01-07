@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::{Indexer};
 
 #[test]
 fn test_ts_dynamic_import_with_variable() {
@@ -24,15 +24,14 @@ fn test_ts_dynamic_import_with_variable() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     let loader_id = indexer.index.files.values()
-        .find(|f| f.path.contains("loader.ts"))
+        .find(|f| f.relative_path.contains("loader.ts"))
         .expect("loader.ts not found").id;
         
     let heavy_id = indexer.index.files.values()
-        .find(|f| f.path.contains("heavy.ts"))
+        .find(|f| f.relative_path.contains("heavy.ts"))
         .expect("heavy.ts not found").id;
 
     let deps = indexer.index.file_dependencies.get(&loader_id)
@@ -54,11 +53,10 @@ fn test_js_require_with_variable() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
-    let app_id = indexer.index.files.values().find(|f| f.path.contains("app.js")).unwrap().id;
-    let lib_id = indexer.index.files.values().find(|f| f.path.contains("lib.js")).unwrap().id;
+    let app_id = indexer.index.files.values().find(|f| f.relative_path.contains("app.js")).unwrap().id;
+    let lib_id = indexer.index.files.values().find(|f| f.relative_path.contains("lib.js")).unwrap().id;
 
     let deps = indexer.index.file_dependencies.get(&app_id).unwrap();
     assert!(deps.contains(&lib_id), "Variable-based require() should link files");
@@ -84,11 +82,10 @@ fn test_python_importlib_variable() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
-    let main_id = indexer.index.files.values().find(|f| f.path.contains("main.py")).unwrap().id;
-    let plugin_id = indexer.index.files.values().find(|f| f.path.contains("payment.py")).unwrap().id;
+    let main_id = indexer.index.files.values().find(|f| f.relative_path.contains("main.py")).unwrap().id;
+    let plugin_id = indexer.index.files.values().find(|f| f.relative_path.contains("payment.py")).unwrap().id;
 
     let deps = indexer.index.file_dependencies.get(&main_id)
         .expect("Main.py should have dependencies");
@@ -107,11 +104,10 @@ fn test_ts_dynamic_import_literal() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
-    let main_id = indexer.index.files.values().find(|f| f.path.contains("main.ts")).unwrap().id;
-    let utils_id = indexer.index.files.values().find(|f| f.path.contains("utils.ts")).unwrap().id;
+    let main_id = indexer.index.files.values().find(|f| f.relative_path.contains("main.ts")).unwrap().id;
+    let utils_id = indexer.index.files.values().find(|f| f.relative_path.contains("utils.ts")).unwrap().id;
 
     let deps = indexer.index.file_dependencies.get(&main_id).unwrap();
     assert!(deps.contains(&utils_id), "Literal dynamic import should link files");

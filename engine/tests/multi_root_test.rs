@@ -151,5 +151,5 @@ fn test_workspace_full_lifecycle() {
 
     // Assert: Config updated
     assert_eq!(manager.config.roots.len(), 1);
-    assert_eq!(manager.config.roots[0], fs::canonicalize(&root_core).unwrap());
+    assert_eq!(manager.config.roots[0].path, fs::canonicalize(&root_core).unwrap());
 }

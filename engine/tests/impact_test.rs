@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 
 #[test]
 fn test_file_impact_analysis() {
@@ -17,8 +17,7 @@ fn test_file_impact_analysis() {
     workspace.create_file("styles.css", "body { color: red; }");
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // 4. Run Impact Analysis on utils.ts
     let target = workspace.path.join("utils.ts");

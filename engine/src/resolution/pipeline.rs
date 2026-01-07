@@ -1,8 +1,6 @@
 use std::collections::HashMap;
-
-use crate::models::{
-    FileId, SymbolId, WorkspaceIndex, StagingArea, SymbolIndex, EdgeKind
-};
+use std::path::PathBuf;
+use crate::models::{ FileId, SymbolId, WorkspaceIndex, StagingArea, SymbolIndex, EdgeKind };
 use crate::analysis::language::LanguageConfig;
 use crate::resolution::resolvers;
 use crate::resolution::resolvers::add_edge;
@@ -11,12 +9,9 @@ use crate::resolution::scanner::FileScanner;
 use crate::resolution::Indexer;
 
 pub struct ResolutionPipeline {
-    // Internal state needed only during resolution
     cache: HashMap<(FileId, String), Option<SymbolId>>,
 }
 
-/// Pipeline is the orchestrator for scanning and resolution.
-/// It owns the scanner and the resolution pipeline, and manages the transient StagingArea.
 pub struct Pipeline {
     pub scanner: FileScanner,
     pub resolver: ResolutionPipeline,
@@ -29,32 +24,32 @@ impl Pipeline {
             resolver: ResolutionPipeline::new(),
         }
     }
+    pub fn hydrate_maps(
+        &self,
+        index: &WorkspaceIndex,
+        active_roots: &HashMap<String, PathBuf>
+    ) -> (HashMap<PathBuf, FileId>, HashMap<FileId, PathBuf>) {
+        let mut path_map = HashMap::new();
+        let mut id_map = HashMap::new();
 
-    pub fn run(&mut self, indexer: &mut Indexer, path: &std::path::Path) {
-        // 1. SCAN: Updates Index state for changed files only.
-        // Unchanged files remain untouched in indexer.index
-        self.scanner.scan(path, &mut indexer.index, &mut indexer.lookup);
-
-        // 2. HYDRATE: Rebuild StagingArea from the FULL Index (Changed + Unchanged files)
-        // This ensures the Resolvers see the complete picture.
-        let mut staging = self.hydrate_staging(&indexer.index);
-
-        // 3. RESOLVE: Rebuild the graph using the staged data
-        self.resolver.run(
-            &mut indexer.index,
-            &mut staging,
-            &mut indexer.lookup,
-            &self.scanner.configs
-        );
-        
-        indexer.build_reverse_graph();
+        for file_node in index.files.values() {
+            if let Some(root_path) = active_roots.get(&file_node.root_id) {
+                let relative_os = if cfg!(windows) {
+                    file_node.relative_path.replace('/', "\\")
+                } else {
+                    file_node.relative_path.clone()
+                };
+                let absolute_path = root_path.join(&relative_os);
+                path_map.insert(absolute_path.clone(), file_node.id);
+                id_map.insert(file_node.id, absolute_path);
+            }
+        }
+        (path_map, id_map)
     }
 
-    /// Reads the persisted Index and populates the transient StagingArea
     pub fn hydrate_staging(&self, index: &WorkspaceIndex) -> StagingArea {
         let mut staging = StagingArea::default();
 
-        // Hydrate from Files
         for file in index.files.values() {
             if !file.literals.is_empty() {
                 staging.raw_literals.insert(file.id, file.literals.clone());
@@ -64,7 +59,6 @@ impl Pipeline {
             }
         }
 
-        // Hydrate from Symbols
         for sym in index.symbols.values() {
             if !sym.calls.is_empty() {
                 staging.raw_calls.insert(sym.id, sym.calls.clone());
@@ -90,9 +84,13 @@ impl Pipeline {
             if !sym.fingerprints.is_empty() {
                 staging.fingerprints.insert(sym.id, sym.fingerprints.clone());
             }
-            
-            if sym.kind == crate::models::SymbolKind::Container || sym.kind == crate::models::SymbolKind::Module {
-                let children_names: std::collections::HashSet<String> = index.symbols.values()
+
+            if
+                sym.kind == crate::models::SymbolKind::Container ||
+                sym.kind == crate::models::SymbolKind::Module
+            {
+                let children_names: std::collections::HashSet<String> = index.symbols
+                    .values()
                     .filter(|s| s.parent_id == Some(sym.id))
                     .map(|s| s.name.clone())
                     .collect();
@@ -106,17 +104,18 @@ impl Pipeline {
         staging
     }
 
-    /// Perform only the scanning phase.
-    pub fn scan(&self, indexer: &mut Indexer, path: &std::path::Path) {
-        self.scanner.scan(path, &mut indexer.index, &mut indexer.lookup);
+    pub fn scan(&self, indexer: &mut Indexer, root_path: &std::path::Path, root_id: Option<&str>) {
+        self.scanner.scan(root_path, &mut indexer.index, &mut indexer.lookup, root_id);
     }
 
-    /// Perform only the resolution phase.
-    pub fn resolve(&mut self, indexer: &mut Indexer, staging: &mut StagingArea) {
+    pub fn resolve(&mut self, indexer: &mut Indexer, staging: &mut StagingArea, active_roots: &Vec<std::path::PathBuf> ) {
         self.resolver.run(
             &mut indexer.index,
             staging,
             &mut indexer.lookup,
+            &indexer.path_map,
+            &indexer.id_map,
+            active_roots,
             &self.scanner.configs
         );
         indexer.build_reverse_graph();
@@ -135,7 +134,9 @@ impl ResolutionPipeline {
         index: &mut WorkspaceIndex,
         staging: &mut StagingArea,
         lookup: &mut SymbolIndex,
-        // Remove &'static. It matches HashMap<String, LanguageConfig> now.
+        path_map: &HashMap<PathBuf, FileId>, 
+        id_map: &HashMap<FileId, PathBuf>,
+        active_roots: &Vec<std::path::PathBuf>,
         configs: &HashMap<String, LanguageConfig>
     ) {
         // Reset Graph State
@@ -148,12 +149,12 @@ impl ResolutionPipeline {
 
         // 1. Core imports and basic structure
         resolvers::standard::resolve_external_imports(index, lookup);
-        resolvers::state::resolve_decorators(index, staging, lookup, &mut self.cache);
+        resolvers::state::resolve_decorators(index, staging, lookup, path_map, id_map, active_roots, &mut self.cache);
         resolvers::frameworks::resolve_implicit_routes(index, staging, lookup);
-        resolvers::data::resolve_namespace_imports(index, staging, lookup);
+        resolvers::data::resolve_namespace_imports(index, staging, lookup, path_map, id_map, active_roots);
 
         // 2. Data and Literals
-        resolvers::data::resolve_literal_dependencies(index, staging, lookup);
+        resolvers::data::resolve_literal_dependencies(index, staging, lookup, path_map, id_map, active_roots);
         resolvers::data::resolve_shared_literals(index, staging, lookup);
         resolvers::state::resolve_pubsub_wildcards(index, staging, lookup, configs);
 
@@ -164,14 +165,47 @@ impl ResolutionPipeline {
         resolvers::inference::resolve_implicit_connections(index, staging, lookup);
 
         // 4. Frameworks & State
-        resolvers::frameworks::resolve_dependency_injection(index, staging, lookup, &mut self.cache, configs);
-        resolvers::standard::resolve_function_calls(index, staging, lookup, &mut self.cache);
+        resolvers::frameworks::resolve_dependency_injection(
+            index,
+            staging,
+            lookup,
+            path_map,
+            id_map,
+            active_roots,
+            &mut self.cache,
+            configs
+        ); // Updated
+        resolvers::standard::resolve_function_calls(
+            index,
+            staging,
+            lookup,
+            path_map,
+            id_map,
+            active_roots,
+            &mut self.cache
+        );
         resolvers::data::resolve_config_links(index, staging, lookup);
-        resolvers::standard::resolve_type_references(index, staging, lookup, &mut self.cache);
+        resolvers::standard::resolve_type_references(
+            index,
+            staging,
+            lookup,
+            path_map,
+            id_map,
+            active_roots,
+            &mut self.cache
+        );
         resolvers::data::resolve_database_references(index, staging);
-        resolvers::data::resolve_file_dependencies(index, lookup); 
+        resolvers::data::resolve_file_dependencies(index, lookup, path_map, id_map, active_roots);
         resolvers::state::resolve_state_management(index, staging);
-        resolvers::frameworks::resolve_middleware_injection(index, staging, lookup, &mut self.cache);
+        resolvers::frameworks::resolve_middleware_injection(
+            index,
+            staging,
+            lookup,
+            path_map,
+            id_map,
+            active_roots,
+            &mut self.cache
+        ); 
         resolvers::data::resolve_iac_links(index, staging, lookup);
     }
 

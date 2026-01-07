@@ -1,16 +1,25 @@
 use std::collections::HashMap;
-
-use crate::models::{ EXTERNAL_FILE_ID, EdgeKind, StagingArea, SymbolIndex, SymbolKind, SymbolNode, WorkspaceIndex };
-use crate::resolution::resolvers::{core, add_edge};
+use std::path::PathBuf;
+use crate::models::{
+    EXTERNAL_FILE_ID,
+    EdgeKind,
+    StagingArea,
+    SymbolIndex,
+    SymbolKind,
+    SymbolNode,
+    WorkspaceIndex,
+    FileId,
+};
+use crate::resolution::resolvers::{ core, add_edge };
 
 pub fn resolve_external_imports(index: &mut WorkspaceIndex, lookup: &mut SymbolIndex) {
     let mut new_symbols = Vec::new();
-    
     for (_file_id, imports) in &lookup.file_imports {
         for imp in imports {
-            if !imp.source.starts_with("./") &&
-               !imp.source.starts_with("../") &&
-               !imp.source.starts_with("/") 
+            if
+                !imp.source.starts_with("./") &&
+                !imp.source.starts_with("../") &&
+                !imp.source.starts_with("/")
             {
                 let pkg_name = imp.source.clone();
                 let sym_name = imp.alias.clone().unwrap_or(imp.name.clone());
@@ -65,23 +74,32 @@ pub fn resolve_function_calls(
     index: &mut WorkspaceIndex,
     staging: &StagingArea,
     lookup: &SymbolIndex,
+    path_map: &HashMap<PathBuf, FileId>,
+    id_map: &HashMap<FileId, PathBuf>,
+    active_roots: &Vec<std::path::PathBuf>,
     cache: &mut core::ResolutionCache
 ) {
-    // No cloning needed!
     for (caller_id, called_names) in &staging.raw_calls {
         let caller_file_id = index.symbols
             .get(caller_id)
             .map(|s| s.file_id)
             .unwrap_or(0);
-
         for name in called_names {
-            // 1. Try Resolve Single Call
-            let resolved_id = core::resolve_single_call(index, lookup, cache, caller_file_id, name);
+            // Pass path_map
+            let resolved_id = core::resolve_single_call(
+                index,
+                lookup,
+                path_map,
+                id_map,
+                active_roots,
+                cache,
+                caller_file_id,
+                name
+            );
 
             if let Some(target_id) = resolved_id {
                 add_edge(index, *caller_id, target_id, EdgeKind::Calls);
             } else {
-                // 2. Fallback: Symbol Map Lookup
                 if let Some(candidates) = lookup.symbol_map.get(name) {
                     for &candidate_id in candidates {
                         add_edge(index, *caller_id, candidate_id, EdgeKind::Calls);
@@ -96,6 +114,9 @@ pub fn resolve_type_references(
     index: &mut WorkspaceIndex,
     staging: &StagingArea,
     lookup: &SymbolIndex,
+    path_map: &HashMap<PathBuf, FileId>, 
+    id_map: &HashMap<FileId, PathBuf>, 
+    active_roots: &Vec<std::path::PathBuf>,
     cache: &mut core::ResolutionCache
 ) {
     for (caller_id, type_names) in &staging.raw_type_refs {
@@ -103,9 +124,17 @@ pub fn resolve_type_references(
             .get(caller_id)
             .map(|s| s.file_id)
             .unwrap_or(0);
-
         for type_name in type_names {
-            let resolved_id = core::resolve_single_call(index, lookup, cache, caller_file_id, type_name);
+            let resolved_id = core::resolve_single_call(
+                index,
+                lookup,
+                path_map,
+                id_map,
+                active_roots,
+                cache,
+                caller_file_id,
+                type_name
+            );
 
             if let Some(target_id) = resolved_id {
                 add_edge(index, *caller_id, target_id, EdgeKind::TypeReference);

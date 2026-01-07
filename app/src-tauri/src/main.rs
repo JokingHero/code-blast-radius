@@ -1,17 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
-use std::path::{Path, PathBuf};
+use std::path::{ PathBuf };
 use tokio::sync::RwLock;
-use tauri::{Manager, Emitter};
-
+use tauri::{ Manager, Emitter };
 // File Watching
-use notify::{RecommendedWatcher, RecursiveMode, Watcher, Event, EventKind};
+use notify::{ RecommendedWatcher, RecursiveMode, Watcher, Event, EventKind };
 use std::sync::Mutex;
 
 // Engine Imports
 use blast_radius_engine::workspace::WorkspaceManager;
 use blast_radius_engine::recipes::executor::RecipeExecutor;
-use blast_radius_engine::recipes::models::Recipe;
+use blast_radius_engine::recipes::models::{ Recipe, RecipeOperation };
 use blast_radius_engine::models::FileId; // u32
 use nucleo_matcher::{ Matcher, Config, Utf32String };
 
@@ -62,9 +60,10 @@ fn map_to_dto(manager: &WorkspaceManager) -> WorkspaceConfigDTO {
 
     WorkspaceConfigDTO {
         name: manager.config.name.clone(),
+        // Extract paths from RootConfig objects
         roots: manager.config.roots
             .iter()
-            .map(|p| p.to_string_lossy().to_string())
+            .map(|r| r.path.to_string_lossy().to_string())
             .collect(),
         mode,
     }
@@ -72,7 +71,7 @@ fn map_to_dto(manager: &WorkspaceManager) -> WorkspaceConfigDTO {
 
 fn setup_watcher(app: &tauri::AppHandle, roots: Vec<PathBuf>) -> Option<RecommendedWatcher> {
     let app_handle = app.clone();
-    
+
     let event_handler = move |res: notify::Result<Event>| {
         match res {
             Ok(event) => {
@@ -82,15 +81,15 @@ fn setup_watcher(app: &tauri::AppHandle, roots: Vec<PathBuf>) -> Option<Recommen
 
                 let is_relevant = event.paths.iter().any(|p| {
                     let path_str = p.to_string_lossy();
-                    !path_str.contains(".cblast") && 
-                    !path_str.contains(".git") &&
-                    !path_str.contains("node_modules")
+                    !path_str.contains(".cblast") &&
+                        !path_str.contains(".git") &&
+                        !path_str.contains("node_modules")
                 });
 
                 if is_relevant {
-                    let _ = app_handle.emit("workspace:dirty", ()); 
+                    let _ = app_handle.emit("workspace:dirty", ());
                 }
-            },
+            }
             Err(e) => eprintln!("Watch error: {:?}", e),
         }
     };
@@ -105,7 +104,41 @@ fn setup_watcher(app: &tauri::AppHandle, roots: Vec<PathBuf>) -> Option<Recommen
 
     Some(watcher)
 }
+/// Normalizes a Recipe received from the UI.
+/// The UI might send Absolute Paths (e.g. from Drag & Drop).
+/// This function looks them up in the path_map and converts them to relative_path globs
+/// to ensure the recipe works with the engine's Relative Path logic.
+fn normalize_recipe(manager: &WorkspaceManager, mut recipe: Recipe) -> Recipe {
+    for op in &mut recipe.operations {
+        match op {
+            RecipeOperation::AddFiles { pattern } | RecipeOperation::RemoveFiles { pattern } => {
+                // Check if pattern is an Absolute Path that exists in our index
+                let path_buf = PathBuf::from(&*pattern);
+                // We attempt to canonicalize if it exists to match the keys in path_map
+                // If it doesn't exist (e.g. deleted file), we rely on raw path lookup or leave as is
+                let lookup_path = if path_buf.exists() {
+                    std::fs::canonicalize(&path_buf).unwrap_or(path_buf)
+                } else {
+                    path_buf
+                };
 
+                if let Some(&id) = manager.indexer.path_map.get(&lookup_path) {
+                    // It's a known file! Retrieve its relative path.
+                    // We have to scan values because we don't have ID->Node map in O(1) inside this scope easily
+                    // Actually `index.files` is Key->Node. `index.files` values are nodes.
+                    if let Some(node) = manager.indexer.index.files.values().find(|f| f.id == id) {
+                        *pattern = node.relative_path.clone();
+                    }
+                } else {
+                    // Fallback: It might already be a relative glob (e.g. "src/**/*.ts")
+                    // Do nothing.
+                }
+            }
+            _ => {}
+        }
+    }
+    recipe
+}
 // --- Commands ---
 
 #[tauri::command]
@@ -130,7 +163,7 @@ async fn set_workspace(
     path: String,
     state: tauri::State<'_, AppState>,
     settings_state: tauri::State<'_, SettingsState>,
-    app_handle: tauri::AppHandle, 
+    app_handle: tauri::AppHandle
 ) -> Result<WorkspaceConfigDTO, String> {
     let target_path = PathBuf::from(&path);
 
@@ -140,15 +173,21 @@ async fn set_workspace(
     }
 
     let manager = if target_path.is_dir() {
+        // Ad-hoc mode
         WorkspaceManager::new_in_memory(vec![target_path]).map_err(|e| e.to_string())?
     } else {
+        // File-backed mode
         WorkspaceManager::from_file(target_path.clone()).map_err(|e| e.to_string())?
     };
 
     settings_state.update_recent(path.clone());
 
     let dto = map_to_dto(&manager);
-    let roots = manager.config.roots.clone();
+    // extract paths from RootConfig for watcher
+    let roots = manager.config.roots
+        .iter()
+        .map(|r| r.path.clone())
+        .collect();
 
     let mut guard = state.manager.write().await;
     *guard = Some(manager);
@@ -180,7 +219,7 @@ async fn save_current_workspace(
 async fn add_root_to_workspace(
     root_path: String,
     state: tauri::State<'_, AppState>,
-    app_handle: tauri::AppHandle,
+    app_handle: tauri::AppHandle
 ) -> Result<WorkspaceConfigDTO, String> {
     let mut guard = state.manager.write().await;
     let manager = guard.as_mut().ok_or("No active workspace")?;
@@ -195,9 +234,12 @@ async fn add_root_to_workspace(
     if manager.backing_file.is_some() {
         manager.save().map_err(|e| e.to_string())?;
     }
-    
+
     let dto = map_to_dto(manager);
-    let roots = manager.config.roots.clone();
+    let roots = manager.config.roots
+        .iter()
+        .map(|r| r.path.clone())
+        .collect();
 
     let mut watcher_guard = state.watcher.lock().unwrap();
     *watcher_guard = setup_watcher(&app_handle, roots);
@@ -209,7 +251,7 @@ async fn add_root_to_workspace(
 async fn remove_root_from_workspace(
     root_path: String,
     state: tauri::State<'_, AppState>,
-    app_handle: tauri::AppHandle,
+    app_handle: tauri::AppHandle
 ) -> Result<WorkspaceConfigDTO, String> {
     let mut guard = state.manager.write().await;
     let manager = guard.as_mut().ok_or("No active workspace")?;
@@ -222,7 +264,10 @@ async fn remove_root_from_workspace(
     }
 
     let dto = map_to_dto(manager);
-    let roots = manager.config.roots.clone();
+    let roots = manager.config.roots
+        .iter()
+        .map(|r| r.path.clone())
+        .collect();
 
     let mut watcher_guard = state.watcher.lock().unwrap();
     *watcher_guard = setup_watcher(&app_handle, roots);
@@ -252,7 +297,6 @@ async fn search_symbols(
     let guard = state.manager.read().await;
     let manager = guard.as_ref().ok_or("Workspace not loaded")?;
     let indexer = &manager.indexer;
-    let roots = &manager.config.roots;
 
     let mut matcher = Matcher::new(Config::DEFAULT);
     let mut results = Vec::new();
@@ -260,14 +304,17 @@ async fn search_symbols(
 
     // 1. Search Symbols
     for sym in indexer.index.symbols.values() {
-        if let Some(score) = matcher.fuzzy_match(
-            Utf32String::from(sym.name.as_str()).slice(..),
-            query_utf32.slice(..)
-        ) {
+        if
+            let Some(score) = matcher.fuzzy_match(
+                Utf32String::from(sym.name.as_str()).slice(..),
+                query_utf32.slice(..)
+            )
+        {
+            // Find Relative Path
             let file_path = indexer.index.files
                 .values()
                 .find(|f| f.id == sym.file_id)
-                .map(|f| f.path.clone())
+                .map(|f| f.relative_path.clone())
                 .unwrap_or_default();
 
             results.push(SearchResult {
@@ -279,26 +326,20 @@ async fn search_symbols(
         }
     }
 
-    // 2. Search Files
+    // 2. Search Files (Match against Relative Path)
     for file in indexer.index.files.values() {
-        let path_obj = Path::new(&file.path);
-        let mut display_name = file.path.clone();
+        let display_name = file.relative_path.clone();
 
-        for root in roots {
-            if let Ok(rel) = path_obj.strip_prefix(root) {
-                display_name = rel.to_string_lossy().replace('\\', "/");
-                break;
-            }
-        }
-
-        if let Some(score) = matcher.fuzzy_match(
-            Utf32String::from(display_name.as_str()).slice(..),
-            query_utf32.slice(..)
-        ) {
+        if
+            let Some(score) = matcher.fuzzy_match(
+                Utf32String::from(display_name.as_str()).slice(..),
+                query_utf32.slice(..)
+            )
+        {
             results.push(SearchResult {
-                name: display_name,
+                name: display_name.clone(),
                 kind: "File".to_string(),
-                path: file.path.clone(),
+                path: display_name,
                 score,
             });
         }
@@ -309,8 +350,6 @@ async fn search_symbols(
     Ok(results)
 }
 
-/// Runs the recipe but returns only metadata (file paths, lines).
-/// It discards the full file content to prevent UI freezes.
 #[tauri::command]
 async fn execute_recipe(
     recipe_json: serde_json::Value,
@@ -318,22 +357,23 @@ async fn execute_recipe(
 ) -> Result<String, String> {
     let guard = state.manager.read().await;
     let manager = guard.as_ref().ok_or("Workspace not loaded")?;
-    
-    let recipe: Recipe = serde_json
+    let mut recipe: Recipe = serde_json
         ::from_value(recipe_json)
         .map_err(|e| format!("Invalid recipe format: {}", e))?;
 
+    // Normalize paths (Abs -> Rel)
+    recipe = normalize_recipe(manager, recipe);
+
     let executor = RecipeExecutor::new(&manager.indexer);
-    
+
     // Metadata only!
-    let output = executor.execute_metadata(&recipe)
+    let output = executor
+        .execute_metadata(&recipe)
         .map_err(|e| format!("Execution failed: {}", e))?;
 
     serde_json::to_string(&output).map_err(|e| e.to_string())
 }
 
-/// Fetches the content of a single file, applying any transforms (skeletons)
-/// defined in the passed recipe context.
 #[tauri::command]
 async fn get_file_content(
     file_id: FileId,
@@ -342,10 +382,11 @@ async fn get_file_content(
 ) -> Result<String, String> {
     let guard = state.manager.read().await;
     let manager = guard.as_ref().ok_or("Workspace not loaded")?;
-
-    let recipe: Recipe = serde_json
+    let mut recipe: Recipe = serde_json
         ::from_value(recipe_json)
         .map_err(|e| format!("Invalid recipe format: {}", e))?;
+
+    recipe = normalize_recipe(manager, recipe);
 
     let executor = RecipeExecutor::new(&manager.indexer);
 
@@ -356,8 +397,6 @@ async fn get_file_content(
     }
 }
 
-/// Runs full execution on backend and returns the XML string.
-/// This offloads large string concatenation from the UI.
 #[tauri::command]
 async fn generate_xml_bundle(
     recipe_json: serde_json::Value,
@@ -365,16 +404,16 @@ async fn generate_xml_bundle(
 ) -> Result<String, String> {
     let guard = state.manager.read().await;
     let manager = guard.as_ref().ok_or("Workspace not loaded")?;
-
-    let recipe: Recipe = serde_json
+    let mut recipe: Recipe = serde_json
         ::from_value(recipe_json)
         .map_err(|e| format!("Invalid recipe format: {}", e))?;
 
+    recipe = normalize_recipe(manager, recipe);
+
     let executor = RecipeExecutor::new(&manager.indexer);
-    
+
     // Full content execution
-    let output = executor.execute_full(&recipe)
-        .map_err(|e| format!("Execution failed: {}", e))?;
+    let output = executor.execute_full(&recipe).map_err(|e| format!("Execution failed: {}", e))?;
 
     Ok(output.to_xml())
 }
@@ -383,7 +422,6 @@ async fn generate_xml_bundle(
 async fn get_saved_recipes(state: tauri::State<'_, AppState>) -> Result<Vec<Recipe>, String> {
     let guard = state.manager.read().await;
     let manager = guard.as_ref().ok_or("No active workspace")?;
-
     let recipes: Vec<Recipe> = manager.config.recipes.values().cloned().collect();
     Ok(recipes)
 }
@@ -395,10 +433,12 @@ async fn save_named_recipe(
 ) -> Result<(), String> {
     let mut guard = state.manager.write().await;
     let manager = guard.as_mut().ok_or("No active workspace")?;
-
-    let recipe: Recipe = serde_json
+    let mut recipe: Recipe = serde_json
         ::from_value(recipe_json)
         .map_err(|e| format!("Invalid recipe format: {}", e))?;
+
+    // Normalize before saving so the saved recipe is portable
+    recipe = normalize_recipe(manager, recipe);
 
     let name = recipe.name.clone();
     manager.config.recipes.insert(name, recipe);
@@ -417,7 +457,6 @@ async fn delete_named_recipe(
 ) -> Result<(), String> {
     let mut guard = state.manager.write().await;
     let manager = guard.as_mut().ok_or("No active workspace")?;
-
     if manager.config.recipes.remove(&name).is_some() {
         if manager.backing_file.is_some() {
             manager.save().map_err(|e| e.to_string())?;
@@ -428,7 +467,6 @@ async fn delete_named_recipe(
 }
 
 // --- Entry Point ---
-
 fn main() {
     tauri::Builder
         ::default()
@@ -458,7 +496,6 @@ fn main() {
                 get_saved_recipes,
                 save_named_recipe,
                 delete_named_recipe,
-                // New Optimized Commands
                 execute_recipe,
                 get_file_content,
                 generate_xml_bundle

@@ -85,7 +85,8 @@ pub fn escape_xml_content(input: &str) -> String {
 /// Used by CLI 'Radius' command which requires immediate full output.
 pub fn generate_context_output(
     index: &WorkspaceIndex, 
-    symbol_ids: &[u32]
+    symbol_ids: &[u32],
+    id_map: &HashMap<FileId, std::path::PathBuf> // Added
 ) -> ContextOutput<FileContent> {
     
     // 1. Identify Target
@@ -117,14 +118,20 @@ pub fn generate_context_output(
             None => continue,
         };
 
+        // Resolve absolute path from id_map
+        let abs_path = match id_map.get(&file_id) {
+            Some(p) => p,
+            None => continue, 
+        };
+
         // We must read the file here because this function returns ContextOutput<FileContent>
-        let source_code = match std::fs::read_to_string(&file_node.path) {
+        let source_code = match std::fs::read_to_string(abs_path) {
             Ok(s) => s,
             Err(_) => continue,
         };
 
         // Determine language from extension for metadata
-        let ext = std::path::Path::new(&file_node.path)
+        let ext = abs_path
             .extension()
             .and_then(|s| s.to_str())
             .unwrap_or("txt")
@@ -175,7 +182,7 @@ pub fn generate_context_output(
         // Construct the Split Object
         let metadata = FileContextMetadata {
             file_id: file_node.id,
-            path: file_node.path.clone(),
+            path: file_node.relative_path.clone(), // Use relative path for UI
             language: ext,
             is_test: file_node.is_test,
             relevant_lines: final_line_ranges,

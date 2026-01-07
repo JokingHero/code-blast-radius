@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 use nucleo_matcher::{Matcher, Config, Utf32String};
 
 #[test]
@@ -23,8 +23,7 @@ fn test_fuzzy_find_symbols_and_files() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     let mut matcher = Matcher::new(Config::DEFAULT);
     
@@ -42,8 +41,8 @@ fn test_fuzzy_find_symbols_and_files() {
 
         // Match Files
         for file in indexer.index.files.values() {
-            if let Some(score) = matcher.fuzzy_match(Utf32String::from(file.path.as_str()).slice(..), query_utf32.slice(..)) {
-                results.push((file.path.clone(), score));
+            if let Some(score) = matcher.fuzzy_match(Utf32String::from(file.relative_path.as_str()).slice(..), query_utf32.slice(..)) {
+                results.push((file.relative_path.clone(), score));
             }
         }
 
@@ -78,8 +77,7 @@ fn test_fuzzy_find_limit_and_sorting() {
     workspace.create_file("test.rs", "fn a1() {} fn a2() {} fn a3() {} fn b1() {}");
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     let mut matcher = Matcher::new(Config::DEFAULT);
     let query_utf32 = Utf32String::from("a");

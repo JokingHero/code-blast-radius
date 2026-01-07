@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 use blast_radius_engine::query::traversal::find_related_symbols;
 
 use crate::common::get_calls;
@@ -32,8 +32,7 @@ fn test_return_type_bridge_sniffing() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // Verification Logic:
     // Searching for "connect" should ideally find "startApp" as a related symbol 
@@ -73,8 +72,7 @@ fn test_explicit_type_sniffing() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     let write_ids = indexer.lookup.symbol_map.get("writeFile").expect("Should find 'writeFile'");
     let write_id = write_ids[0];
@@ -108,8 +106,7 @@ fn test_chained_inference_no_bloat() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // Ensure 'service' is NOT a symbol (no bloat)
     if let Some(ids) = indexer.lookup.symbol_map.get("service") {

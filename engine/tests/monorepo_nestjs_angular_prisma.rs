@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 use blast_radius_engine::query::traversal::find_related_symbols;
 
 #[test]
@@ -148,8 +148,7 @@ fn test_scenario_monorepo_nest_angular_prisma() {
     // ==========================================
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // ==========================================
     // 6. ASSERTIONS ( The Graph Integrity )
@@ -190,7 +189,7 @@ fn test_scenario_monorepo_nest_angular_prisma() {
     // but the definition should be in libs/shared/src/user.dto.ts
     let dto_def = dto_ids.iter().find(|&&id| {
         let fid = indexer.index.symbols[&id].file_id;
-        let path = &indexer.index.files.values().find(|f| f.id == fid).unwrap().path;
+        let path = &indexer.index.files.values().find(|f| f.id == fid).unwrap().relative_path;
         path.contains("libs/shared")
     }).expect("Should find UserDto definition in libs/shared");
 

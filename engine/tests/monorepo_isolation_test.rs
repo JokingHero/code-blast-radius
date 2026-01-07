@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 use blast_radius_engine::query::traversal::find_related_symbols;
 use std::collections::HashSet;
 
@@ -169,8 +169,7 @@ fn test_monorepo_vertical_isolation() {
     // 4. EXECUTION
     // ==========================================
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // We query the Frontend Component for Users
     let related_ids = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "UserProfileComponent", None)
@@ -195,13 +194,13 @@ fn test_monorepo_vertical_isolation() {
         
         let fid = sym.file_id;
         if let Some(file_node) = indexer.index.files.values().find(|f| f.id == fid) {
-            involved_file_paths.insert(file_node.path.clone());
+            involved_file_paths.insert(file_node.relative_path.clone());
 
             // Check if this file has dependencies (like HTML templates)
             if let Some(deps) = indexer.index.file_dependencies.get(&fid) {
                 for &dep_fid in deps {
                     if let Some(dep_node) = indexer.index.files.values().find(|f| f.id == dep_fid) {
-                        involved_file_paths.insert(dep_node.path.clone());
+                        involved_file_paths.insert(dep_node.relative_path.clone());
                     }
                 }
             }

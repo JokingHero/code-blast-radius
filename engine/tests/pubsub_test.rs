@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 
 #[test]
 fn test_pubsub_wildcards() {
@@ -30,13 +30,12 @@ fn test_pubsub_wildcards() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
-    let pub_id = indexer.index.files.values().find(|f| f.path.contains("publisher.ts")).unwrap().id;
-    let wild_id = indexer.index.files.values().find(|f| f.path.contains("sub_wildcard.ts")).unwrap().id;
-    let deep_id = indexer.index.files.values().find(|f| f.path.contains("sub_deep.ts")).unwrap().id;
-    let other_id = indexer.index.files.values().find(|f| f.path.contains("sub_other.ts")).unwrap().id;
+    let pub_id = indexer.index.files.values().find(|f| f.relative_path.contains("publisher.ts")).unwrap().id;
+    let wild_id = indexer.index.files.values().find(|f| f.relative_path.contains("sub_wildcard.ts")).unwrap().id;
+    let deep_id = indexer.index.files.values().find(|f| f.relative_path.contains("sub_deep.ts")).unwrap().id;
+    let other_id = indexer.index.files.values().find(|f| f.relative_path.contains("sub_other.ts")).unwrap().id;
 
     let pub_deps = indexer.index.file_dependencies.get(&pub_id).expect("Publisher should have deps");
 
@@ -63,11 +62,10 @@ fn test_slash_separator_wildcards() {
     workspace.create_file("monitor_wild.js", "mqtt.sub('home/*/temp')");
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
-    let sensor_id = indexer.index.files.values().find(|f| f.path.contains("sensor.js")).unwrap().id;
-    let mon_id = indexer.index.files.values().find(|f| f.path.contains("monitor_wild.js")).unwrap().id;
+    let sensor_id = indexer.index.files.values().find(|f| f.relative_path.contains("sensor.js")).unwrap().id;
+    let mon_id = indexer.index.files.values().find(|f| f.relative_path.contains("monitor_wild.js")).unwrap().id;
 
     let deps = indexer.index.file_dependencies.get(&sensor_id).expect("Deps found");
     assert!(deps.contains(&mon_id));

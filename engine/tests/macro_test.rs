@@ -28,8 +28,8 @@ fn test_rust_macro_definitions() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // Assert macro definition found
     assert!(indexer.lookup.symbol_map.contains_key("create_handler"));
@@ -52,7 +52,7 @@ fn test_rust_macro_definitions_with_visibility() {
 
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    pipeline.scan(&mut indexer, &workspace.path);
+    pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
 
     // Assert 'MyStruct' is found
     assert!(indexer.lookup.symbol_map.contains_key("MyStruct"), "Failed to extract MyStruct from 'pub MyStruct'");

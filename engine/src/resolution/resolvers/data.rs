@@ -1,17 +1,23 @@
 use std::collections::{ HashMap, HashSet };
-use crate::models::{ FileId, SymbolId, SymbolKind, EdgeKind, WorkspaceIndex, StagingArea, SymbolIndex };
-use crate::resolution::resolvers::{core, add_edge, link_modules, constants};
+use std::path::PathBuf;
+use crate::models::{
+    FileId,
+    SymbolId,
+    SymbolKind,
+    EdgeKind,
+    WorkspaceIndex,
+    StagingArea,
+    SymbolIndex,
+};
+use crate::resolution::resolvers::{ core, add_edge, link_modules, constants };
 
-pub fn resolve_database_references(
-    index: &mut WorkspaceIndex,
-    staging: &StagingArea,
-) {
+pub fn resolve_database_references(index: &mut WorkspaceIndex, staging: &StagingArea) {
     // 1. Build Schema Map
     let mut schema_map: HashMap<String, SymbolId> = HashMap::new();
     for (id, sym) in &index.symbols {
         let file_opt = index.files.values().find(|f| f.id == sym.file_id);
         if let Some(file) = file_opt {
-            if file.path.ends_with(".sql") || file.path.ends_with(".prisma") {
+            if file.relative_path.ends_with(".sql") || file.relative_path.ends_with(".prisma") {
                 schema_map.insert(sym.name.clone(), *id);
             }
         }
@@ -63,7 +69,11 @@ pub fn resolve_database_references(
     }
 }
 
-pub fn resolve_config_links(index: &mut WorkspaceIndex, staging: &StagingArea, lookup: &SymbolIndex) {
+pub fn resolve_config_links(
+    index: &mut WorkspaceIndex,
+    staging: &StagingArea,
+    lookup: &SymbolIndex
+) {
     let mut new_links = Vec::new();
     for (&sym_id, used_keys) in &staging.symbol_config_refs {
         for key in used_keys {
@@ -79,7 +89,13 @@ pub fn resolve_config_links(index: &mut WorkspaceIndex, staging: &StagingArea, l
     }
 }
 
-pub fn resolve_file_dependencies(index: &mut WorkspaceIndex, lookup: &SymbolIndex) {
+pub fn resolve_file_dependencies(
+    index: &mut WorkspaceIndex,
+    lookup: &SymbolIndex,
+    path_map: &HashMap<PathBuf, FileId>, 
+    id_map: &HashMap<FileId, PathBuf>,
+    active_roots: &Vec<std::path::PathBuf>,
+) {
     let mut file_to_module_sym: HashMap<FileId, SymbolId> = HashMap::new();
     for sym in index.symbols.values() {
         if sym.kind == SymbolKind::Module {
@@ -92,9 +108,25 @@ pub fn resolve_file_dependencies(index: &mut WorkspaceIndex, lookup: &SymbolInde
         let src_module_id = file_to_module_sym.get(file_id).cloned();
 
         for imp in imports {
-            if let Some(target_fid) = core::resolve_import_path(index, lookup, *file_id, &imp.source) {
+            // Pass path_map
+            if
+                let Some(target_fid) = core::resolve_import_path(
+                    index,
+                    lookup,
+                    path_map,
+                    id_map,
+                    active_roots,
+                    *file_id,
+                    &imp.source
+                )
+            {
                 deps.insert(target_fid);
-                if let (Some(src_id), Some(tgt_id)) = (src_module_id, file_to_module_sym.get(&target_fid)) {
+                if
+                    let (Some(src_id), Some(tgt_id)) = (
+                        src_module_id,
+                        file_to_module_sym.get(&target_fid),
+                    )
+                {
                     add_edge(index, src_id, *tgt_id, EdgeKind::Imports);
                 }
             }
@@ -105,13 +137,19 @@ pub fn resolve_file_dependencies(index: &mut WorkspaceIndex, lookup: &SymbolInde
     }
 }
 
-pub fn resolve_namespace_imports(index: &mut WorkspaceIndex, staging: &mut StagingArea, lookup: &SymbolIndex) {
+pub fn resolve_namespace_imports(
+    index: &mut WorkspaceIndex,
+    staging: &mut StagingArea,
+    lookup: &SymbolIndex,
+    path_map: &HashMap<PathBuf, FileId>,
+    id_map: &HashMap<FileId, PathBuf>,
+    active_roots: &Vec<std::path::PathBuf>
+) {
     let file_mod_map: HashMap<FileId, String> = index.symbols
         .values()
         .filter(|s| s.kind == SymbolKind::Module)
         .map(|s| (s.file_id, s.name.clone()))
         .collect();
-
     for (file_id, imports) in &lookup.file_imports {
         let mod_sym_id = index.symbols
             .values()
@@ -122,7 +160,17 @@ pub fn resolve_namespace_imports(index: &mut WorkspaceIndex, staging: &mut Stagi
             for imp in imports {
                 if imp.name == "*" {
                     if let Some(alias) = &imp.alias {
-                        if let Some(target_fid) = core::resolve_import_path(index, lookup, *file_id, &imp.source) {
+                        if
+                            let Some(target_fid) = core::resolve_import_path(
+                                index,
+                                lookup,
+                                path_map,
+                                id_map,
+                                active_roots,
+                                *file_id,
+                                &imp.source
+                            )
+                        {
                             if let Some(target_mod_name) = file_mod_map.get(&target_fid) {
                                 staging.local_variable_types
                                     .entry(scope_id)
@@ -137,28 +185,51 @@ pub fn resolve_namespace_imports(index: &mut WorkspaceIndex, staging: &mut Stagi
     }
 }
 
-pub fn resolve_literal_dependencies(index: &mut WorkspaceIndex, staging: &StagingArea, lookup: &SymbolIndex) {
+pub fn resolve_literal_dependencies(
+    index: &mut WorkspaceIndex,
+    staging: &StagingArea,
+    lookup: &SymbolIndex,
+    path_map: &HashMap<PathBuf, FileId>, 
+    id_map: &HashMap<FileId, PathBuf>,
+    active_roots: &Vec<std::path::PathBuf>
+) {
     let mut potential_links: Vec<(FileId, String)> = Vec::new();
     let config_file_ids: HashSet<FileId> = index.files
         .iter()
-        .filter(|(path, _)| {
-            let p = path.to_lowercase();
+        .filter(|(_, node)| {
+            let p = node.relative_path.to_lowercase();
             p.ends_with("json") || p.ends_with(".env")
         })
         .map(|(_, node)| node.id)
         .collect();
-
     for (file_id, literals) in &staging.raw_literals {
-        if config_file_ids.contains(file_id) { continue; }
+        if config_file_ids.contains(file_id) {
+            continue;
+        }
         for lit in literals {
-            if (lit.contains('/') || lit.contains('.')) && !lit.contains(' ') && !lit.contains('\n') && lit.len() > 3 {
+            if
+                (lit.contains('/') || lit.contains('.')) &&
+                !lit.contains(' ') &&
+                !lit.contains('\n') &&
+                lit.len() > 3
+            {
                 potential_links.push((*file_id, lit.clone()));
             }
         }
     }
 
     for (src_id, literal) in potential_links {
-        if let Some(target_id) = core::resolve_import_path(index, lookup, src_id, &literal) {
+        if
+            let Some(target_id) = core::resolve_import_path(
+                index,
+                lookup,
+                path_map,
+                id_map,
+                active_roots,
+                src_id,
+                &literal
+            )
+        {
             if src_id != target_id {
                 let deps = index.file_dependencies.entry(src_id).or_default();
                 if !deps.contains(&target_id) {
@@ -170,23 +241,34 @@ pub fn resolve_literal_dependencies(index: &mut WorkspaceIndex, staging: &Stagin
     }
 }
 
-pub fn resolve_shared_literals(index: &mut WorkspaceIndex, staging: &StagingArea, lookup: &SymbolIndex) {
+pub fn resolve_shared_literals(
+    index: &mut WorkspaceIndex,
+    staging: &StagingArea,
+    lookup: &SymbolIndex
+) {
     let mut literal_map: HashMap<String, Vec<FileId>> = HashMap::new();
     let config_file_ids: HashSet<FileId> = index.files
         .iter()
-        .filter(|(path, _)| {
-            let p = path.to_lowercase();
+        .filter(|(_, node)| {
+            let p = node.relative_path.to_lowercase();
             p.ends_with("json") || p.ends_with(".env")
         })
         .map(|(_, node)| node.id)
         .collect();
 
     for (file_id, literals) in &staging.raw_literals {
-        if config_file_ids.contains(file_id) { continue; }
+        if config_file_ids.contains(file_id) {
+            continue;
+        }
         for lit in literals {
-            if lit.starts_with("./") || lit.starts_with("../") || lit.starts_with("@") { continue; }
+            if lit.starts_with("./") || lit.starts_with("../") || lit.starts_with("@") {
+                continue;
+            }
             let is_route = lit.starts_with('/');
-            let is_long = lit.len() > 10 && !lit.contains(' ') && (lit.contains('_') || lit.contains('-') || lit.contains('.'));
+            let is_long =
+                lit.len() > 10 &&
+                !lit.contains(' ') &&
+                (lit.contains('_') || lit.contains('-') || lit.contains('.'));
 
             if (is_route || is_long) && lit.len() > 3 {
                 literal_map.entry(lit.clone()).or_default().push(*file_id);
@@ -195,16 +277,22 @@ pub fn resolve_shared_literals(index: &mut WorkspaceIndex, staging: &StagingArea
     }
 
     for (_lit, file_ids) in literal_map {
-        if file_ids.len() < 2 { continue; }
+        if file_ids.len() < 2 {
+            continue;
+        }
         for i in 0..file_ids.len() {
             for j in i + 1..file_ids.len() {
                 let id_a = file_ids[i];
                 let id_b = file_ids[j];
 
                 let deps_a = index.file_dependencies.entry(id_a).or_default();
-                if !deps_a.contains(&id_b) { deps_a.push(id_b); }
+                if !deps_a.contains(&id_b) {
+                    deps_a.push(id_b);
+                }
                 let deps_b = index.file_dependencies.entry(id_b).or_default();
-                if !deps_b.contains(&id_a) { deps_b.push(id_a); }
+                if !deps_b.contains(&id_a) {
+                    deps_b.push(id_a);
+                }
 
                 link_modules(index, lookup, id_a, id_b);
             }
@@ -220,9 +308,15 @@ pub fn resolve_iac_links(index: &mut WorkspaceIndex, staging: &StagingArea, look
         for lit in literals {
             let parts = lit.split(|c: char| !c.is_alphanumeric() && c != '_');
             for part in parts {
-                if part.len() > 3 && part.chars().all(|c| c.is_uppercase() || c.is_numeric() || c == '_') && part.contains('_') {
+                if
+                    part.len() > 3 &&
+                    part.chars().all(|c| c.is_uppercase() || c.is_numeric() || c == '_') &&
+                    part.contains('_')
+                {
                     let entry = env_var_definitions.entry(part.to_string()).or_default();
-                    if !entry.contains(file_id) { entry.push(*file_id); }
+                    if !entry.contains(file_id) {
+                        entry.push(*file_id);
+                    }
                 }
             }
         }
@@ -262,13 +356,17 @@ pub fn resolve_iac_links(index: &mut WorkspaceIndex, staging: &StagingArea, look
 
     for user_id in &aws_s3_users {
         for def_id in &s3_definers {
-            if user_id != def_id { new_file_links.push((*user_id, *def_id)); }
+            if user_id != def_id {
+                new_file_links.push((*user_id, *def_id));
+            }
         }
     }
 
     for (src, tgt) in new_file_links {
         let deps = index.file_dependencies.entry(src).or_default();
-        if !deps.contains(&tgt) { deps.push(tgt); }
+        if !deps.contains(&tgt) {
+            deps.push(tgt);
+        }
         link_modules(index, lookup, src, tgt);
     }
 }

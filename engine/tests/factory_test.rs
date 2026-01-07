@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 
 #[test]
 fn test_ts_factories() {
@@ -33,8 +33,7 @@ fn test_ts_factories() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     assert!(indexer.lookup.symbol_map.contains_key("useStore"), "Zustand create() pattern missed");
     assert!(indexer.lookup.symbol_map.contains_key("User"), "Mongoose model() pattern missed");

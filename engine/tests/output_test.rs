@@ -31,7 +31,15 @@ fn test_output_json_structure_and_merging() {
     // 2. Index the file
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    pipeline.scan(&mut indexer, &workspace.path);
+    // Scan with a default root ID
+    pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
+    
+    // Manual Hydration for Test Environment (Since we don't have WorkspaceManager here)
+    let mut active_roots = std::collections::HashMap::new();
+    active_roots.insert("root_1".to_string(), workspace.path.clone());
+    let (pm, im) = pipeline.hydrate_maps(&indexer.index, &active_roots);
+    indexer.path_map = pm;
+    indexer.id_map = im;
     
     // 3. Get Symbol IDs
     let id_a = indexer.lookup.symbol_map.get("funcA").expect("funcA missing")[0];
@@ -40,7 +48,7 @@ fn test_output_json_structure_and_merging() {
 
     // 4. Generate Output passing all 3 IDs
     let ids = vec![id_a, id_b, id_c];
-    let output = generate_context_output(&indexer.index, &ids);
+    let output = generate_context_output(&indexer.index, &ids, &indexer.id_map);
 
     // 5. Assertions
     
@@ -95,12 +103,19 @@ fn test_output_multi_file() {
 
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    pipeline.scan(&mut indexer, &workspace.path);
+    pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
+
+    // Manual Hydration
+    let mut active_roots = std::collections::HashMap::new();
+    active_roots.insert("root_1".to_string(), workspace.path.clone());
+    let (pm, im) = pipeline.hydrate_maps(&indexer.index, &active_roots);
+    indexer.path_map = pm;
+    indexer.id_map = im;
     
     let id_main = indexer.lookup.symbol_map.get("main").unwrap()[0];
     let id_help = indexer.lookup.symbol_map.get("help").unwrap()[0];
 
-    let output = generate_context_output(&indexer.index, &[id_main, id_help]);
+    let output = generate_context_output(&indexer.index, &[id_main, id_help], &indexer.id_map);
 
     assert_eq!(output.target, "main");
     assert_eq!(output.files.len(), 2, "Should return context for 2 files");

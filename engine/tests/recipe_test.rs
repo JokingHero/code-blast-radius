@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 use blast_radius_engine::recipes::executor::RecipeExecutor;
 use blast_radius_engine::recipes::models::{Recipe, RecipeOperation, FileTransform};
 use std::collections::HashMap;
@@ -16,8 +16,7 @@ fn test_recipe_globbing_and_filtering() {
     workspace.create_file("README.md", "# Hello");
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // 2. Define Recipe
     // Intent: Include all TS files, but exclude tests.
@@ -65,8 +64,7 @@ fn test_recipe_transformation_focus_mode() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // 2. Define Recipe with FocusOn
     let mut transforms = HashMap::new();
@@ -115,10 +113,9 @@ fn test_recipe_drift_safety() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
 
     // Initial Scan
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // 2. Modify File (Prepend lines to shift byte offsets)
     let new_content = r#"
@@ -129,7 +126,7 @@ fn test_recipe_drift_safety() {
     workspace.create_file(file_path, new_content);
 
     // 3. Re-scan (The Critical Step to Fix Drift)
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // 4. Execute Recipe
     let mut transforms = HashMap::new();

@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::{resolution::{Indexer, pipeline::Pipeline}};
+use blast_radius_engine::resolution::Indexer;
 
 #[test]
 fn test_tsconfig_path_alias() {
@@ -27,11 +27,14 @@ fn test_tsconfig_path_alias() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
-    let main_id = indexer.index.files.values().find(|f| f.path.contains("main.ts")).unwrap().id;
-    let math_id = indexer.index.files.values().find(|f| f.path.contains("math.ts")).unwrap().id;
+    let main_id = indexer.index.files.values()
+        .find(|f| f.relative_path.contains("main.ts"))
+        .unwrap().id;
+    let math_id = indexer.index.files.values()
+        .find(|f| f.relative_path.contains("math.ts"))
+        .unwrap().id;
 
     let deps = indexer.index.file_dependencies.get(&main_id).expect("Dependencies expected");
     
@@ -56,11 +59,14 @@ fn test_rust_crate_alias() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
-    let main_id = indexer.index.files.values().find(|f| f.path.contains("main.rs")).unwrap().id;
-    let helper_id = indexer.index.files.values().find(|f| f.path.contains("helper.rs")).unwrap().id;
+    let main_id = indexer.index.files.values()
+        .find(|f| f.relative_path.contains("main.rs"))
+        .unwrap().id;
+    let helper_id = indexer.index.files.values()
+        .find(|f| f.relative_path.contains("helper.rs"))
+        .unwrap().id;
 
     let deps = indexer.index.file_dependencies.get(&main_id).expect("Dependencies expected");
 
@@ -75,20 +81,20 @@ fn test_fuzzy_fallback_resolution() {
     workspace.create_file("src/nested/deep/logic.py", "def compute(): pass");
 
     // 2. Consumer (sloppy import)
-    // Python allows imports relative to PYTHONPATH. 
-    // If the tool doesn't know PYTHONPATH, it usually fails.
-    // Our fuzzy matcher should see "nested.deep.logic" and find "src/nested/deep/logic.py"
     workspace.create_file("app.py", r#"
         import nested.deep.logic
         nested.deep.logic.compute()
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
-    let app_id = indexer.index.files.values().find(|f| f.path.contains("app.py")).unwrap().id;
-    let logic_id = indexer.index.files.values().find(|f| f.path.contains("logic.py")).unwrap().id;
+    let app_id = indexer.index.files.values()
+        .find(|f| f.relative_path.contains("app.py"))
+        .unwrap().id;
+    let logic_id = indexer.index.files.values()
+        .find(|f| f.relative_path.contains("logic.py"))
+        .unwrap().id;
 
     let deps = indexer.index.file_dependencies.get(&app_id).expect("Dependencies expected");
 

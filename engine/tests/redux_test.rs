@@ -1,7 +1,7 @@
 mod common;
 use common::TestWorkspace;
 use blast_radius_engine::models::{EdgeKind}; // Removed StagingArea import
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::{Indexer};
 use blast_radius_engine::query::traversal::find_related_symbols;
 
 #[test]
@@ -37,10 +37,9 @@ fn test_redux_switch_case_linking() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
     
     // CHANGE: Use .run() to ensure Scan -> Hydrate -> Resolve flow
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // --- Assertions ---
 
@@ -105,10 +104,9 @@ fn test_redux_object_map_linking() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
     
     // CHANGE: Use .run() to ensure full pipeline execution including hydration
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     let saga_id = indexer.lookup.symbol_map.get("createTodoSaga").unwrap()[0];
 
@@ -129,7 +127,7 @@ fn test_redux_object_map_linking() {
 
     // 3. Verify linkage to the reducer file
     let reducer_file_id = indexer.index.files.values()
-        .find(|f| f.path.contains("todos.js"))
+        .find(|f| f.relative_path.contains("todos.js"))
         .expect("Reducer file should be indexed")
         .id;
 

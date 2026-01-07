@@ -17,11 +17,11 @@ fn test_path_based_test_detection() {
 
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    pipeline.scan(&mut indexer, &workspace.path);
+    pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
 
     // Verify FileNode flags
     let files = &indexer.index.files;
-    let find_file = |name: &str| files.values().find(|f| f.path.contains(name)).unwrap();
+    let find_file = |name: &str| files.values().find(|f| f.relative_path.contains(name)).unwrap();
 
     assert!(!find_file("src/auth.ts").is_test, "Production file should not be flagged as test");
     assert!(find_file("tests/login_test.ts").is_test, "Files in tests/ should be flagged");
@@ -54,7 +54,7 @@ fn test_inline_symbol_test_detection() {
 
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    pipeline.scan(&mut indexer, &workspace.path);
+    pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
 
     let get_sym = |name: &str| {
         let id = indexer.lookup.symbol_map.get(name).unwrap()[0];
@@ -90,20 +90,33 @@ fn test_context_filtering_logic() {
 
     let mut indexer = Indexer::new();
     let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    // Use explicit root ID
+    pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
+
+    // Manual Hydration
+    let mut active_roots = std::collections::HashMap::new();
+    active_roots.insert("root_1".to_string(), workspace.path.clone());
+    let (pm, im) = pipeline.hydrate_maps(&indexer.index, &active_roots);
+    indexer.path_map = pm;
+    indexer.id_map = im;
+
+    // Run resolution
+    let mut staging = pipeline.hydrate_staging(&indexer.index);
+    let root_paths = vec![workspace.path.clone()];
+    pipeline.resolve(&mut indexer, &mut staging, &root_paths);
 
     // 1. Find related symbols for "multiply"
     // This will find "multiply" (target) and "test_multiply" (upstream caller)
     let related_ids = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "multiply", None).expect("Should find symbols");
 
     // 2. Generate context WITH tests (default/false)
-    let context_with_tests = generate_context_from_ids(&indexer.index, &related_ids, true, false);
+    let context_with_tests = generate_context_from_ids(&indexer.index, &related_ids, &indexer.id_map, true, false);
     assert!(context_with_tests.contains("multiply"), "Should contain prod code");
     assert!(context_with_tests.contains("test_multiply"), "Should contain test code when not excluded");
     assert!(context_with_tests.contains("math.test.ts"), "Should show test file header");
 
     // 3. Generate context WITHOUT tests (true)
-    let context_no_tests = generate_context_from_ids(&indexer.index, &related_ids, true, true);
+    let context_no_tests = generate_context_from_ids(&indexer.index, &related_ids, &indexer.id_map, true, true);
     assert!(context_no_tests.contains("multiply"), "Should still contain prod code");
     assert!(!context_no_tests.contains("test_multiply"), "Should EXCLUDE test function");
     assert!(!context_no_tests.contains("math.test.ts"), "Should EXCLUDE test file header");
@@ -119,16 +132,16 @@ fn test_python_test_detection() {
 
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    pipeline.scan(&mut indexer, &workspace.path);
+    pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
     
     // Use stricter matching to ensure we don't accidentally grab "test_logic.py"
     // when looking for "logic.py"
     let prod_file = indexer.index.files.values()
-        .find(|f| f.path.ends_with("/logic.py") || f.path.ends_with("\\logic.py") || f.path == "logic.py")
+        .find(|f| f.relative_path.ends_with("/logic.py") || f.relative_path.ends_with("\\logic.py") || f.relative_path == "logic.py")
         .expect("Should find logic.py");
         
     let test_file = indexer.index.files.values()
-        .find(|f| f.path.contains("test_logic.py"))
+        .find(|f| f.relative_path.contains("test_logic.py"))
         .expect("Should find test_logic.py");
 
     assert!(!prod_file.is_test, "logic.py should NOT be flagged as a test");

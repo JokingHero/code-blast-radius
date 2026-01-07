@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 
 #[test]
 fn test_const_propagation_import() {
@@ -21,11 +21,10 @@ fn test_const_propagation_import() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
-    let main_id = indexer.index.files.values().find(|f| f.path.contains("main.ts")).unwrap().id;
-    let utils_id = indexer.index.files.values().find(|f| f.path.contains("utils.ts")).unwrap().id;
+    let main_id = indexer.index.files.values().find(|f| f.relative_path.contains("main.ts")).unwrap().id;
+    let utils_id = indexer.index.files.values().find(|f| f.relative_path.contains("utils.ts")).unwrap().id;
 
     // The indexer should have resolved LIB_PATH to "./utils" and linked the files
     let deps = indexer.index.file_dependencies.get(&main_id).expect("Should have dependencies");
@@ -49,11 +48,10 @@ fn test_const_propagation_shared_route() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
-    let server_id = indexer.index.files.values().find(|f| f.path.contains("server.py")).unwrap().id;
-    let client_id = indexer.index.files.values().find(|f| f.path.contains("client.ts")).unwrap().id;
+    let server_id = indexer.index.files.values().find(|f| f.relative_path.contains("server.py")).unwrap().id;
+    let client_id = indexer.index.files.values().find(|f| f.relative_path.contains("client.ts")).unwrap().id;
 
     let deps = indexer.index.file_dependencies.get(&client_id).expect("Client should link to server");
     assert!(deps.contains(&server_id), "Shared route should link files even when one uses a constant");
@@ -79,11 +77,10 @@ fn test_template_string_constant_propagation() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
-    let back_id = indexer.index.files.values().find(|f| f.path.contains("users.py")).unwrap().id;
-    let front_id = indexer.index.files.values().find(|f| f.path.contains("api.ts")).unwrap().id;
+    let back_id = indexer.index.files.values().find(|f| f.relative_path.contains("users.py")).unwrap().id;
+    let front_id = indexer.index.files.values().find(|f| f.relative_path.contains("api.ts")).unwrap().id;
 
     let deps = indexer.index.file_dependencies.get(&front_id).expect("Frontend should link to backend");
     assert!(deps.contains(&back_id), "Template string expansion failed to link to backend route");

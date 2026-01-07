@@ -14,7 +14,7 @@ fn test_ghost_data_removal() {
     {
         let mut indexer = Indexer::new();
         let pipeline = Pipeline::new();
-        pipeline.scan(&mut indexer, &workspace.path);
+        pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
         indexer.save(&index_file).unwrap();
         
         // Check symbol existence directly in index
@@ -27,7 +27,7 @@ fn test_ghost_data_removal() {
     {
         let mut indexer = Indexer::load_from_file(&index_file).unwrap();
         let pipeline = Pipeline::new();
-        pipeline.scan(&mut indexer, &workspace.path);
+        pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
         
         assert!(indexer.index.symbols.values().any(|f| f.name == "new_function"), "New function not found");
         assert!(!indexer.index.symbols.values().any(|f| f.name == "old_function"), "Ghost Data: old_function still exists after rename!");
@@ -39,7 +39,7 @@ fn test_ghost_data_removal() {
     {
         let mut indexer = Indexer::load_from_file(&index_file).unwrap();
         let pipeline = Pipeline::new();
-        pipeline.scan(&mut indexer, &workspace.path);
+        pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
         
         assert!(!indexer.index.symbols.values().any(|f| f.name == "new_function"), "Ghost Data: function still exists after file deletion!");
         assert!(indexer.index.symbols.is_empty(), "Graph should be empty");

@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 
 #[test]
 fn test_strategy_1_and_3_cli_path_linking() {
@@ -22,13 +22,12 @@ fn test_strategy_1_and_3_cli_path_linking() {
     workspace.create_file("raw_data.json", r#"{ "id": 100 }"#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // Helpers to get IDs
-    let sh_id = indexer.index.files.values().find(|f| f.path.contains("pipeline.sh")).unwrap().id;
-    let py_id = indexer.index.files.values().find(|f| f.path.contains("data_processor.py")).unwrap().id;
-    let json_id = indexer.index.files.values().find(|f| f.path.contains("raw_data.json")).unwrap().id;
+    let sh_id = indexer.index.files.values().find(|f| f.relative_path.contains("pipeline.sh")).unwrap().id;
+    let py_id = indexer.index.files.values().find(|f| f.relative_path.contains("data_processor.py")).unwrap().id;
+    let json_id = indexer.index.files.values().find(|f| f.relative_path.contains("raw_data.json")).unwrap().id;
 
     // Assertions
     let deps = indexer.index.file_dependencies.get(&sh_id).expect("Pipeline.sh should have dependencies");
@@ -50,11 +49,10 @@ fn test_strategy_1_config_file_loading() {
     workspace.create_file("config/settings.json", r#"{ "port": 8080 }"#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
-    let js_id = indexer.index.files.values().find(|f| f.path.contains("server.js")).unwrap().id;
-    let json_id = indexer.index.files.values().find(|f| f.path.contains("settings.json")).unwrap().id;
+    let js_id = indexer.index.files.values().find(|f| f.relative_path.contains("server.js")).unwrap().id;
+    let json_id = indexer.index.files.values().find(|f| f.relative_path.contains("settings.json")).unwrap().id;
 
     let deps = indexer.index.file_dependencies.get(&js_id).expect("Server.js should have dependencies");
     
@@ -78,12 +76,11 @@ fn test_strategy_2_shared_routes() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // --- Assertions for HTTP Route ---
-    let ts_id = indexer.index.files.values().find(|f| f.path.contains("api.ts")).unwrap().id;
-    let py_id = indexer.index.files.values().find(|f| f.path.contains("routes.py")).unwrap().id;
+    let ts_id = indexer.index.files.values().find(|f| f.relative_path.contains("api.ts")).unwrap().id;
+    let py_id = indexer.index.files.values().find(|f| f.relative_path.contains("routes.py")).unwrap().id;
     
     let ts_deps = indexer.index.file_dependencies.get(&ts_id).expect("Frontend should link to backend");
     assert!(ts_deps.contains(&py_id), "Files sharing HTTP route literal should be linked");
@@ -106,11 +103,10 @@ fn test_strategy_2_ipc_supported_langs() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
-    let js_id = indexer.index.files.values().find(|f| f.path.contains("producer.js")).unwrap().id;
-    let rs_id = indexer.index.files.values().find(|f| f.path.contains("consumer.rs")).unwrap().id;
+    let js_id = indexer.index.files.values().find(|f| f.relative_path.contains("producer.js")).unwrap().id;
+    let rs_id = indexer.index.files.values().find(|f| f.relative_path.contains("consumer.rs")).unwrap().id;
 
     let deps = indexer.index.file_dependencies.get(&js_id).expect("Producer should link to consumer");
     assert!(deps.contains(&rs_id), "Files sharing distinct IPC literal should be linked");

@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::{Indexer};
 use blast_radius_engine::query::traversal::find_related_symbols;
 use std::collections::HashSet;
 
@@ -23,8 +23,7 @@ fn test_name_collision() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     assert!(indexer.index.symbols.len() > 3, "Graph should contain more than 3 unique nodes");
 

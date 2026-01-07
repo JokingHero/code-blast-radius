@@ -26,7 +26,20 @@ fn test_typescript_call_chain() {
 
     let mut indexer = Indexer::new();
     let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    // Use explicit root ID
+    pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
+
+    // Manual Hydration
+    let mut active_roots = std::collections::HashMap::new();
+    active_roots.insert("root_1".to_string(), workspace.path.clone());
+    let (pm, im) = pipeline.hydrate_maps(&indexer.index, &active_roots);
+    indexer.path_map = pm;
+    indexer.id_map = im;
+
+    // Run resolution
+    let mut staging = pipeline.hydrate_staging(&indexer.index);
+    let root_paths = vec![workspace.path.clone()];
+    pipeline.resolve(&mut indexer, &mut staging, &root_paths);
 
     // Verify functions exist
     assert!(has_func(&indexer.index, "add"), "Function 'add' not found");
@@ -72,7 +85,7 @@ fn test_rust_docs_extraction() {
 
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    pipeline.scan(&mut indexer, &workspace.path);
+    pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
 
     let id = indexer.lookup.symbol_map.get("my_rust_func").unwrap()[0];
     let sym = indexer.index.symbols.get(&id).unwrap();
@@ -90,7 +103,7 @@ fn test_polyglot_folder() {
 
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    pipeline.scan(&mut indexer, &workspace.path);
+    pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
 
     assert!(has_func(&indexer.index, "py_func"));
     assert!(has_func(&indexer.index, "js_func"));

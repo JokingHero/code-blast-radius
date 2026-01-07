@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 use blast_radius_engine::query::traversal::find_related_symbols;
 
 #[test]
@@ -25,8 +25,7 @@ fn test_data_structure_dependency() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // Case 1: Search for the Function -> Should see the Type
     let related_func = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "sendEmail", None).unwrap();
@@ -64,8 +63,7 @@ def process_user(u: User) -> None:
 "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // 3. Search for 'process_user' -> Context should contain 'User'
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "process_user", None).expect("Should find symbol");

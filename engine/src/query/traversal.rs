@@ -168,6 +168,7 @@ pub fn find_related_symbols(
 pub fn generate_context_from_ids(
     index: &WorkspaceIndex,
     chain: &[SymbolId],
+    id_map: &HashMap<SymbolId, std::path::PathBuf>, // Added
     include_docs: bool,
     exclude_tests: bool
 ) -> String {
@@ -239,7 +240,7 @@ pub fn generate_context_from_ids(
                     context.push_str(
                         "// ==========================================================\n"
                     );
-                    context.push_str(&format!("// File: {}\n", file_node.path));
+                    context.push_str(&format!("// File: {}\n", file_node.relative_path));
                     if file_node.is_test {
                         context.push_str("// (Test File)\n");
                     }
@@ -256,19 +257,23 @@ pub fn generate_context_from_ids(
                     }
                 }
 
-                if let Ok(content) = std::fs::read_to_string(&file_node.path) {
-                    if sym.range_end <= content.len() {
-                        let text = String::from_utf8_lossy(
-                            &content.as_bytes()[sym.range_start..sym.range_end]
-                        );
-                        context.push_str(&text);
+                if let Some(abs_path) = id_map.get(&sym.file_id) {
+                    if let Ok(content) = std::fs::read_to_string(abs_path) {
+                        if sym.range_end <= content.len() {
+                            let text = String::from_utf8_lossy(
+                                &content.as_bytes()[sym.range_start..sym.range_end]
+                            );
+                            context.push_str(&text);
+                        } else {
+                            context.push_str(
+                                "// Error: Source range out of bounds for this file version"
+                            );
+                        }
                     } else {
-                        context.push_str(
-                            "// Error: Source range out of bounds for this file version"
-                        );
+                        context.push_str("// Error: Could not read source file from disk");
                     }
                 } else {
-                    context.push_str("// Error: Could not read source file from disk");
+                     context.push_str("// Error: File path not found in index map");
                 }
                 context.push_str("\n\n");
             }

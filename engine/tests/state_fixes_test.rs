@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 use blast_radius_engine::query::traversal::find_related_symbols;
 
 #[test]
@@ -33,8 +33,7 @@ fn test_redux_constant_propagation() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // 3. Verify linkage
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "doLogin", None).unwrap();
@@ -73,15 +72,14 @@ fn test_vuex_commit_support() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // 3. Verify linkage
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "increment", None).expect("...");
     
     // We expect to find the file where 'INCREMENT_COUNT' is handled.
     let store_file_id = indexer.index.files.values()
-        .find(|f| f.path.contains("store.js"))
+        .find(|f| f.relative_path.contains("store.js"))
         .unwrap().id;
 
     let linked_files: Vec<u32> = related.iter()
@@ -114,15 +112,14 @@ fn test_mixed_dispatch_variable() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     let related = find_related_symbols(&indexer.index, &indexer.lookup, &indexer.reverse_graph, "run", None).unwrap();
     
     // Check if we found the definition file in the related context
     let events_file_found = related.iter().any(|id| {
         let fid = indexer.index.symbols.get(id).unwrap().file_id;
-        let fpath = &indexer.index.files.get(&indexer.index.files.keys().find(|k| indexer.index.files[*k].id == fid).unwrap().clone()).unwrap().path;
+        let fpath = &indexer.index.files.get(&indexer.index.files.keys().find(|k| indexer.index.files[*k].id == fid).unwrap().clone()).unwrap().relative_path;
         fpath.contains("events.js")
     });
 

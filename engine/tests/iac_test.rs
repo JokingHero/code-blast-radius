@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 
 #[test]
 fn test_environment_bridge() {
@@ -34,13 +34,12 @@ fn test_environment_bridge() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     let js_id = indexer.index.files.values()
-        .find(|f| f.path.contains("uploader.js")).unwrap().id;
+        .find(|f| f.relative_path.contains("uploader.js")).unwrap().id;
     let tf_id = indexer.index.files.values()
-        .find(|f| f.path.contains("main.tf")).unwrap().id;
+        .find(|f| f.relative_path.contains("main.tf")).unwrap().id;
 
     let deps = indexer.index.file_dependencies.get(&js_id).expect("JS file should have deps");
     
@@ -67,13 +66,12 @@ fn test_cloud_resource_heuristic() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     let ts_id = indexer.index.files.values()
-        .find(|f| f.path.contains("storage.ts")).unwrap().id;
+        .find(|f| f.relative_path.contains("storage.ts")).unwrap().id;
     let tf_id = indexer.index.files.values()
-        .find(|f| f.path.contains("storage.tf")).unwrap().id;
+        .find(|f| f.relative_path.contains("storage.tf")).unwrap().id;
 
     let deps = indexer.index.file_dependencies.get(&ts_id).expect("TS file should have deps");
     

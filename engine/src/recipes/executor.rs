@@ -1,6 +1,6 @@
 use std::collections::{ HashMap, HashSet };
 use std::fs;
-use std::path::Path;
+
 use anyhow::{ Result, Context };
 use globset::{ Glob };
 
@@ -11,7 +11,6 @@ use crate::query::output::{ ContextOutput, FileContent, FileContextMetadata, Lin
 use crate::recipes::models::{ Recipe, RecipeOperation, FileTransform };
 use crate::models::{ SymbolKind, FileId };
 
-/// Internal struct to track text replacements
 #[derive(Debug, Clone)]
 struct RenderMask {
     start: usize,
@@ -34,22 +33,19 @@ impl<'a> RecipeExecutor<'a> {
         }
         Self { indexer, config_map }
     }
-
-    /// Executing for CLI/Export: Returns FULL content.
-    /// Used when we need the actual code (LLM Context, XML generation).
+    
     pub fn execute_full(&self, recipe: &Recipe) -> Result<ContextOutput<FileContent>> {
         let file_ids = self.resolve_files(&recipe.operations)?;
         let mut output_files = Vec::new();
 
         for file_id in file_ids {
             if let Some(file_node) = self.indexer.index.files.values().find(|f| f.id == file_id) {
-                let transform = self.resolve_transform(recipe, &file_node.path);
+                let transform = self.resolve_transform(recipe, &file_node.relative_path);
                 let file_content = self.process_file(file_node, transform)?;
                 output_files.push(file_content);
             }
         }
 
-        // Sort for deterministic output (by path)
         output_files.sort_by(|a, b| a.metadata.path.cmp(&b.metadata.path));
 
         Ok(ContextOutput {
@@ -58,19 +54,13 @@ impl<'a> RecipeExecutor<'a> {
         })
     }
 
-    /// Executing for GUI: Returns METADATA only.
-    /// This reads the files to calculate stats/lines but DISCARDS the heavy content string
-    /// to prevent freezing the UI during serialization.
     pub fn execute_metadata(&self, recipe: &Recipe) -> Result<ContextOutput<FileContextMetadata>> {
         let file_ids = self.resolve_files(&recipe.operations)?;
         let mut output_files = Vec::new();
 
         for file_id in file_ids {
             if let Some(file_node) = self.indexer.index.files.values().find(|f| f.id == file_id) {
-                let transform = self.resolve_transform(recipe, &file_node.path);
-                
-                // We process the file to apply skeletons/transforms so that line counts are accurate,
-                // but we extract ONLY the metadata to return.
+                let transform = self.resolve_transform(recipe, &file_node.relative_path);
                 let file_content = self.process_file(file_node, transform)?;
                 output_files.push(file_content.metadata);
             }
@@ -84,11 +74,9 @@ impl<'a> RecipeExecutor<'a> {
         })
     }
 
-    /// Lazy Load: Fetch content for a specific file ID within the context of a Recipe.
-    /// This ensures skeletons/transforms defined in the recipe are applied.
     pub fn get_file_content(&self, file_id: FileId, recipe: &Recipe) -> Result<Option<String>> {
         if let Some(file_node) = self.indexer.index.files.values().find(|f| f.id == file_id) {
-            let transform = self.resolve_transform(recipe, &file_node.path);
+            let transform = self.resolve_transform(recipe, &file_node.relative_path);
             let file_content = self.process_file(file_node, transform)?;
             Ok(Some(file_content.content))
         } else {
@@ -104,19 +92,23 @@ impl<'a> RecipeExecutor<'a> {
         for op in operations {
             match op {
                 RecipeOperation::AddFiles { pattern } => {
-                    let normalized_pattern = pattern.replace('\\', "/"); 
+                    // Pattern matching logic updated for Relative Paths
+                    // The user provides a glob pattern.
+                    // We match it against `FileNode.relative_path`.
+                    // Note: If the user provides an absolute path from drag-drop,
+                    // the GUI frontend must normalize it, OR we try to handle it here.
+                    // For robustness, we handle both:
+                    // 1. If pattern looks absolute, we convert it to relative if possible via path_map?
+                    //    No, path_map goes Abs->ID.
+                    //    Instead, we assume pattern is a Glob.
+                    //    If the user drags `C:\Project\src\main.rs`, the GUI should send `src/main.rs`.
+                    //    This is handled in Phase 5 (GUI). Here we assume Globs.
+
+                    let normalized_pattern = pattern.replace('\\', "/");
                     let matcher = Glob::new(&normalized_pattern)?.compile_matcher();
 
                     for file in self.indexer.index.files.values() {
-                        let path_str = file.path.as_str();
-                        
-                        // Remove Windows "\\?\" prefix if it exists
-                        let clean_start = if path_str.starts_with("\\\\?\\") { 4 } else { 0 };
-                        let clean_path = &path_str[clean_start..];
-
-                        let normalized_path = clean_path.replace('\\', "/");
-
-                        if matcher.is_match(&normalized_path) {
+                        if matcher.is_match(&file.relative_path) {
                             working_set.insert(file.id);
                         }
                     }
@@ -127,12 +119,12 @@ impl<'a> RecipeExecutor<'a> {
                     let to_remove: Vec<FileId> = working_set
                         .iter()
                         .filter(|&&fid| {
-                            if let Some(file) = self.indexer.index.files.values().find(|f| f.id == fid) {
-                                let path_str = file.path.as_str();
-                                let clean_start = if path_str.starts_with("\\\\?\\") { 4 } else { 0 };
-                                let clean_path = &path_str[clean_start..];
-                                let normalized_path = clean_path.replace('\\', "/");
-                                matcher.is_match(&normalized_path)
+                            if
+                                let Some(file) = self.indexer.index.files
+                                    .values()
+                                    .find(|f| f.id == fid)
+                            {
+                                matcher.is_match(&file.relative_path)
                             } else {
                                 false
                             }
@@ -157,11 +149,14 @@ impl<'a> RecipeExecutor<'a> {
                             depth_opt
                         );
                         found_ids = walker.walk_deep(ids);
-                    } 
-                    // B. Fallback: Check if 'symbol' is a File Path
-                    else {
-                        let matching_file_id = self.indexer.index.files.values()
-                            .find(|f| f.path == *symbol || f.path.ends_with(symbol))
+                    } else {
+                        // B. Fallback: Check if 'symbol' is a File Path (Relative)
+                        let matching_file_id = self.indexer.index.files
+                            .values()
+                            .find(
+                                |f|
+                                    f.relative_path == *symbol || f.relative_path.ends_with(symbol)
+                            )
                             .map(|f| f.id);
 
                         if let Some(fid) = matching_file_id {
@@ -200,12 +195,14 @@ impl<'a> RecipeExecutor<'a> {
 
     // --- PHASE 2: TRANSFORMATION ---
 
-    fn resolve_transform<'b>(&self, recipe: &'b Recipe, file_path: &str) -> Option<&'b FileTransform> {
+    fn resolve_transform<'b>(
+        &self,
+        recipe: &'b Recipe,
+        file_path: &str
+    ) -> Option<&'b FileTransform> {
         recipe.transforms
             .iter()
-            .find(|(path_key, _)| {
-                file_path.ends_with(*path_key) || file_path == **path_key
-            })
+            .find(|(path_key, _)| { file_path.ends_with(*path_key) || file_path == **path_key })
             .map(|(_, t)| t)
     }
 
@@ -214,12 +211,19 @@ impl<'a> RecipeExecutor<'a> {
         file_node: &crate::models::FileNode,
         transform: Option<&FileTransform>
     ) -> Result<FileContent> {
-        let raw_content = fs
-            ::read_to_string(&file_node.path)
-            .with_context(|| format!("Failed to read file: {}", file_node.path))?;
+        // We need Absolute Path to read the file.
+        // Use the id_map for O(1) lookup.
+        let absolute_path = self.indexer.id_map
+            .get(&file_node.id)
+            .ok_or_else(||
+                anyhow::anyhow!("File path not found in runtime map for ID {}", file_node.id)
+            )?;
 
-        // Metadata extraction
-        let ext = Path::new(&file_node.path)
+        let raw_content = fs
+            ::read_to_string(absolute_path)
+            .with_context(|| format!("Failed to read file: {:?}", absolute_path))?;
+
+        let ext = absolute_path
             .extension()
             .and_then(|s| s.to_str())
             .unwrap_or("txt")
@@ -232,14 +236,12 @@ impl<'a> RecipeExecutor<'a> {
             raw_content.clone()
         };
 
-        // Calculate line ranges
-        // Currently naive (entire file), but could be refined if partial inclusion is added later
         let line_count = final_content.lines().count();
         let relevant_lines = vec![LineRange { start: 1, end: line_count.max(1) }];
 
         let metadata = FileContextMetadata {
             file_id: file_node.id,
-            path: file_node.path.clone(),
+            path: file_node.relative_path.clone(), // Return relative path for UI cleanliness
             language: ext,
             is_test: file_node.is_test,
             relevant_lines,
@@ -273,7 +275,9 @@ impl<'a> RecipeExecutor<'a> {
         for sym in file_symbols {
             let body_start = match sym.body_start {
                 Some(bs) => bs,
-                None => continue,
+                None => {
+                    continue;
+                }
             };
 
             if body_start >= sym.range_end {

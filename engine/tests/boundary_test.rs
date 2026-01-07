@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::{Indexer};
 
 use crate::common::get_calls;
 
@@ -30,8 +30,7 @@ fn test_external_stub_generation() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // 4. Verify External Package Detection
     assert!(indexer.lookup.external_packages.contains("axios"), "Should detect axios in package.json");
@@ -64,8 +63,7 @@ fn test_ignore_file_respect() {
     workspace.create_file("node_modules/bad_lib.ts", "function hidden() {}");
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // Should find main.ts
     assert!(indexer.index.files.keys().any(|k| k.contains("src/main.ts")));

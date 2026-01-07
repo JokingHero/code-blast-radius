@@ -18,8 +18,8 @@ fn test_persistence_lifecycle() {
     // Run 1
     {
         let mut indexer = Indexer::new();
-        let mut pipeline = Pipeline::new();
-        pipeline.run(&mut indexer, &workspace.path);
+        
+        common::run_pipeline(&mut indexer, &workspace.path);
         indexer.save(&index_file).expect("Failed to save index");
     }
 
@@ -40,7 +40,7 @@ fn test_incremental_updates() {
     {
         let mut indexer = Indexer::new();
         let pipeline = Pipeline::new();
-        pipeline.scan(&mut indexer, &workspace.path);
+        pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
         indexer.save(&index_file).unwrap();
     }
 
@@ -56,7 +56,7 @@ fn test_incremental_updates() {
 
         // 2. Create a FRESH staging area for the update scan
         let pipeline = Pipeline::new();
-    pipeline.scan(&mut indexer, &workspace.path);
+    pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
 
         assert!(has_func(&indexer.index, "helper"), "Incremental scan missed new file");
         assert!(has_func(&indexer.index, "init_system_v2"), "Incremental scan missed modified function");

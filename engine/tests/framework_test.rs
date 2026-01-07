@@ -1,6 +1,6 @@
 mod common;
 use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::resolution::Indexer;
 
 #[test]
 fn test_nextjs_api_linking() {
@@ -21,15 +21,14 @@ fn test_nextjs_api_linking() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     let backend_id = indexer.index.files.values()
-        .find(|f| f.path.contains("pages/api/login.ts"))
+        .find(|f| f.relative_path.contains("pages/api/login.ts"))
         .unwrap().id;
     
     let frontend_id = indexer.index.files.values()
-        .find(|f| f.path.contains("LoginForm.tsx"))
+        .find(|f| f.relative_path.contains("LoginForm.tsx"))
         .unwrap().id;
 
     // Check File Dependencies

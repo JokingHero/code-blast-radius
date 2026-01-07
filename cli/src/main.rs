@@ -222,7 +222,7 @@ fn run() -> Result<()> {
             
             // Step A: Check if input is a File Path
             let matching_file_id = indexer.index.files.values()
-                .find(|f| f.path.ends_with(symbol) || f.path == *symbol)
+                .find(|f| f.relative_path.ends_with(symbol) || f.relative_path == *symbol)
                 .map(|f| f.id);
 
             let mut start_ids = Vec::new();
@@ -258,7 +258,7 @@ fn run() -> Result<()> {
             }
 
             // Radius command always uses full content output
-            let output = generate_context_output(&indexer.index, &related_ids);
+            let output = generate_context_output(&indexer.index, &related_ids, &indexer.id_map);
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
 
@@ -273,7 +273,7 @@ fn run() -> Result<()> {
                 if let Some(score) = matcher.fuzzy_match(Utf32String::from(sym.name.as_str()).slice(..), query_utf32.slice(..)) {
                     let file_path = indexer.index.files.values()
                         .find(|f| f.id == sym.file_id)
-                        .map(|f| f.path.as_str())
+                        .map(|f| f.relative_path.as_str())
                         .unwrap_or("unknown");
 
                     results.push(MatchResult {
@@ -286,11 +286,11 @@ fn run() -> Result<()> {
             }
 
             for file in indexer.index.files.values() {
-                if let Some(score) = matcher.fuzzy_match(Utf32String::from(file.path.as_str()).slice(..), query_utf32.slice(..)) {
+                if let Some(score) = matcher.fuzzy_match(Utf32String::from(file.relative_path.as_str()).slice(..), query_utf32.slice(..)) {
                     results.push(MatchResult {
-                        name: file.path.clone(),
+                        name: file.relative_path.clone(),
                         kind: "File".to_string(),
-                        path: file.path.clone(),
+                        path: file.relative_path.clone(),
                         score,
                     });
                 }

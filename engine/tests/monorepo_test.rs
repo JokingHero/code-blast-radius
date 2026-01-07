@@ -28,8 +28,8 @@ fn test_monorepo_package_subpath_resolution() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    
+    common::run_pipeline(&mut indexer, &workspace.path);
 
     // --- Assertions ---
 
@@ -40,11 +40,11 @@ fn test_monorepo_package_subpath_resolution() {
 
     // 2. Verify File Dependency Linkage
     let app_id = indexer.index.files.values()
-        .find(|f| f.path.contains("App.tsx"))
+        .find(|f| f.relative_path.contains("App.tsx"))
         .expect("App.tsx not found").id;
 
     let button_id = indexer.index.files.values()
-        .find(|f| f.path.contains("Button.ts"))
+        .find(|f| f.relative_path.contains("Button.ts"))
         .expect("Button.ts not found").id;
 
     let deps = indexer.index.file_dependencies.get(&app_id).expect("App should have dependencies");
@@ -69,11 +69,11 @@ fn test_monorepo_package_root_resolution() {
     "#);
 
     let mut indexer = Indexer::new();
-    let mut pipeline = Pipeline::new();
-    pipeline.run(&mut indexer, &workspace.path);
+    
+    common::run_pipeline(&mut indexer, &workspace.path);
 
-    let server_id = indexer.index.files.values().find(|f| f.path.contains("server.ts")).unwrap().id;
-    let index_id = indexer.index.files.values().find(|f| f.path.contains("index.ts")).unwrap().id;
+    let server_id = indexer.index.files.values().find(|f| f.relative_path.contains("server.ts")).unwrap().id;
+    let index_id = indexer.index.files.values().find(|f| f.relative_path.contains("index.ts")).unwrap().id;
 
     let deps = indexer.index.file_dependencies.get(&server_id).unwrap();
     assert!(deps.contains(&index_id), "Importing '@my-org/core' should resolve to 'libs/core/index.ts'");
@@ -95,7 +95,7 @@ fn test_cargo_workspace_mapping() {
     // 2. Run scan
     let mut indexer = Indexer::new();
     let pipeline = Pipeline::new();
-    pipeline.scan(&mut indexer, &workspace.path);
+    pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
     
     // 3. Verify Mapping
     // We mainly want to ensure the logic in manifest.rs correctly extracted the name

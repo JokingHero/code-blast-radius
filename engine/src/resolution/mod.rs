@@ -4,12 +4,9 @@ pub mod resolvers;
 pub mod scanner;
 pub mod pipeline;
 
-use crate::models::{
-    Edge, EdgeKind, SymbolId, WorkspaceIndex, SymbolIndex
-};
+use crate::models::{ Edge, EdgeKind, SymbolId, WorkspaceIndex, SymbolIndex, FileId };
 use crate::resolution::persistence::PersistenceManager;
-
-use std::path::Path;
+use std::path::{ Path, PathBuf };
 use std::collections::HashMap;
 
 pub struct Indexer {
@@ -17,15 +14,19 @@ pub struct Indexer {
     pub index: WorkspaceIndex,
     // The Lookups (Rebuildable)
     pub lookup: SymbolIndex,
-    
     // Runtime-only Reverse Graph (Target -> [Sources])
     pub reverse_graph: HashMap<SymbolId, Vec<Edge>>,
+
+    // Transient map for O(1) lookup of Absolute Paths to File IDs.
+    pub path_map: HashMap<PathBuf, FileId>,
+    
+    // Reverse map for O(1) lookup of File ID to Absolute Path.
+    pub id_map: HashMap<FileId, PathBuf>,
 }
 
 impl Indexer {
     pub fn new() -> Self {
         let mut index = WorkspaceIndex::default();
-        
         //Start IDs at 1 to reserve 0 for EXTERNAL_FILE_ID
         index.next_file_id = 1;
         index.next_symbol_id = 1;
@@ -34,6 +35,8 @@ impl Indexer {
             index,
             lookup: SymbolIndex::default(),
             reverse_graph: HashMap::new(),
+            path_map: HashMap::new(),
+            id_map: HashMap::new(),
         }
     }
 
@@ -55,15 +58,14 @@ impl Indexer {
 
     fn rebuild_derived_indices(&mut self) {
         self.lookup.symbol_map.clear();
-        self.lookup.file_to_module.clear(); // Clear new map
+        self.lookup.file_to_module.clear();
 
         for sym in self.index.symbols.values() {
-             self.lookup.symbol_map.entry(sym.name.clone()).or_default().push(sym.id);
-             
-             // Populate Bridge
-             if sym.kind == crate::models::SymbolKind::Module {
-                 self.lookup.file_to_module.insert(sym.file_id, sym.id);
-             }
+            self.lookup.symbol_map.entry(sym.name.clone()).or_default().push(sym.id);
+
+            if sym.kind == crate::models::SymbolKind::Module {
+                self.lookup.file_to_module.insert(sym.file_id, sym.id);
+            }
         }
 
         self.lookup.file_imports = self.index.file_imports.clone();
@@ -71,7 +73,6 @@ impl Indexer {
         self.build_reverse_graph();
     }
 
-    // Helper for manual edge addition (mostly used by tests/scanners)
     pub fn add_edge(&mut self, source: SymbolId, target: SymbolId, kind: EdgeKind) {
         crate::resolution::resolvers::add_edge(&mut self.index, source, target, kind);
     }
@@ -88,39 +89,42 @@ impl Indexer {
         }
     }
 
-
     pub fn get_impacted_files(&self, target_path: &Path) -> Vec<String> {
-        let target_key = utils::to_index_path(target_path);
-        let target_id = match self.index.files.get(&target_key) {
-            Some(node) => node.id, None => return vec![],
+        // Note: target_path from test might be relative or absolute.
+        // We canonicalize it to match path_map keys.
+        let abs_target = std::fs::canonicalize(target_path).unwrap_or(target_path.to_path_buf());
+        
+        let target_id = match self.path_map.get(&abs_target) {
+            Some(&id) => id,
+            None => return vec![],
         };
+
         let mut impacted_paths = Vec::new();
         for (&source_file_id, dependencies) in &self.index.file_dependencies {
             if dependencies.contains(&target_id) {
                 if let Some(source_node) = self.index.files.values().find(|f| f.id == source_file_id) {
-                    impacted_paths.push(source_node.path.clone());
+                    impacted_paths.push(source_node.relative_path.clone());
                 }
             }
         }
         impacted_paths
     }
 
-    pub fn remove_root(&mut self, root_path: &Path) {
-        let root_str = utils::to_index_path(root_path);
-        
+    pub fn remove_root(&mut self, root_id: &str) {
         // 1. Remove from roots list
-        self.index.roots.retain(|r| *r != root_str);
+        self.index.roots.retain(|r| *r != root_id);
 
-        // 2. Identify files to remove
-        let paths_to_remove: Vec<String> = self.index.files.values()
-            .filter(|f| f.path.starts_with(&root_str))
-            .map(|f| f.path.clone())
+        // 2. Identify files to remove based on root_id field
+        let keys_to_remove: Vec<String> = self.index.files
+            .iter()
+            .filter(|(_, node)| node.root_id == root_id)
+            .map(|(k, _)| k.clone())
             .collect();
 
-        // 3. Remove them (This reuses your existing internal cleanup logic)
+        // 3. Remove them
         let scanner = crate::resolution::scanner::FileScanner::new();
-        for path in paths_to_remove {
-            scanner.remove_file(&path, &mut self.index, &mut self.lookup);
+        for key in keys_to_remove {
+            scanner.remove_file(&key, &mut self.index, &mut self.lookup);
         }
     }
 }
