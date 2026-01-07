@@ -29,14 +29,16 @@ fn test_recipe_globbing_and_filtering() {
             RecipeOperation::AddFiles { pattern: "**/*.ts".to_string() },
             RecipeOperation::RemoveFiles { pattern: "**/*.test.ts".to_string() },
         ],
-        transforms: HashMap::new(),
+        transforms: HashMap::new()
     };
 
     let executor = RecipeExecutor::new(&indexer);
-    let output = executor.execute(&recipe).expect("Execution failed");
+    // FIX: Use execute_full() to get content
+    let output = executor.execute_full(&recipe).expect("Execution failed");
 
     // 3. Assertions
-    let paths: Vec<String> = output.files.iter().map(|f| f.path.clone()).collect();
+    // FIX: Access path via metadata
+    let paths: Vec<String> = output.files.iter().map(|f| f.metadata.path.clone()).collect();
     
     // Should match
     assert!(paths.iter().any(|p| p.ends_with("src/auth.ts")), "Should include auth.ts");
@@ -76,16 +78,17 @@ fn test_recipe_transformation_focus_mode() {
         operations: vec![
             RecipeOperation::AddFiles { pattern: "**/logic.ts".to_string() },
         ],
-        transforms,
+        transforms
     };
 
     let executor = RecipeExecutor::new(&indexer);
-    let output = executor.execute(&recipe).expect("Execution failed");
+    // FIX: Use execute_full()
+    let output = executor.execute_full(&recipe).expect("Execution failed");
 
     assert!(!output.files.is_empty(), "Recipe matched no files. Check glob pattern.");
 
     let file_ctx = &output.files[0];
-    let content = &file_ctx.content;
+    let content = &file_ctx.content; // Content is directly on FileContent
 
     // 3. Assertions
 
@@ -138,11 +141,12 @@ fn test_recipe_drift_safety() {
         operations: vec![
             RecipeOperation::AddFiles { pattern: "**/*.ts".to_string() },
         ],
-        transforms,
+        transforms
     };
 
     let executor = RecipeExecutor::new(&indexer);
-    let output = executor.execute(&recipe).expect("Execution failed");
+    // FIX: Use execute_full()
+    let output = executor.execute_full(&recipe).expect("Execution failed");
 
     assert!(!output.files.is_empty(), "Recipe matched no files.");
     let content = &output.files[0].content;

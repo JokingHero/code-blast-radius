@@ -1,22 +1,57 @@
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use crate::models::{WorkspaceIndex, FileId};
 use std::collections::HashMap;
 
-#[derive(Serialize)]
-pub struct ContextOutput {
+/// Generic container for context results. 
+/// T can be `FileContextMetadata` (for GUI lists) or `FileContent` (for CLI/Export).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ContextOutput<T> {
     pub target: String,
-    pub files: Vec<FileContext>,
+    pub files: Vec<T>,
 }
 
-impl ContextOutput {
+/// Lightweight metadata used for UI lists and lazy loading.
+/// Does not contain the full file string.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FileContextMetadata {
+    pub file_id: FileId, // Added for efficient lazy-loading lookup
+    pub path: String,
+    pub language: String,
+    pub is_test: bool,
+    pub relevant_lines: Vec<LineRange>,
+}
+
+/// Heavyweight struct containing the actual source code.
+/// Flattens metadata during serialization to maintain JSON compatibility.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FileContent {
+    #[serde(flatten)]
+    pub metadata: FileContextMetadata,
+    pub content: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LineRange {
+    pub start: usize, // 1-based
+    pub end: usize,
+}
+
+// Internal helper for range calculation
+struct RawByteRange {
+    start: usize,
+    end: usize,
+}
+
+// XML generation is only possible if we have the content
+impl ContextOutput<FileContent> {
     pub fn to_xml(&self) -> String {
         let mut xml = String::from("<documents>\n");
         
         for file in &self.files {
             xml.push_str(&format!(
                 "  <document path=\"{}\" language=\"{}\">\n",
-                escape_xml_attribute(&file.path),
-                escape_xml_attribute(&file.language)
+                escape_xml_attribute(&file.metadata.path),
+                escape_xml_attribute(&file.metadata.language)
             ));
             
             xml.push_str("    <source_code>\n");
@@ -31,7 +66,7 @@ impl ContextOutput {
     }
 }
 
-fn escape_xml_attribute(input: &str) -> String {
+pub fn escape_xml_attribute(input: &str) -> String {
     input.replace('&', "&amp;")
          .replace('<', "&lt;")
          .replace('>', "&gt;")
@@ -39,38 +74,20 @@ fn escape_xml_attribute(input: &str) -> String {
          .replace('\'', "&apos;")
 }
 
-fn escape_xml_content(input: &str) -> String {
+pub fn escape_xml_content(input: &str) -> String {
     // For content, quotes don't strictly need escaping, but <, >, & do.
     input.replace('&', "&amp;")
          .replace('<', "&lt;")
          .replace('>', "&gt;")
 }
 
-#[derive(Serialize)]
-pub struct FileContext {
-    pub path: String,
-    pub language: String,
-    pub is_test: bool,
-    pub relevant_lines: Vec<LineRange>,
-    pub content: String,
-}
-
-#[derive(Serialize)]
-pub struct LineRange {
-    pub start: usize, // 1-based
-    pub end: usize,
-}
-
-struct RawByteRange {
-    start: usize,
-    end: usize,
-}
-
+/// Generates the full output (Metadata + Content).
+/// Used by CLI 'Radius' command which requires immediate full output.
 pub fn generate_context_output(
     index: &WorkspaceIndex, 
     symbol_ids: &[u32]
-) -> ContextOutput {
-    // ... (Existing implementation remains unchanged)
+) -> ContextOutput<FileContent> {
+    
     // 1. Identify Target
     let mut target_name = "Unknown".to_string();
     if let Some(first) = symbol_ids.first() {
@@ -100,6 +117,7 @@ pub fn generate_context_output(
             None => continue,
         };
 
+        // We must read the file here because this function returns ContextOutput<FileContent>
         let source_code = match std::fs::read_to_string(&file_node.path) {
             Ok(s) => s,
             Err(_) => continue,
@@ -154,14 +172,23 @@ pub fn generate_context_output(
             });
         }
 
-        output_files.push(FileContext {
+        // Construct the Split Object
+        let metadata = FileContextMetadata {
+            file_id: file_node.id,
             path: file_node.path.clone(),
             language: ext,
             is_test: file_node.is_test,
             relevant_lines: final_line_ranges,
+        };
+
+        output_files.push(FileContent {
+            metadata,
             content: source_code,
         });
     }
+
+    // Sort by path for deterministic output
+    output_files.sort_by(|a, b| a.metadata.path.cmp(&b.metadata.path));
 
     ContextOutput {
         target: target_name,

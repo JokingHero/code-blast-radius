@@ -10,7 +10,6 @@ import { useWorkspace } from "./workspace.store";
 interface RecipeState {
   steps: UiRecipeStep[];
   savedRecipes: SavedRecipe[];
-  // viewMode removed
   isExecuting: boolean;
   activeRecipeName: string | null;
   isDirty: boolean;
@@ -25,7 +24,12 @@ const [state, setState] = createStore<RecipeState>({
 });
 
 export const useRecipe = () => {
-  const { setContextFiles, setLoading } = useWorkspace();
+  const { 
+    state: workspaceState, 
+    setContextFiles, 
+    setLoading, 
+    refreshWorkspace 
+  } = useWorkspace();
 
   const markDirty = () => setState("isDirty", true);
 
@@ -125,6 +129,11 @@ export const useRecipe = () => {
       setContextFiles([]);
       return;
     }
+
+    if (workspaceState.isDirty) {
+      await refreshWorkspace();
+    }
+
     setState("isExecuting", true);
 
     const payload: EngineRecipe = {

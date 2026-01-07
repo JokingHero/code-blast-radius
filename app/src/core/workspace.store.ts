@@ -6,11 +6,12 @@ import { listen } from "@tauri-apps/api/event";
 // --- Types ---
 
 export interface ContextFile {
+  file_id: number;
   path: string;
   language: string;
-  content: string;
   is_test: boolean;
   relevant_lines: { start: number; end: number }[];
+  content?: string | null; 
 }
 
 export interface WorkspaceConfig {
@@ -57,11 +58,9 @@ export const useWorkspace = () => {
   // --- Event Listeners ---
 
   const setupListeners = async () => {
-    // Listen for file watcher events from Rust
     await listen("workspace:dirty", () => {
         // Prevent unnecessary state updates if already dirty
-        if (!state.isDirty) {
-            console.log("[Workspace] File changes detected - Index out of sync");
+        if (!state.isDirty && !state.isSyncing) {
             setState("isDirty", true);
         }
     });

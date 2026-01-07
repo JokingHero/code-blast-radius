@@ -51,12 +51,12 @@ fn test_output_json_structure_and_merging() {
     assert_eq!(output.files.len(), 1);
     let file_ctx = &output.files[0];
 
-    // Metadata
-    assert!(file_ctx.path.ends_with("main.ts"));
-    assert_eq!(file_ctx.language, "ts");
-    assert!(!file_ctx.is_test);
+    // Metadata (Accessed via .metadata)
+    assert!(file_ctx.metadata.path.ends_with("main.ts"));
+    assert_eq!(file_ctx.metadata.language, "ts");
+    assert!(!file_ctx.metadata.is_test);
     
-    // Content equality
+    // Content equality (Accessed directly)
     assert_eq!(file_ctx.content, content);
 
     // Range Merging Logic
@@ -65,21 +65,21 @@ fn test_output_json_structure_and_merging() {
     // Expected result: 2 Ranges.
     
     // DEBUG OUTPUT
-    println!("Found {} ranges:", file_ctx.relevant_lines.len());
-    for (i, r) in file_ctx.relevant_lines.iter().enumerate() {
+    println!("Found {} ranges:", file_ctx.metadata.relevant_lines.len());
+    for (i, r) in file_ctx.metadata.relevant_lines.iter().enumerate() {
         println!("Range {}: Lines {}-{}", i, r.start, r.end);
     }
 
-    assert_eq!(file_ctx.relevant_lines.len(), 2, "Expected 2 ranges: [A+B] and [C]");
+    assert_eq!(file_ctx.metadata.relevant_lines.len(), 2, "Expected 2 ranges: [A+B] and [C]");
 
     // Verify Range 1 (A + B)
-    let r1 = &file_ctx.relevant_lines[0];
+    let r1 = &file_ctx.metadata.relevant_lines[0];
     assert_eq!(r1.start, 1, "Range 1 should start at line 1 (funcA)");
     // funcA (line 1) + 5 newlines = funcB starts on line 6.
     assert!(r1.end >= 6, "Range 1 should cover funcB (at least line 6)");
 
     // Verify Range 2 (C)
-    let r2 = &file_ctx.relevant_lines[1];
+    let r2 = &file_ctx.metadata.relevant_lines[1];
     // It must start after the large gap.
     // funcB ends on line 6. large_gap is line 7. funcC starts on line 8.
     // So start must be > r1.end
@@ -105,8 +105,8 @@ fn test_output_multi_file() {
     assert_eq!(output.target, "main");
     assert_eq!(output.files.len(), 2, "Should return context for 2 files");
 
-    // Verify both paths are present
-    let paths: Vec<String> = output.files.iter().map(|f| f.path.clone()).collect();
+    // Verify both paths are present (Accessed via .metadata.path)
+    let paths: Vec<String> = output.files.iter().map(|f| f.metadata.path.clone()).collect();
     assert!(paths.iter().any(|p| p.contains("utils.ts")));
     assert!(paths.iter().any(|p| p.contains("main.ts")));
 }

@@ -7,7 +7,7 @@ use globset::{ Glob };
 use crate::analysis::language::{ LanguageConfig, get_language_configs };
 use crate::resolution::Indexer;
 use crate::query::traversal::{ GraphWalker, TraversalMode };
-use crate::query::output::{ ContextOutput, FileContext, LineRange };
+use crate::query::output::{ ContextOutput, FileContent, FileContextMetadata, LineRange };
 use crate::recipes::models::{ Recipe, RecipeOperation, FileTransform };
 use crate::models::{ SymbolKind, FileId };
 
@@ -35,41 +35,65 @@ impl<'a> RecipeExecutor<'a> {
         Self { indexer, config_map }
     }
 
-    /// Main entry point: Executes a recipe against the current Indexer state.
-    /// PRECONDITION: The caller must have run `workspace.sync()` (or pipeline.scan)
-    /// immediately before calling this to ensure AST offsets match file content on disk.
-    pub fn execute(&self, recipe: &Recipe) -> Result<ContextOutput> {
-        // 1. THE NET: Discover relevant files based on operations
+    /// Executing for CLI/Export: Returns FULL content.
+    /// Used when we need the actual code (LLM Context, XML generation).
+    pub fn execute_full(&self, recipe: &Recipe) -> Result<ContextOutput<FileContent>> {
         let file_ids = self.resolve_files(&recipe.operations)?;
-
-        // 2. THE LENS: Transform and render content
         let mut output_files = Vec::new();
 
         for file_id in file_ids {
             if let Some(file_node) = self.indexer.index.files.values().find(|f| f.id == file_id) {
-                // Determine if there is a transform for this specific file
-                // We match based on the file path stored in the index
-                // Note: Index paths are usually normalized. Recipe paths might be relative.
-                // We attempt a suffix match or exact match.
-                let transform = recipe.transforms
-                    .iter()
-                    .find(|(path_key, _)| {
-                        file_node.path.ends_with(*path_key) || file_node.path == **path_key
-                    })
-                    .map(|(_, t)| t);
-
-                let file_context = self.process_file(file_node, transform)?;
-                output_files.push(file_context);
+                let transform = self.resolve_transform(recipe, &file_node.path);
+                let file_content = self.process_file(file_node, transform)?;
+                output_files.push(file_content);
             }
         }
 
         // Sort for deterministic output (by path)
+        output_files.sort_by(|a, b| a.metadata.path.cmp(&b.metadata.path));
+
+        Ok(ContextOutput {
+            target: recipe.name.clone(),
+            files: output_files,
+        })
+    }
+
+    /// Executing for GUI: Returns METADATA only.
+    /// This reads the files to calculate stats/lines but DISCARDS the heavy content string
+    /// to prevent freezing the UI during serialization.
+    pub fn execute_metadata(&self, recipe: &Recipe) -> Result<ContextOutput<FileContextMetadata>> {
+        let file_ids = self.resolve_files(&recipe.operations)?;
+        let mut output_files = Vec::new();
+
+        for file_id in file_ids {
+            if let Some(file_node) = self.indexer.index.files.values().find(|f| f.id == file_id) {
+                let transform = self.resolve_transform(recipe, &file_node.path);
+                
+                // We process the file to apply skeletons/transforms so that line counts are accurate,
+                // but we extract ONLY the metadata to return.
+                let file_content = self.process_file(file_node, transform)?;
+                output_files.push(file_content.metadata);
+            }
+        }
+
         output_files.sort_by(|a, b| a.path.cmp(&b.path));
 
         Ok(ContextOutput {
             target: recipe.name.clone(),
             files: output_files,
         })
+    }
+
+    /// Lazy Load: Fetch content for a specific file ID within the context of a Recipe.
+    /// This ensures skeletons/transforms defined in the recipe are applied.
+    pub fn get_file_content(&self, file_id: FileId, recipe: &Recipe) -> Result<Option<String>> {
+        if let Some(file_node) = self.indexer.index.files.values().find(|f| f.id == file_id) {
+            let transform = self.resolve_transform(recipe, &file_node.path);
+            let file_content = self.process_file(file_node, transform)?;
+            Ok(Some(file_content.content))
+        } else {
+            Ok(None)
+        }
     }
 
     // --- PHASE 1: DISCOVERY ---
@@ -105,14 +129,9 @@ impl<'a> RecipeExecutor<'a> {
                         .filter(|&&fid| {
                             if let Some(file) = self.indexer.index.files.values().find(|f| f.id == fid) {
                                 let path_str = file.path.as_str();
-
-                                // Remove Windows "\\?\" prefix if it exists
                                 let clean_start = if path_str.starts_with("\\\\?\\") { 4 } else { 0 };
                                 let clean_path = &path_str[clean_start..];
-
-                                // Normalize slashes to match the pattern format
                                 let normalized_path = clean_path.replace('\\', "/");
-
                                 matcher.is_match(&normalized_path)
                             } else {
                                 false
@@ -126,18 +145,10 @@ impl<'a> RecipeExecutor<'a> {
                     }
                 }
                 RecipeOperation::BlastRadius { symbol, max_depth, exclude_tests } => {
-                    // Convert u32 to Option<usize> for the walker.
-                    // 0 = Infinite (None)
-                    // >0 = Specific depth limit (Some(n))
-                    let depth_opt = if *max_depth == 0 { 
-                        None 
-                    } else { 
-                        Some(*max_depth as usize) 
-                    };
-
+                    let depth_opt = if *max_depth == 0 { None } else { Some(*max_depth as usize) };
                     let mut found_ids = Vec::new();
 
-                    // A. Attempt to find matching symbols directly (Functions, Classes, etc.)
+                    // A. Attempt to find matching symbols directly
                     if let Some(ids) = self.indexer.lookup.symbol_map.get(symbol) {
                         let walker = GraphWalker::new(
                             &self.indexer.index,
@@ -147,21 +158,19 @@ impl<'a> RecipeExecutor<'a> {
                         );
                         found_ids = walker.walk_deep(ids);
                     } 
-                    // B. Fallback: Check if the 'symbol' string is actually a File Path
+                    // B. Fallback: Check if 'symbol' is a File Path
                     else {
                         let matching_file_id = self.indexer.index.files.values()
-                            .find(|f| f.path == *symbol || f.path.ends_with(symbol)) // Exact or suffix match
+                            .find(|f| f.path == *symbol || f.path.ends_with(symbol))
                             .map(|f| f.id);
 
                         if let Some(fid) = matching_file_id {
-                            // If it's a file, seed the traversal with ALL symbols defined in that file.
                             let mut seed_ids = Vec::new();
                             for sym in self.indexer.index.symbols.values() {
                                 if sym.file_id == fid {
                                     seed_ids.push(sym.id);
                                 }
                             }
-                            
                             let walker = GraphWalker::new(
                                 &self.indexer.index,
                                 &self.indexer.reverse_graph,
@@ -177,7 +186,6 @@ impl<'a> RecipeExecutor<'a> {
                             if *exclude_tests && sym.is_test {
                                 continue;
                             }
-                            // Don't add external library "files" (which have ID 0 usually or virtual)
                             if !sym.is_external {
                                 working_set.insert(sym.file_id);
                             }
@@ -192,11 +200,20 @@ impl<'a> RecipeExecutor<'a> {
 
     // --- PHASE 2: TRANSFORMATION ---
 
+    fn resolve_transform<'b>(&self, recipe: &'b Recipe, file_path: &str) -> Option<&'b FileTransform> {
+        recipe.transforms
+            .iter()
+            .find(|(path_key, _)| {
+                file_path.ends_with(*path_key) || file_path == **path_key
+            })
+            .map(|(_, t)| t)
+    }
+
     fn process_file(
         &self,
         file_node: &crate::models::FileNode,
         transform: Option<&FileTransform>
-    ) -> Result<FileContext> {
+    ) -> Result<FileContent> {
         let raw_content = fs
             ::read_to_string(&file_node.path)
             .with_context(|| format!("Failed to read file: {}", file_node.path))?;
@@ -215,16 +232,21 @@ impl<'a> RecipeExecutor<'a> {
             raw_content.clone()
         };
 
-        // Calculate line ranges (naive: generic range covering whole file for now,
-        // as Recipes usually return whole files or skeletonized whole files).
+        // Calculate line ranges
+        // Currently naive (entire file), but could be refined if partial inclusion is added later
         let line_count = final_content.lines().count();
         let relevant_lines = vec![LineRange { start: 1, end: line_count.max(1) }];
 
-        Ok(FileContext {
+        let metadata = FileContextMetadata {
+            file_id: file_node.id,
             path: file_node.path.clone(),
             language: ext,
             is_test: file_node.is_test,
             relevant_lines,
+        };
+
+        Ok(FileContent {
+            metadata,
             content: final_content,
         })
     }
@@ -237,52 +259,35 @@ impl<'a> RecipeExecutor<'a> {
     ) -> Vec<RenderMask> {
         let mut masks = Vec::new();
 
-        // Lookup skeleton template
-        // Default to C-style if extension unknown or language not configured
         let default_template = "{ /* ... {} body hidden ... */ }";
         let template = self.config_map
             .get(ext)
             .map(|c| c.skeleton_template)
             .unwrap_or(default_template);
 
-        // Retrieve all symbols for this file
-        // We iterate directly as we don't have a file_id -> [Symbol] lookup optimized,
-        // but index.symbols is flat map.
         let file_symbols: Vec<_> = self.indexer.index.symbols
             .values()
             .filter(|s| s.file_id == file_id)
             .collect();
 
         for sym in file_symbols {
-            // We only skeletonize things that HAVE a body
             let body_start = match sym.body_start {
                 Some(bs) => bs,
-                None => {
-                    continue;
-                }
+                None => continue,
             };
 
-            // Safety: body_start cannot be after range_end
             if body_start >= sym.range_end {
                 continue;
             }
 
-            // Decide whether to mask based on Transform logic
             let should_mask = match transform {
-                FileTransform::Skeletonize(targets) => {
-                    // "Deny-List": Hide ONLY these
-                    targets.contains(&sym.name)
-                }
+                FileTransform::Skeletonize(targets) => targets.contains(&sym.name),
                 FileTransform::FocusOn(targets) => {
-                    // "Allow-List": Hide everything EXCEPT these...
-                    // ...BUT: Never hide Containers (Classes/Modules), because we need their shell
-                    // to see the children inside. We only mask "leaves" (Functions/Methods).
                     let is_container = matches!(
                         sym.kind,
                         SymbolKind::Container | SymbolKind::Module
                     );
                     let is_target = targets.contains(&sym.name);
-
                     !is_container && !is_target
                 }
             };
@@ -304,57 +309,33 @@ impl<'a> RecipeExecutor<'a> {
             return source.to_string();
         }
 
-        // 1. Sort by start position to process sequentially
         masks.sort_by_key(|m| m.start);
 
-        // 2. Filter overlaps.
-        // If we have nested masks (e.g. inner function inside outer function),
-        // we likely want to keep the OUTER mask (which hides everything) and skip the inner one.
-        // Since we sorted by start, an outer mask will appear before an inner mask
-        // (assuming outer starts before or at inner).
         let mut filtered_masks: Vec<RenderMask> = Vec::new();
         let mut max_end_so_far = 0;
 
         for mask in masks {
-            // Validate char boundaries to prevent panics
             if !source.is_char_boundary(mask.start) || !source.is_char_boundary(mask.end) {
-                eprintln!(
-                    "Warning: Skipping mask at {}-{} due to invalid char boundary",
-                    mask.start,
-                    mask.end
-                );
                 continue;
             }
 
             if mask.start >= max_end_so_far {
                 max_end_so_far = mask.end;
                 filtered_masks.push(mask);
-            } else {
-                // Overlap detected: This mask starts before the previous one ended.
-                // Since we sorted by start, this means it's likely "inside" the previous one.
-                // We skip it because the outer mask covers it.
             }
         }
 
-        // 3. Construct String
         let mut result = String::with_capacity(source.len());
         let mut last_pos = 0;
 
         for mask in filtered_masks {
-            // Append content before the mask
-            // Safety: last_pos is updated from mask.end, which we checked is_char_boundary
-            // mask.start is checked is_char_boundary
             if mask.start > last_pos {
                 result.push_str(&source[last_pos..mask.start]);
             }
-
-            // Append replacement
             result.push_str(&mask.replacement);
-
             last_pos = mask.end;
         }
 
-        // Append remaining content
         if last_pos < source.len() {
             result.push_str(&source[last_pos..]);
         }

@@ -78,8 +78,14 @@ enum RecipeAction {
     Remove { 
         name: String 
     },
+    /// Execute a recipe. Outputs XML by default, or JSON if metadata is requested.
     Run { 
-        name: String 
+        name: String,
+        
+        /// If set, returns a JSON list of file metadata without full content.
+        /// Useful for MCP servers to preview the context size.
+        #[arg(short, long)]
+        metadata: bool,
     },
 }
 
@@ -191,15 +197,21 @@ fn run() -> Result<()> {
                         process::exit(1);
                     }
                 }
-                RecipeAction::Run { name } => {
+                RecipeAction::Run { name, metadata } => {
                     let recipe = manager.config.recipes.get(name)
                         .ok_or_else(|| anyhow::anyhow!("Recipe '{}' not found", name))?;
 
                     let executor = RecipeExecutor::new(&manager.indexer);
-                    let output = executor.execute(recipe)?;
                     
-                    // Uses the XML method defined in the engine
-                    println!("{}", output.to_xml());
+                    if *metadata {
+                        // MCP Mode: Return JSON list of files (no heavy content)
+                        let output = executor.execute_metadata(recipe)?;
+                        println!("{}", serde_json::to_string_pretty(&output)?);
+                    } else {
+                        // Standard Mode: Return XML Bundle (with full content)
+                        let output = executor.execute_full(recipe)?;
+                        println!("{}", output.to_xml());
+                    }
                 }
             }
         }
@@ -245,6 +257,7 @@ fn run() -> Result<()> {
                 });
             }
 
+            // Radius command always uses full content output
             let output = generate_context_output(&indexer.index, &related_ids);
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
