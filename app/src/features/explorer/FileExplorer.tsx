@@ -14,9 +14,10 @@ const IGNORED_NAMES = new Set([
   "target", "vendor", 
   "dist", "build", "out", "bin", "obj",
   "__pycache__", ".pytest_cache",
-  ".git", ".svn", ".hg", 
+  ".git", ".svn", ".hg",
   ".idea", ".vscode", ".vs", ".DS_Store", "Thumbs.db",
-  "coverage"
+  "coverage",
+  ".cblast"
 ]);
 
 const RENDER_CHUNK_SIZE = 100;
@@ -109,6 +110,7 @@ const FileNode = (props: {
 
   const shouldHide = (name: string) => {
       if (IGNORED_NAMES.has(name)) return true;
+      if (name.endsWith(".cblast") || name.endsWith(".cblast.index")) return true;
       if (props.ignoreRules) {
           if (props.ignoreRules.names.has(name)) return true;
           for (const ext of props.ignoreRules.extensions) {

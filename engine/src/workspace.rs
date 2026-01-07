@@ -1,5 +1,3 @@
-// File: engine/src/workspace.rs
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -32,9 +30,30 @@ pub struct WorkspaceManager {
 }
 
 impl WorkspaceManager {
+    
+    // --- HELPER: Safe Path Resolution ---
+    /// Resolves a path to an absolute PathBuf.
+    /// 1. If relative, joins with CWD.
+    /// 2. Attempts to canonicalize (resolve symlinks/..).
+    /// 3. If canonicalization fails (e.g. restrictive permissions), falls back to the calculated absolute path.
+    fn resolve_path_safe(path: PathBuf) -> PathBuf {
+        let absolute = if path.is_absolute() {
+            path
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(path)
+        };
+
+        // unwrap_or(absolute) is the key fix: it prevents panics or failures 
+        // if the OS filesystem call fails, keeping the logical absolute path instead.
+        fs::canonicalize(&absolute).unwrap_or(absolute)
+    }
+
     /// Case 1: Load from an existing .cblast file
     pub fn from_file(path: PathBuf) -> Result<Self> {
-        let abs_path = fs::canonicalize(&path).unwrap_or(path.clone());
+        // We use the helper here too for the workspace file itself
+        let abs_path = Self::resolve_path_safe(path);
         let base_dir = abs_path.parent().unwrap_or_else(|| Path::new("."));
 
         let content = fs::read_to_string(&abs_path)
@@ -56,14 +75,14 @@ impl WorkspaceManager {
             
             let path_obj = PathBuf::from(os_path_str);
 
-            // 2. Resolve Relative Paths
+            // 2. Resolve Relative Paths (Relative to the WORKSPACE FILE, not CWD)
             let final_path = if path_obj.is_relative() {
                 base_dir.join(path_obj)
             } else {
                 path_obj
             };
 
-            // 3. Canonicalize (Best effort, ignore if path doesn't exist yet to allow repairing)
+            // 3. Canonicalize Safe Fallback
             let canonical = fs::canonicalize(&final_path).unwrap_or(final_path);
             roots.push(canonical);
         }
@@ -75,6 +94,10 @@ impl WorkspaceManager {
         };
 
         // Look for sibling index file: project.cblast -> project.cblast.index
+        // Using "with_extension" on "project.cblast" results in "project.cblast.index"
+        // Note: standard with_extension replaces the last extension, so we append manually to be safe or ensure naming convention.
+        // If file is "my.workspace.cblast", with_extension("index") makes "my.workspace.index".
+        // Current logic assumes specific naming convention.
         let index_path = abs_path.with_extension("cblast.index");
         let indexer = Indexer::load_from_file(&index_path).unwrap_or(Indexer::new());
 
@@ -94,19 +117,20 @@ impl WorkspaceManager {
     pub fn new_in_memory(roots: Vec<PathBuf>) -> Result<Self> {
         let mut indexer = Indexer::new();
         
+        // Apply Safe Resolution to inputs (Fixes CLI '.' relative paths)
+        let abs_roots: Vec<PathBuf> = roots.into_iter()
+            .map(Self::resolve_path_safe)
+            .collect();
+
         // Optimization: If it's a single root, try to load existing cache from `.cblast/index.local.bin`
-        if roots.len() == 1 {
-            let cache_path = roots[0].join(".cblast").join("index.local.bin");
+        if abs_roots.len() == 1 {
+            let cache_path = abs_roots[0].join(".cblast").join("index.local.bin");
             if cache_path.exists() {
                 if let Ok(loaded) = Indexer::load_from_file(&cache_path) {
                     indexer = loaded;
                 }
             }
         }
-
-        let abs_roots: Vec<PathBuf> = roots.into_iter()
-            .map(|r| fs::canonicalize(&r).unwrap_or(r))
-            .collect();
 
         // Initial Scan
         let mut pipeline = Pipeline::new();
@@ -173,7 +197,7 @@ impl WorkspaceManager {
 
     /// Promote In-Memory to File-Backed, OR Save As new path
     pub fn save_as(&mut self, path: PathBuf) -> Result<()> {
-        let abs_path = fs::canonicalize(&path).unwrap_or(path);
+        let abs_path = Self::resolve_path_safe(path);
         self.backing_file = Some(abs_path);
         
         if let Some(stem) = self.backing_file.as_ref().unwrap().file_stem() {
@@ -183,7 +207,9 @@ impl WorkspaceManager {
     }
 
     pub fn add_root(&mut self, root: PathBuf) {
-        let abs_root = fs::canonicalize(&root).unwrap_or(root);
+        // Apply Safe Resolution (Fixes CLI relative paths)
+        let abs_root = Self::resolve_path_safe(root);
+
         if !self.config.roots.contains(&abs_root) {
             self.config.roots.push(abs_root.clone());
             let pipeline = Pipeline::new();
@@ -193,7 +219,9 @@ impl WorkspaceManager {
     }
     
     pub fn remove_root(&mut self, root: PathBuf) {
-         let abs_root = fs::canonicalize(&root).unwrap_or(root);
+         // Apply Safe Resolution so we can match what is stored in config.roots
+         let abs_root = Self::resolve_path_safe(root);
+
          if let Some(pos) = self.config.roots.iter().position(|r| *r == abs_root) {
             self.config.roots.remove(pos);
             self.indexer.remove_root(&abs_root);
