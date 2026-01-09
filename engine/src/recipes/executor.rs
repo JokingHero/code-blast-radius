@@ -21,17 +21,18 @@ struct RenderMask {
 pub struct RecipeExecutor<'a> {
     indexer: &'a Indexer,
     config_map: HashMap<String, LanguageConfig>,
+    root_map: HashMap<String, String>,
 }
 
 impl<'a> RecipeExecutor<'a> {
-    pub fn new(indexer: &'a Indexer) -> Self {
+    pub fn new(indexer: &'a Indexer, root_map: HashMap<String, String>) -> Self {
         let mut config_map = HashMap::new();
         for config in get_language_configs() {
             for &ext in config.file_extensions {
                 config_map.insert(ext.to_string(), config.clone());
             }
         }
-        Self { indexer, config_map }
+        Self { indexer, config_map, root_map }
     }
     
     pub fn execute_full(&self, recipe: &Recipe) -> Result<ContextOutput<FileContent>> {
@@ -238,10 +239,12 @@ impl<'a> RecipeExecutor<'a> {
 
         let line_count = final_content.lines().count();
         let relevant_lines = vec![LineRange { start: 1, end: line_count.max(1) }];
+        let root_name = self.root_map.get(&file_node.root_id).cloned();
 
         let metadata = FileContextMetadata {
             file_id: file_node.id,
             path: file_node.relative_path.clone(), // Return relative path for UI cleanliness
+            root_name,
             language: ext,
             is_test: file_node.is_test,
             relevant_lines,

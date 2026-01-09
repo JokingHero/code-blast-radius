@@ -14,8 +14,9 @@ pub struct ContextOutput<T> {
 /// Does not contain the full file string.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FileContextMetadata {
-    pub file_id: FileId, // Added for efficient lazy-loading lookup
+    pub file_id: FileId,
     pub path: String,
+    pub root_name: Option<String>,
     pub language: String,
     pub is_test: bool,
     pub relevant_lines: Vec<LineRange>,
@@ -183,6 +184,7 @@ pub fn generate_context_output(
         let metadata = FileContextMetadata {
             file_id: file_node.id,
             path: file_node.relative_path.clone(), // Use relative path for UI
+            root_name: None,
             language: ext,
             is_test: file_node.is_test,
             relevant_lines: final_line_ranges,

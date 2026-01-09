@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+use std::collections::HashMap;
 use std::path::{ PathBuf };
 use tokio::sync::RwLock;
 use tauri::{ Manager, Emitter };
@@ -34,10 +35,28 @@ struct SearchResult {
     score: u16,
 }
 
+#[derive(serde::Serialize)]
+struct ResolvedPathDTO {
+    original: String,
+    // If successfully resolved to an indexed file:
+    relative_path: Option<String>, 
+    root_id: Option<String>,
+    // If not found in index, is it at least inside a root?
+    is_indexed: bool,
+}
+
+// Update the WorkspaceConfigDTO to include Root IDs (needed for UI mapping)
+#[derive(serde::Serialize, Clone)]
+struct RootConfigDTO {
+    id: String,
+    path: String,
+    name: String,
+}
+
 #[derive(serde::Serialize, Clone)]
 struct WorkspaceConfigDTO {
     name: String,
-    roots: Vec<String>,
+    roots: Vec<RootConfigDTO>,
     mode: String,
 }
 
@@ -58,13 +77,26 @@ fn map_to_dto(manager: &WorkspaceManager) -> WorkspaceConfigDTO {
         "ad-hoc".to_string()
     };
 
+    let roots = manager.config.roots
+        .iter()
+        .map(|r| {
+            let path_str = r.path.to_string_lossy().to_string();
+            // Simple heuristic for a name: last component of the path
+            let name = r.path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path_str.clone());
+
+            RootConfigDTO {
+                id: r.id.clone(),
+                path: path_str,
+                name,
+            }
+        })
+        .collect();
+
     WorkspaceConfigDTO {
         name: manager.config.name.clone(),
-        // Extract paths from RootConfig objects
-        roots: manager.config.roots
-            .iter()
-            .map(|r| r.path.to_string_lossy().to_string())
-            .collect(),
+        roots,
         mode,
     }
 }
@@ -350,6 +382,15 @@ async fn search_symbols(
     Ok(results)
 }
 
+fn get_root_map(manager: &WorkspaceManager) -> HashMap<String, String> {
+    manager.config.roots.iter().map(|r| {
+        let name = r.path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "root".to_string());
+        (r.id.clone(), name)
+    }).collect()
+}
+
 #[tauri::command]
 async fn execute_recipe(
     recipe_json: serde_json::Value,
@@ -363,8 +404,8 @@ async fn execute_recipe(
 
     // Normalize paths (Abs -> Rel)
     recipe = normalize_recipe(manager, recipe);
-
-    let executor = RecipeExecutor::new(&manager.indexer);
+    let root_map = get_root_map(manager);
+    let executor = RecipeExecutor::new(&manager.indexer, root_map);
 
     // Metadata only!
     let output = executor
@@ -387,8 +428,8 @@ async fn get_file_content(
         .map_err(|e| format!("Invalid recipe format: {}", e))?;
 
     recipe = normalize_recipe(manager, recipe);
-
-    let executor = RecipeExecutor::new(&manager.indexer);
+    let root_map = get_root_map(manager);
+    let executor = RecipeExecutor::new(&manager.indexer, root_map);
 
     match executor.get_file_content(file_id, &recipe) {
         Ok(Some(content)) => Ok(content),
@@ -409,8 +450,8 @@ async fn generate_xml_bundle(
         .map_err(|e| format!("Invalid recipe format: {}", e))?;
 
     recipe = normalize_recipe(manager, recipe);
-
-    let executor = RecipeExecutor::new(&manager.indexer);
+    let root_map = get_root_map(manager);
+    let executor = RecipeExecutor::new(&manager.indexer, root_map);
 
     // Full content execution
     let output = executor.execute_full(&recipe).map_err(|e| format!("Execution failed: {}", e))?;
@@ -466,6 +507,89 @@ async fn delete_named_recipe(
     Ok(())
 }
 
+#[tauri::command]
+async fn resolve_paths(
+    paths: Vec<String>,
+    state: tauri::State<'_, AppState>
+) -> Result<Vec<ResolvedPathDTO>, String> {
+    let guard = state.manager.read().await;
+    let manager = guard.as_ref().ok_or("Workspace not loaded")?;
+    let indexer = &manager.indexer;
+
+    let mut results = Vec::new();
+
+    for path_str in paths {
+        let path_buf = PathBuf::from(&path_str);
+        // Ensure we are comparing canonical paths if possible
+        let lookup_path = if path_buf.exists() {
+            std::fs::canonicalize(&path_buf).unwrap_or(path_buf.clone())
+        } else {
+            path_buf.clone()
+        };
+
+        // 1. Check path_map (Absolute -> FileId)
+        if let Some(&file_id) = indexer.path_map.get(&lookup_path) {
+            // Found in index! Get the relative path.
+            if let Some(file_node) = indexer.index.files.values().find(|f| f.id == file_id) {
+                results.push(ResolvedPathDTO {
+                    original: path_str,
+                    relative_path: Some(file_node.relative_path.clone()),
+                    root_id: Some(file_node.root_id.clone()),
+                    is_indexed: true,
+                });
+                continue;
+            }
+        }
+
+        // 2. Handle Directory Drops (Partial Matches)
+        // If the user drops "src/utils/", and we have files inside it, 
+        // we need to return a glob like "src/utils/**"
+        // This is trickier with O(1) lookups. 
+        // For V1, let's check if the path is contained within any Root.
+        
+        let mut found_root = None;
+        let mut rel_path_candidate = None;
+
+        for root in &manager.config.roots {
+            if lookup_path.starts_with(&root.path) {
+                // It is inside this root.
+                if let Ok(rel) = lookup_path.strip_prefix(&root.path) {
+                    // Convert to unix style for globs
+                    let rel_str = rel.to_string_lossy().replace('\\', "/");
+                    
+                    rel_path_candidate = Some(if lookup_path.is_dir() {
+                        format!("{}/**", rel_str)
+                    } else {
+                        rel_str
+                    });
+                    
+                    found_root = Some(root.id.clone());
+                    break;
+                }
+            }
+        }
+
+        if let Some(root_id) = found_root {
+            results.push(ResolvedPathDTO {
+                original: path_str,
+                relative_path: rel_path_candidate,
+                root_id: Some(root_id),
+                is_indexed: false, // Not a specific file in the index, but valid for a glob
+            });
+        } else {
+            // Completely outside workspace
+            results.push(ResolvedPathDTO {
+                original: path_str,
+                relative_path: None,
+                root_id: None,
+                is_indexed: false,
+            });
+        }
+    }
+
+    Ok(results)
+}
+
 // --- Entry Point ---
 fn main() {
     tauri::Builder
@@ -498,7 +622,8 @@ fn main() {
                 delete_named_recipe,
                 execute_recipe,
                 get_file_content,
-                generate_xml_bundle
+                generate_xml_bundle,
+                resolve_paths,
             ]
         )
         .run(tauri::generate_context!())

@@ -200,8 +200,16 @@ fn run() -> Result<()> {
                 RecipeAction::Run { name, metadata } => {
                     let recipe = manager.config.recipes.get(name)
                         .ok_or_else(|| anyhow::anyhow!("Recipe '{}' not found", name))?;
-
-                    let executor = RecipeExecutor::new(&manager.indexer);
+                    let root_map: std::collections::HashMap<String, String> = manager.config.roots
+                        .iter()
+                        .map(|r| {
+                            let name = r.path.file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_else(|| "root".to_string());
+                            (r.id.clone(), name)
+                        })
+                        .collect();
+                    let executor = RecipeExecutor::new(&manager.indexer, root_map);
                     
                     if *metadata {
                         // MCP Mode: Return JSON list of files (no heavy content)

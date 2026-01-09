@@ -20,7 +20,6 @@ fn test_recipe_globbing_and_filtering() {
 
     // 2. Define Recipe
     // Intent: Include all TS files, but exclude tests.
-    // FIX: Use recursive glob "**/" to match absolute paths
     let recipe = Recipe {
         name: "Source Only".to_string(),
         description: None,
@@ -31,12 +30,11 @@ fn test_recipe_globbing_and_filtering() {
         transforms: HashMap::new()
     };
 
-    let executor = RecipeExecutor::new(&indexer);
-    // FIX: Use execute_full() to get content
+    let root_map = HashMap::from([("root_1".to_string(), "test_root".to_string())]);
+    let executor = RecipeExecutor::new(&indexer, root_map);
     let output = executor.execute_full(&recipe).expect("Execution failed");
 
     // 3. Assertions
-    // FIX: Access path via metadata
     let paths: Vec<String> = output.files.iter().map(|f| f.metadata.path.clone()).collect();
     
     // Should match
@@ -79,8 +77,8 @@ fn test_recipe_transformation_focus_mode() {
         transforms
     };
 
-    let executor = RecipeExecutor::new(&indexer);
-    // FIX: Use execute_full()
+    let root_map = HashMap::from([("root_1".to_string(), "test_root".to_string())]);
+    let executor = RecipeExecutor::new(&indexer, root_map);
     let output = executor.execute_full(&recipe).expect("Execution failed");
 
     assert!(!output.files.is_empty(), "Recipe matched no files. Check glob pattern.");
@@ -141,8 +139,8 @@ fn test_recipe_drift_safety() {
         transforms
     };
 
-    let executor = RecipeExecutor::new(&indexer);
-    // FIX: Use execute_full()
+    let root_map = HashMap::from([("root_1".to_string(), "test_root".to_string())]);
+    let executor = RecipeExecutor::new(&indexer, root_map);
     let output = executor.execute_full(&recipe).expect("Execution failed");
 
     assert!(!output.files.is_empty(), "Recipe matched no files.");
