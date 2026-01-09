@@ -41,18 +41,9 @@ impl FileScanner {
         root: &Path,
         index: &mut WorkspaceIndex,
         lookup: &mut SymbolIndex,
-        // Added: Root ID is now required for logical key generation
         root_id: Option<&str>
     ) {
         let root_abs = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-        // Note: roots list in index is now just for validation, not key generation
-        // But we update it to match the logical ID if possible or legacy string
-        // Actually, WorkspaceManager handles `index.roots` validation now.
-        // We only scan here.
-
-        // If no root_id provided (e.g. tests), we fallback to a temp ID or fail?
-        // For tests using `pipeline.scan`, we can default to "default_root"
-        // to maintain test compatibility without huge refactors.
         let active_root_id = root_id.unwrap_or("default_root");
 
         // 1. Collect all candidate files
@@ -73,8 +64,8 @@ impl FileScanner {
         // 2. Parallel Processing (Read & Hash)
         struct InitialFileResult {
             path: PathBuf,
-            logical_key: String, // Changed from path_key
-            relative_path: String, // Store relative path for FileNode
+            logical_key: String,
+            relative_path: String,
             manifest: ManifestResult,
             config: Option<LanguageConfig>,
             is_test: bool,
@@ -85,10 +76,6 @@ impl FileScanner {
         let initial_results: Vec<InitialFileResult> = file_entries
             .into_par_iter()
             .map(|path| {
-                // LOGIC CHANGE: Generate Logical Key
-                // 1. Calculate relative path from root
-                // 2. Convert to Unix Slashes
-                // 3. Prefix with ::{root_id}::
                 let relative_path = pathdiff
                     ::diff_paths(&path, &root_abs)
                     .unwrap_or_else(|| path.clone())
@@ -98,7 +85,6 @@ impl FileScanner {
 
                 let logical_key = format!("::{}::{}", active_root_id, relative_path);
 
-                // Manifest scanning still needs physical path
                 let manifest = scan_manifests(&path);
 
                 let ext = path
@@ -128,13 +114,13 @@ impl FileScanner {
                     }
                 };
 
+                // CHANGE: Attempt to read and hash ALL files, not just configured ones.
+                // read_to_string will fail for binary files (non-UTF8), effectively filtering them out.
                 let mut hash = None;
                 let mut content = None;
-                if config.is_some() {
-                    if let Ok(c) = fs::read_to_string(&path) {
-                        hash = Some(blake3::hash(c.as_bytes()).into());
-                        content = Some(c);
-                    }
+                if let Ok(c) = fs::read_to_string(&path) {
+                    hash = Some(blake3::hash(c.as_bytes()).into());
+                    content = Some(c);
                 }
 
                 InitialFileResult {
@@ -155,7 +141,7 @@ impl FileScanner {
             path: PathBuf,
             logical_key: String,
             relative_path: String,
-            config: LanguageConfig,
+            config: Option<LanguageConfig>, // Changed: Now Optional
             is_test: bool,
             hash: [u8; 32],
             analysis: Result<FileAnalysis, String>,
@@ -165,11 +151,6 @@ impl FileScanner {
         let mut to_process = Vec::new();
 
         for res in initial_results {
-            // Update manifest data sequentially (fast operations)
-            // Note: Package paths map still uses Absolute Paths or Logical?
-            // Resolver uses absolute to traverse FS, so we likely want absolute here or relative to root?
-            // Current resolver logic uses `resolve_import_path` which works on absolute/relative file system paths.
-            // So storing the directory key as absolute `to_index_path` (normalized abs) is still correct for the *Lookup*.
             if let Some(pkg_name) = res.manifest.package_name.clone() {
                 if let Some(parent_dir) = res.path.parent() {
                     let dir_key = utils::to_index_path(parent_dir);
@@ -183,11 +164,10 @@ impl FileScanner {
                 lookup.import_mappings.extend(res.manifest.aliases.clone());
             }
 
-            // If we have a language config, valid content, and hash
-            if let (Some(config), Some(hash), Some(content)) = (res.config, res.hash, res.content) {
+            // CHANGE: Proceed if we have Content/Hash, regardless of Config presence
+            if let (Some(hash), Some(content)) = (res.hash, res.content) {
                 seen_keys.insert(res.logical_key.clone());
 
-                // Check if file has changed using Logical Key
                 let needs_update = match index.files.get(&res.logical_key) {
                     Some(node) => node.hash != hash,
                     None => true,
@@ -199,7 +179,7 @@ impl FileScanner {
                         res.logical_key,
                         res.relative_path,
                         res.manifest,
-                        config,
+                        res.config,
                         res.is_test,
                         hash,
                         content,
@@ -212,7 +192,22 @@ impl FileScanner {
         let analysis_results: Vec<ProcessingResult> = to_process
             .into_par_iter()
             .map(|(path, logical_key, relative_path, _manifest, config, is_test, hash, content)| {
-                let analysis = analyze_source(&path, &content, &config);
+                // CHANGE: Run analysis only if config exists, otherwise return empty analysis
+                let analysis = if let Some(ref c) = config {
+                    analyze_source(&path, &content, c)
+                } else {
+                    Ok(FileAnalysis {
+                        functions: vec![],
+                        imports: vec![],
+                        exports: vec![],
+                        literals: vec![],
+                        implementations: vec![],
+                        global_vars: HashMap::new(),
+                        middleware_usage: vec![],
+                        defined_routes: vec![],
+                    })
+                };
+
                 ProcessingResult {
                     path,
                     logical_key,
@@ -234,20 +229,15 @@ impl FileScanner {
                 &res.path,
                 res.analysis,
                 res.hash,
-                &res.config,
+                res.config.as_ref(), // Pass Option reference
                 res.is_test,
                 index,
                 lookup
             );
         }
 
-        // 5. Cleanup Removed Files (SCOPED)
-        // We filter keys that:
-        // 1. Belong to the CURRENT Root ID (Ghost Busting)
-        // 2. Were NOT seen in this scan pass
-
+        // 5. Cleanup Removed Files
         let prefix = format!("::{}::", active_root_id);
-
         let to_remove: Vec<String> = index.files
             .keys()
             .filter(|key| { key.starts_with(&prefix) && !seen_keys.contains(*key) })
@@ -264,10 +254,10 @@ impl FileScanner {
         logical_key: &str,
         relative_path: &str,
         root_id: &str,
-        path_obj: &Path, // Physical path for route detection utils
+        path_obj: &Path,
         analysis_res: Result<FileAnalysis, String>,
         hash: [u8; 32],
-        config: &LanguageConfig,
+        config: Option<&LanguageConfig>, // Changed: Now Optional
         is_path_test: bool,
         index: &mut WorkspaceIndex,
         lookup: &mut SymbolIndex
@@ -281,11 +271,9 @@ impl FileScanner {
             }
         };
 
-        // Clear old data for this file completely to ensure no stale symbols remain
         self.clear_file_symbols(file_id, index, lookup);
 
         if let Ok(analysis) = analysis_res {
-            // 1. Update Imports/Exports
             if !analysis.imports.is_empty() {
                 index.file_imports.insert(file_id, analysis.imports.clone());
                 lookup.file_imports.insert(file_id, analysis.imports);
@@ -295,8 +283,6 @@ impl FileScanner {
                 lookup.file_exports.insert(file_id, analysis.exports);
             }
 
-            // 2. Create FileNode (Source of Truth)
-            // Storing Relative Path + Root ID instead of Absolute Path
             index.files.insert(logical_key.to_string(), FileNode {
                 id: file_id,
                 root_id: root_id.to_string(),
@@ -307,7 +293,6 @@ impl FileScanner {
                 middleware_usage: analysis.middleware_usage,
             });
 
-            // 3. Process Functions -> Symbols
             let mut file_symbol_ids = Vec::new();
 
             for func in analysis.functions {
@@ -355,18 +340,20 @@ impl FileScanner {
             }
 
             // 4. Config Definitions
-            let is_data = matches!(
-                config.lang,
-                crate::analysis::language::SupportedLanguage::Yaml |
-                    crate::analysis::language::SupportedLanguage::Json |
-                    crate::analysis::language::SupportedLanguage::Toml |
-                    crate::analysis::language::SupportedLanguage::Dotenv
-            );
+            if let Some(c) = config {
+                let is_data = matches!(
+                    c.lang,
+                    crate::analysis::language::SupportedLanguage::Yaml |
+                        crate::analysis::language::SupportedLanguage::Json |
+                        crate::analysis::language::SupportedLanguage::Toml |
+                        crate::analysis::language::SupportedLanguage::Dotenv
+                );
 
-            if is_data {
-                for &symbol_id in &file_symbol_ids {
-                    let name = &index.symbols[&symbol_id].name;
-                    lookup.config_definitions.entry(name.clone()).or_default().push(symbol_id);
+                if is_data {
+                    for &symbol_id in &file_symbol_ids {
+                        let name = &index.symbols[&symbol_id].name;
+                        lookup.config_definitions.entry(name.clone()).or_default().push(symbol_id);
+                    }
                 }
             }
 
@@ -443,7 +430,7 @@ impl FileScanner {
 
     pub fn remove_file(
         &self,
-        logical_key: &str, // Changed from path_key
+        logical_key: &str,
         index: &mut WorkspaceIndex,
         lookup: &mut SymbolIndex
     ) {

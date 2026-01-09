@@ -18,7 +18,6 @@ fn test_persistence_lifecycle() {
     // Run 1
     {
         let mut indexer = Indexer::new();
-        
         common::run_pipeline(&mut indexer, &workspace.path);
         indexer.save(&index_file).expect("Failed to save index");
     }

@@ -28,7 +28,6 @@ fn test_monorepo_package_subpath_resolution() {
     "#);
 
     let mut indexer = Indexer::new();
-    
     common::run_pipeline(&mut indexer, &workspace.path);
 
     // --- Assertions ---
@@ -69,7 +68,6 @@ fn test_monorepo_package_root_resolution() {
     "#);
 
     let mut indexer = Indexer::new();
-    
     common::run_pipeline(&mut indexer, &workspace.path);
 
     let server_id = indexer.index.files.values().find(|f| f.relative_path.contains("server.ts")).unwrap().id;

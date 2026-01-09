@@ -28,7 +28,6 @@ fn test_rust_macro_definitions() {
     "#);
 
     let mut indexer = Indexer::new();
-    
     common::run_pipeline(&mut indexer, &workspace.path);
 
     // Assert macro definition found

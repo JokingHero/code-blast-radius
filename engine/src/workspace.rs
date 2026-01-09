@@ -54,7 +54,15 @@ impl WorkspaceManager {
                 .unwrap_or_else(|_| PathBuf::from("."))
                 .join(path)
         };
-        fs::canonicalize(&absolute).unwrap_or(absolute)
+        let canonical = fs::canonicalize(&absolute).unwrap_or(absolute);
+    
+        // STRIP UNC PREFIX
+        let s = canonical.to_string_lossy();
+        if s.starts_with(r"\\?\") {
+            PathBuf::from(&s[4..])
+        } else {
+            canonical
+        }
     }
 
     /// Case 1: Load from an existing .cblast file
