@@ -1,5 +1,6 @@
 import { For, Show, createSignal, createEffect, createMemo } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { useWorkspace, ContextFile } from "../../core/workspace.store";
 import { useRecipe } from "../../core/recipe.store";
 import { EngineRecipe } from "../../core/types";
@@ -104,7 +105,8 @@ const ContextFileItem = (props: {
     }
 
     if (textToCopy) {
-        navigator.clipboard.writeText(textToCopy);
+        // USE PLUGIN HERE TOO FOR CONSISTENCY
+        await writeText(textToCopy);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     }
@@ -231,7 +233,9 @@ export const ContextComposer = () => {
             recipeJson: currentRecipePayload() 
         });
         
-        await navigator.clipboard.writeText(xml);
+        // USE TAURI PLUGIN: Avoids browser timeout/focus issues
+        await writeText(xml);
+        
         setIsCopiedAll(true);
         setTimeout(() => setIsCopiedAll(false), 2000);
     } catch (e) {
