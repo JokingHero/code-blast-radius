@@ -1,6 +1,14 @@
 import { For, createSignal, Show, Switch, Match } from "solid-js";
 import { useRecipe } from "../../core/recipe.store";
 import { UiRecipeStep } from "../../core/types";
+import { invoke } from "@tauri-apps/api/core";
+
+interface ResolvedPathDTO {
+  original: string;
+  relative_path: string | null;
+  root_id: string | null;
+  is_indexed: boolean;
+}
 
 const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: number, to: number) => void }) => {
   const { removeStep, updateStepParams, toggleStepType } = useRecipe();
@@ -177,22 +185,54 @@ export const RecipeBuilder = () => {
   const { recipeState, addStep, resetRecipe, moveStep } = useRecipe();
   const [isDraggingFile, setIsDraggingFile] = createSignal(false);
 
-  // Outer Drop (New Files)
-  const handleOuterDrop = (e: DragEvent) => {
+  const handleOuterDrop = async (e: DragEvent) => {
     e.preventDefault();
     setIsDraggingFile(false);
-    if (e.dataTransfer) {
-      const type = e.dataTransfer.getData("type");
-      if (type === "reorder_step") return;
-      const rawData = e.dataTransfer.getData("application/json");
-      if (rawData) {
-        try {
-          const data = JSON.parse(rawData);
-          if (data.type === 'add_file') addStep({ type: 'file', value: data.value });
-        } catch (err) {
-          console.error("Invalid drop data");
+    
+    if (!e.dataTransfer) return;
+
+    const type = e.dataTransfer.getData("type");
+    if (type === "reorder_step") return;
+
+    // 1. Collect Paths to Resolve
+    const pathsToResolve: string[] = [];
+
+    // Check for Internal Drag (from FileExplorer)
+    const rawData = e.dataTransfer.getData("application/json");
+    if (rawData) {
+      try {
+        const data = JSON.parse(rawData);
+        if (data.type === 'add_file' && data.value) {
+          pathsToResolve.push(data.value);
+        }
+      } catch (err) { /* ignore */ }
+    } 
+    // Check for External OS Drag
+    else if (e.dataTransfer.files.length > 0) {
+      // Note: Tauri's drag-drop implementation usually handles files specifically,
+      // but for now we assume the internal explorer is the primary source.
+      // If handling OS files, you'd iterate e.dataTransfer.files here.
+    }
+
+    if (pathsToResolve.length === 0) return;
+
+    // 2. Resolve Absolute -> Relative via Backend
+    try {
+      const resolved = await invoke<ResolvedPathDTO[]>("resolve_paths", { 
+        paths: pathsToResolve 
+      });
+
+      // 3. Add Valid Steps
+      for (const res of resolved) {
+        if (res.relative_path) {
+          addStep({ type: 'file', value: res.relative_path });
+        } else {
+          console.warn("Dropped file is outside of any active workspace root:", res.original);
+          // Optional: Add a toast notification here
         }
       }
+    } catch (err) {
+      console.error("Failed to resolve paths", err);
     }
   };
 

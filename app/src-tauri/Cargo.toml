@@ -30,4 +30,5 @@ anyhow = "1.0"
 tauri-plugin-fs = "2.4.4"
 tokio = "1.49.0"
 notify = "8.2.0"
+tauri-plugin-clipboard-manager = "2.3.2"
 

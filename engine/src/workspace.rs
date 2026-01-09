@@ -110,16 +110,16 @@ impl WorkspaceManager {
         let index_path = abs_path.with_extension("cblast.index");
         let indexer = Indexer::load_from_file(&index_path).unwrap_or(Indexer::new());
 
-        // PHASE 2: Hydrate the path map immediately after loading
         let mut manager = Self {
             backing_file: Some(abs_path),
             config,
             indexer,
         };
 
+        // Hydrate before syncing to ensure we map existing files
         manager.rebuild_runtime_maps();
 
-        // Sync will scan and resolve
+        // Sync will scan and resolve (and rebuild maps again for new files)
         manager.sync();
 
         Ok(manager)
@@ -173,14 +173,20 @@ impl WorkspaceManager {
             indexer,
         };
 
-        // Hydrate before initial scan to ensure any loaded cache is mapped
+        // 1. Initial hydration (handle cached index if loaded)
         manager.rebuild_runtime_maps();
 
+        // 2. Scan (Populates manager.indexer.index.files)
         let pipeline = Pipeline::new();
         for root in &manager.config.roots {
             pipeline.scan(&mut manager.indexer, &root.path, Some(&root.id));
         }
 
+        // 3. FIX: Rebuild maps AGAIN to include newly scanned files
+        // Without this, id_map doesn't know about new files, so RecipeExecutor fails to find them.
+        manager.rebuild_runtime_maps();
+
+        // 4. Resolve Graph (Relies on populated maps)
         manager.rebuild_graph();
 
         Ok(manager)
@@ -263,11 +269,17 @@ impl WorkspaceManager {
 
         self.config.roots.push(new_root.clone());
 
-        // Rebuild runtime maps with new root
+        // 1. Initial map update (register the new root ID)
         self.rebuild_runtime_maps();
 
+        // 2. Scan new root
         let pipeline = Pipeline::new();
         pipeline.scan(&mut self.indexer, &new_root.path, Some(&new_root.id));
+        
+        // 3. FIX: Rebuild maps to map the newly scanned file IDs -> Absolute Paths
+        self.rebuild_runtime_maps();
+
+        // 4. Resolve
         self.rebuild_graph();
     }
 
@@ -286,13 +298,16 @@ impl WorkspaceManager {
     }
 
     pub fn sync(&mut self) {
-        // Ensure path maps are up to date before scanning
+        // 1. Ensure maps are ready for partial scans if needed
         self.rebuild_runtime_maps();
 
         let pipeline = Pipeline::new();
         for root in &self.config.roots {
             pipeline.scan(&mut self.indexer, &root.path, Some(&root.id));
         }
+
+        // 2. FIX: Update maps with any new files found during scan
+        self.rebuild_runtime_maps();
 
         if self.backing_file.is_none() && self.config.roots.len() == 1 {
             let cache_dir = self.config.roots[0].path.join(".cblast");

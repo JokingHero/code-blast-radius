@@ -148,14 +148,15 @@ const FileNode = (props: {
   };
 
   // NOTE: Auto-expand createEffect removed here to prevent Filesystem DOS
-
   const handleDragStart = (e: DragEvent) => {
     if (e.dataTransfer) {
-      let value = normalizePath(fullPath);
-      if (props.entry.isDirectory) {
-        value = value.endsWith("/") ? `${value}**` : `${value}/**`;
-      }
-      const payload = JSON.stringify({ type: "add_file", value });
+      // Send the raw absolute path. 
+      // The Backend's `resolve_paths` will determine if it's a dir and append /**
+      const payload = JSON.stringify({ 
+        type: "add_file", 
+        value: normalizePath(fullPath) // Send absolute path
+      });
+      
       e.dataTransfer.setData("application/json", payload);
       e.dataTransfer.effectAllowed = "copy";
       if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.opacity = "0.5";
@@ -603,11 +604,11 @@ export const FileExplorer = () => {
         <Show when={state.config}>
             <div class="p-1">
                 <For each={state.config?.roots}>
-                    {(rootPath) => (
+                    {(root) => (
                         <RootFolder 
-                            path={rootPath} 
+                            path={root.path} 
                             canRemove={(state.config?.roots.length || 0) > 1}
-                            onRemove={() => removeRoot(rootPath)}
+                            onRemove={() => removeRoot(root.path)}
                             filter={filter()}
                         />
                     )}

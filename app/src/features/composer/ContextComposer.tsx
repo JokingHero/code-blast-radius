@@ -129,11 +129,17 @@ const ContextFileItem = (props: {
           `}>
              ▶
           </div>
+
+          <Show when={props.file.root_name}>
+            <span class="text-xs font-bold font-mono px-1.5 py-0.5 rounded border border-matrix-primary/30 bg-matrix-primary/10 text-matrix-highlight/80 select-none whitespace-nowrap">
+              {props.file.root_name}
+            </span>
+          </Show>
           <span class="text-sm font-bold uppercase text-matrix-bg bg-matrix-primary/40 px-1.5">
             {props.file.language}
           </span>
           <span class="font-bold text-base font-mono text-matrix-primary truncate" title={props.file.path}>
-            {props.file.path.split(/[/\\]/).slice(-2).join('/')}
+            {props.file.path} 
           </span>
         </div>
         

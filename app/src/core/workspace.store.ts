@@ -8,15 +8,22 @@ import { listen } from "@tauri-apps/api/event";
 export interface ContextFile {
   file_id: number;
   path: string;
+  root_name?: string;
   language: string;
   is_test: boolean;
   relevant_lines: { start: number; end: number }[];
   content?: string | null; 
 }
 
+export interface RootConfig {
+  id: string;
+  path: string;
+  name: string;
+}
+
 export interface WorkspaceConfig {
   name: string;
-  roots: string[]; 
+  roots: RootConfig[];
   mode: 'ad-hoc' | 'project' | 'unsaved-workspace';
 }
 
@@ -79,16 +86,20 @@ export const useWorkspace = () => {
 
   const initSession = async () => {
     try {
-      // Initialize listeners first to catch early events
       await setupListeners();
-
       const settings = await invoke<GlobalSettings>("get_global_settings");
       setState("recentWorkspaces", settings.recent);
+      
       if (settings.last_opened) {
-        await loadWorkspace(settings.last_opened);
+        try {
+           await loadWorkspace(settings.last_opened);
+        } catch (err) {
+           setState("isLoaded", false);
+           setState("config", null);
+        }
       }
     } catch (e) {
-      console.error("Initialization failed", e);
+      console.error("Initialization failed completely", e);
     } finally {
       setState("isInitializing", false);
     }
