@@ -1,4 +1,4 @@
-import { For, Show, createSignal, createEffect, createMemo } from "solid-js";
+import { For, Show, createSignal, createMemo } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { useWorkspace, ContextFile } from "../../core/workspace.store";
@@ -7,7 +7,6 @@ import { EngineRecipe } from "../../core/types";
 
 /**
  * Heuristic for token estimation based on line counts.
- * We don't have the full content anymore, so we guess.
  * Average line of code ~40 chars / 3 chars per token ~= 13 tokens.
  * Plus XML overhead.
  */
@@ -34,7 +33,6 @@ const formatTokenCount = (num: number) => {
 
 const ContextFileItem = (props: { 
   file: ContextFile; 
-  forceState?: boolean | null; 
   recipePayload: EngineRecipe;
 }) => {
   const [isExpanded, setIsExpanded] = createSignal(false);
@@ -42,18 +40,6 @@ const ContextFileItem = (props: {
   const [isLoading, setIsLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [copied, setCopied] = createSignal(false);
-
-  // Handle Force Expand/Collapse from parent
-  createEffect(() => {
-    if (props.forceState !== null && props.forceState !== undefined) {
-      const shouldExpand = props.forceState;
-      if (shouldExpand && !isExpanded()) {
-        toggleNode(); // Trigger fetch if expanding
-      } else if (!shouldExpand) {
-        setIsExpanded(false);
-      }
-    }
-  });
 
   const fetchContent = async () => {
     if (content() || isLoading()) return;
@@ -105,7 +91,6 @@ const ContextFileItem = (props: {
     }
 
     if (textToCopy) {
-        // USE PLUGIN HERE TOO FOR CONSISTENCY
         await writeText(textToCopy);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -203,7 +188,6 @@ export const ContextComposer = () => {
   const { state: workspaceState } = useWorkspace();
   const { recipeState } = useRecipe();
   
-  const [forceExpand, setForceExpand] = createSignal<boolean | null>(null);
   const [isCopiedAll, setIsCopiedAll] = createSignal(false);
   const [isGeneratingXml, setIsGeneratingXml] = createSignal(false);
 
@@ -245,11 +229,6 @@ export const ContextComposer = () => {
     }
   };
 
-  const toggleAll = () => {
-    // If null or false, set to true. If true, set to false.
-    setForceExpand((prev) => prev === true ? false : true);
-  }
-
   const canAction = () => workspaceState.contextFiles.length > 0 && !workspaceState.isSyncing;
 
   return (
@@ -278,16 +257,6 @@ export const ContextComposer = () => {
         </div>
         
         <div class="flex items-center gap-2">
-            <Show when={canAction()}>
-                <button
-                    onClick={toggleAll}
-                    class="text-lg font-bold uppercase tracking-wider px-2 py-1 text-matrix-primary/50 hover:text-matrix-primary transition-colors"
-                >
-                    {forceExpand() === true ? "Collapse All" : "Expand All"}
-                </button>
-                <div class="w-px h-3 bg-matrix-border/50"></div>
-            </Show>
-
             <button 
                 onClick={handleCopyAll}
                 disabled={!canAction() || isGeneratingXml()}
@@ -326,7 +295,6 @@ export const ContextComposer = () => {
                 {(file) => (
                     <ContextFileItem 
                         file={file} 
-                        forceState={forceExpand()} 
                         recipePayload={currentRecipePayload()}
                     />
                 )}

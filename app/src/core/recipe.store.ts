@@ -44,9 +44,10 @@ export const useRecipe = () => {
     let newStep: UiRecipeStep;
     
     if (step.type === "file") {
+      const opType = step.params?.subtype === "RemoveFiles" ? "RemoveFiles" : "AddFiles";
       newStep = {
         id,
-        op: { type: "AddFiles", params: { pattern: step.value } },
+        op: { type: opType, params: { pattern: step.value } },
       };
     } else {
       newStep = {
