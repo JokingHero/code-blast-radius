@@ -1,5 +1,5 @@
 use blast_radius_engine::analysis::boundary::extract_boundary;
-use blast_radius_engine::analysis::language::{get_language_configs, SupportedLanguage};
+use blast_radius_engine::analysis::language::{ get_config_by_language, SupportedLanguage };
 use blast_radius_engine::models::SymbolKind;
 
 struct DefTestCase {
@@ -354,12 +354,11 @@ fn test_comprehensive_definitions_extraction() {
         },
     ];
 
-    let configs = get_language_configs();
     let mut failures = Vec::new();
 
     for case in cases {
-        let config = configs.iter().find(|c| c.lang == case.lang)
-            .unwrap_or_else(|| panic!("Configuration for {:?} not found", case.lang));
+        let config = get_config_by_language(case.lang)
+            .expect(&format!("Config not found for {:?}", case.lang));
 
         let hash = [0u8; 32];
         

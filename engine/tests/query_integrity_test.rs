@@ -1,33 +1,34 @@
-use blast_radius_engine::analysis::language::{get_language_configs, SupportedLanguage};
+use blast_radius_engine::analysis::language::{
+    get_config_by_language, ALL_LANGUAGES, SupportedLanguage
+};
 
 #[test]
 fn test_core_queries_compile() {
-    let configs = get_language_configs();
     let mut failures = Vec::new();
 
-    for config in configs {
-        let name = format!("{:?}", config.lang);
+    for &lang in ALL_LANGUAGES {
+        let config = match get_config_by_language(lang) {
+            Some(c) => c,
+            None => {
+                failures.push(format!("[{:?}] Config not found / failed to load", lang));
+                continue;
+            }
+        };
+
+        let name = format!("{:?}", lang);
         
         // 1. Definitions Query
-        // Every language module in the current codebase defines a 'defs' query.
-        // If this is None, it means the TreeSitter query string failed to compile during the build step.
         if config.queries.definitions.is_none() {
-            failures.push(format!("[{}] Definitions query failed to compile (or is missing)", name));
+            failures.push(format!("[{}] Definitions query failed to compile", name));
         }
 
         // 2. References Query
-        // This is auto-injected by the LanguageConfigBuilder using a generic identifier matcher.
-        // If this fails, it usually means the underlying TreeSitter Grammar (language crate) 
-        // does not support the node types used in the generic query (e.g. 'identifier').
         if config.queries.references.is_none() {
             failures.push(format!("[{}] References query failed to compile", name));
         }
 
         // 3. Imports Query
-        // Not all languages have imports (e.g. JSON, YAML, TOML).
-        // However, for languages that DO, we want to ensure they compiled.
-        // We use an explicit match list for languages where we expect imports.
-        let expects_imports = match config.lang {
+        let expects_imports = match lang {
             SupportedLanguage::Json | 
             SupportedLanguage::Yaml | 
             SupportedLanguage::Toml | 
@@ -39,13 +40,11 @@ fn test_core_queries_compile() {
         };
 
         if expects_imports && config.queries.imports.is_none() {
-             // Note: This might also trigger if a language legitimately hasn't implemented imports yet,
-             // but identifying it as a failure helps track what is unfinished or broken.
-             failures.push(format!("[{}] Imports query failed to compile (or is missing)", name));
+             failures.push(format!("[{}] Imports query failed to compile", name));
         }
     }
 
     if !failures.is_empty() {
-        panic!("Query Integrity Check Failed:\n\nThe following queries returned None, indicating syntax errors in the TreeSitter query strings:\n\n{}", failures.join("\n"));
+        panic!("Query Integrity Check Failed:\n\n{}", failures.join("\n"));
     }
 }

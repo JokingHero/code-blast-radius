@@ -1,5 +1,5 @@
 use blast_radius_engine::analysis::boundary::extract_boundary;
-use blast_radius_engine::analysis::language::{ get_language_configs, SupportedLanguage };
+use blast_radius_engine::analysis::language::{ get_config_by_language, ALL_LANGUAGES, SupportedLanguage };
 struct MalformedCase {
     lang: SupportedLanguage,
     name: &'static str,
@@ -96,13 +96,10 @@ fn test_specific_malformed_syntax_resilience() {
         }
     ];
 
-    let configs = get_language_configs();
     let mut failures = Vec::new();
 
     for case in cases {
-        let config = configs
-            .iter()
-            .find(|c| c.lang == case.lang)
+        let config = get_config_by_language(case.lang)
             .expect(&format!("Config not found for {:?}", case.lang));
 
         let dummy_hash = [0u8; 32];
@@ -158,10 +155,10 @@ fn test_universal_fuzzing() {
         "😊 🚀" // Emoji check
     ];
 
-    let configs = get_language_configs();
     let mut panics = Vec::new();
 
-    for config in configs {
+    for &lang in ALL_LANGUAGES {
+        let config = get_config_by_language(lang).unwrap();
         let lang_name = format!("{:?}", config.lang);
 
         for (i, garbage) in universal_garbage.iter().enumerate() {
@@ -192,11 +189,7 @@ fn test_stack_overflow_resilience() {
     let deep_code = "{".repeat(nesting_level) + &"}".repeat(nesting_level);
 
     // Test against a C-style language (Rust) which uses braces extensively
-    let configs = get_language_configs();
-    let config = configs
-        .iter()
-        .find(|c| c.lang == SupportedLanguage::Rust)
-        .unwrap();
+    let config = get_config_by_language(SupportedLanguage::Rust).unwrap();
 
     let result = std::panic::catch_unwind(|| {
         extract_boundary("deep.rs", &deep_code, config, [0u8; 32])

@@ -1,5 +1,5 @@
 use blast_radius_engine::analysis::boundary::extract_boundary;
-use blast_radius_engine::analysis::language::{ get_language_configs, SupportedLanguage };
+use blast_radius_engine::analysis::language::{ get_config_by_language, SupportedLanguage };
 use std::collections::HashSet;
 struct RefTestCase {
     lang: SupportedLanguage,
@@ -362,13 +362,10 @@ return <UserProfile user={currentUser} />;
         }
     ];
 
-    let configs = get_language_configs();
     let mut failures = Vec::new();
 
     for case in cases {
-        let config = configs
-            .iter()
-            .find(|c| c.lang == case.lang)
+        let config = get_config_by_language(case.lang)
             .expect(&format!("Config not found for {:?}", case.lang));
 
         let dummy_hash = [0u8; 32];

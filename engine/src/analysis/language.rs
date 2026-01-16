@@ -1,5 +1,5 @@
 use tree_sitter::{Language, Query};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use crate::analysis::languages;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -229,29 +229,143 @@ fn get_default_refs_query(lang: SupportedLanguage) -> &'static str {
     }
 }
 
-pub fn get_language_configs() -> Vec<LanguageConfig> {
-    vec![
-        languages::rust::config(),
-        languages::typescript::config(),
-        languages::javascript::config(),
-        languages::python::config(),
-        languages::java::config(),
-        languages::bash::config(),
-        languages::julia::config(),
-        languages::r::config(),
-        languages::html::config(),
-        languages::json::config(),
-        languages::yaml::config(),
-        languages::toml::config(),
-        languages::dotenv::config(),
-        languages::sql::config(),
-        languages::prisma::config(),
-        languages::hcl::config(),
-        languages::go::config(),
-        languages::c_sharp::config(),
-        languages::php::config(),
-        languages::ruby::config(),
-        languages::c::config(),
-        languages::cpp::config(),
-    ]
+pub fn get_config_for_extension(ext: &str) -> Option<&'static LanguageConfig> {
+    match ext {
+        // Rust
+        "rs" => Some(get_rust_config()),
+        
+        // JavaScript / TypeScript ecosystem
+        "ts" | "tsx" => Some(get_typescript_config()),
+        "js" | "jsx" | "mjs" | "cjs" | "vue" => Some(get_javascript_config()),
+        "json" => Some(get_json_config()),
+        
+        // Python
+        "py" | "pyi" | "pyw" => Some(get_python_config()),
+        
+        // Backend / Systems
+        "java" => Some(get_java_config()),
+        "go" => Some(get_go_config()),
+        "cs" => Some(get_c_sharp_config()),
+        "c" | "h" => Some(get_c_config()),
+        "cpp" | "hpp" | "cc" | "cxx" | "hh" => Some(get_cpp_config()),
+        "php" => Some(get_php_config()),
+        "rb" => Some(get_ruby_config()),
+        
+        // Data / Config
+        "sql" => Some(get_sql_config()),
+        "yaml" | "yml" => Some(get_yaml_config()),
+        "toml" => Some(get_toml_config()),
+        "tf" | "hcl" | "tfvars" => Some(get_hcl_config()),
+        "prisma" => Some(get_prisma_config()),
+        "env" | "env.example" | "env.template" | "env.local" | "env.development" | "env.test" | "env.production" => Some(get_dotenv_config()),
+        
+        // Scripts / Other
+        "sh" | "bash" | "zsh" => Some(get_bash_config()),
+        "html" | "htm" | "xhtml" => Some(get_html_config()),
+        "jl" => Some(get_julia_config()),
+        "R" | "r" | "Rscript" => Some(get_r_config()),
+        
+        _ => None,
+    }
+}
+
+/// Macro to generate lazy accessors for language configs.
+/// This keeps the global namespace clean and avoids 22 blocks of repetitive code.
+macro_rules! define_lazy_configs {
+    ($($name:ident => $module:ident),* $(,)?) => {
+        $(
+            fn $name() -> &'static LanguageConfig {
+                static CONFIG: OnceLock<LanguageConfig> = OnceLock::new();
+                CONFIG.get_or_init(|| languages::$module::config())
+            }
+        )*
+    };
+}
+
+// Generate the lazy loaders
+define_lazy_configs!(
+    get_rust_config => rust,
+    get_typescript_config => typescript,
+    get_javascript_config => javascript,
+    get_python_config => python,
+    get_java_config => java,
+    get_bash_config => bash,
+    get_julia_config => julia,
+    get_r_config => r,
+    get_html_config => html,
+    get_json_config => json,
+    get_yaml_config => yaml,
+    get_toml_config => toml,
+    get_dotenv_config => dotenv,
+    get_sql_config => sql,
+    get_prisma_config => prisma,
+    get_hcl_config => hcl,
+    get_go_config => go,
+    get_c_sharp_config => c_sharp,
+    get_php_config => php,
+    get_ruby_config => ruby,
+    get_c_config => c,
+    get_cpp_config => cpp,
+);
+
+/// A list of all supported languages, primarily used for integrity testing.
+pub const ALL_LANGUAGES: &[SupportedLanguage] = &[
+    SupportedLanguage::Rust,
+    SupportedLanguage::TypeScript,
+    SupportedLanguage::JavaScript,
+    SupportedLanguage::Python,
+    SupportedLanguage::Java,
+    SupportedLanguage::Go,
+    SupportedLanguage::CSharp,
+    SupportedLanguage::Ruby,
+    SupportedLanguage::Php,
+    SupportedLanguage::C,
+    SupportedLanguage::Cpp,
+    SupportedLanguage::Bash,
+    SupportedLanguage::Html,
+    SupportedLanguage::Julia,
+    SupportedLanguage::R,
+    SupportedLanguage::Json,
+    SupportedLanguage::Yaml,
+    SupportedLanguage::Toml,
+    SupportedLanguage::Dotenv,
+    SupportedLanguage::Sql,
+    SupportedLanguage::Prisma,
+    SupportedLanguage::Hcl,
+];
+
+/// Helper for tests and internal logic to get a config directly from the Enum.
+/// It maps the Enum to a representative file extension and triggers the lazy load.
+pub fn get_config_by_language(lang: SupportedLanguage) -> Option<&'static LanguageConfig> {
+    let ext = match lang {
+        SupportedLanguage::Rust => "rs",
+        SupportedLanguage::TypeScript => "ts",
+        SupportedLanguage::JavaScript => "js",
+        SupportedLanguage::Python => "py",
+        SupportedLanguage::Java => "java",
+        SupportedLanguage::Bash | SupportedLanguage::Dotenv => "sh", // Dotenv shares logic or maps to specific loader
+        SupportedLanguage::Html => "html",
+        SupportedLanguage::Julia => "jl",
+        SupportedLanguage::R => "r",
+        SupportedLanguage::Json => "json",
+        SupportedLanguage::Yaml => "yaml",
+        SupportedLanguage::Toml => "toml",
+        SupportedLanguage::Sql => "sql",
+        SupportedLanguage::Prisma => "prisma",
+        SupportedLanguage::Hcl => "tf",
+        SupportedLanguage::Go => "go",
+        SupportedLanguage::CSharp => "cs",
+        SupportedLanguage::Php => "php",
+        SupportedLanguage::Ruby => "rb",
+        SupportedLanguage::C => "c",
+        SupportedLanguage::Cpp => "cpp",
+    };
+    
+    // Special handling for Dotenv if it has a unique loader separate from Bash in your logic,
+    // otherwise the match above handles the mapping.
+    if lang == SupportedLanguage::Dotenv {
+        return get_config_for_extension("env");
+    }
+
+    get_config_for_extension(ext)
 }

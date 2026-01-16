@@ -1,6 +1,5 @@
 use blast_radius_engine::analysis::extract_boundary;
-use blast_radius_engine::analysis::language::{get_language_configs, SupportedLanguage};
-
+use blast_radius_engine::analysis::language::{ get_config_by_language, SupportedLanguage };
 struct TestCase {
     lang: SupportedLanguage,
     name: &'static str,
@@ -243,17 +242,12 @@ fn test_body_capture_across_languages() {
         },
     ];
 
-    let configs = get_language_configs();
-    println!("DEBUG: Loaded Language Configs: {:?}", 
-        configs.iter().map(|c| c.lang).collect::<Vec<_>>()
-    );
     let mut failures = Vec::new();
 
     for case in cases {
         println!("Testing case: {} ({:?})", case.name, case.lang);
 
-        // Find config
-        let config = configs.iter().find(|c| c.lang == case.lang)
+        let config = get_config_by_language(case.lang)
             .expect(&format!("Config not found for {:?}", case.lang));
 
         // --- Call extract_boundary with a dummy hash ---

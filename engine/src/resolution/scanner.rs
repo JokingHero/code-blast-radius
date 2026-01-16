@@ -8,23 +8,12 @@ use pathdiff;
 
 use crate::models::{BoundaryIndex, FileBoundary, FileId};
 use crate::analysis::boundary::extract_boundary;
-use crate::analysis::language::{get_language_configs, LanguageConfig};
-
-pub struct FileScanner {
-    pub configs: HashMap<String, LanguageConfig>,
-}
+use crate::analysis::language::get_config_for_extension;
+pub struct FileScanner; 
 
 impl FileScanner {
     pub fn new() -> Self {
-        let mut config_map = HashMap::new();
-        for config in get_language_configs() {
-            for &ext in config.file_extensions {
-                config_map.insert(ext.to_string(), config.clone());
-            }
-        }
-        Self {
-            configs: config_map,
-        }
+        Self
     }
 
     pub fn scan(
@@ -34,8 +23,6 @@ impl FileScanner {
         root_id: &str
     ) {
         let root_abs = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-        
-        // 1. Walk & Collect Candidates
         let walker = WalkBuilder::new(&root_abs)
             .hidden(false)
             .git_ignore(true)
@@ -50,7 +37,6 @@ impl FileScanner {
             }
         }
 
-        // 2. Parallel Read & Hash
         struct FileData {
             relative_path: String,
             extension: String,
@@ -63,9 +49,15 @@ impl FileScanner {
             .filter_map(|path| {
                 let extension = path.extension()?.to_str()?.to_string();
                 
-                if !self.configs.contains_key(&extension) {
+                // We check if we have a config for this extension. 
+                // Note: get_config_for_extension will LAZILY initialize the config 
+                // if this is the first time we see this extension.
+                // Since this is inside rayon par_iter, multiple threads might hit this at once.
+                // OnceLock handles thread safety automatically.
+                if get_config_for_extension(&extension).is_none() {
                     return None;
                 }
+                // ---------------
 
                 let content = fs::read_to_string(&path).ok()?;
                 let hash = blake3::hash(content.as_bytes()).into();
@@ -90,13 +82,12 @@ impl FileScanner {
             .map(|f| f.relative_path.clone())
             .collect();
 
-        // 3. Identify & Process Changes (Parallel Parse)
+        // Identify & Process Changes (Parallel Parse)
         let existing_files: HashMap<String, [u8; 32]> = index.files.values()
             .filter(|f| f.root_id == root_id)
             .map(|f| (f.path.clone(), f.hash))
             .collect();
         
-        // Map path -> existing ID to preserve IDs across updates
         let existing_ids: HashMap<String, FileId> = index.files.values()
             .filter(|f| f.root_id == root_id)
             .map(|f| (f.path.clone(), f.id))
@@ -105,15 +96,17 @@ impl FileScanner {
         let new_boundaries: Vec<FileBoundary> = scanned_files
             .into_par_iter()
             .filter_map(|file_data| {
-                // Check if unchanged
                 if let Some(&old_hash) = existing_files.get(&file_data.relative_path) {
                     if old_hash == file_data.hash {
-                        return None; // SKIP PARSING
+                        return None; 
                     }
                 }
 
-                // PARSE
-                let config = &self.configs[&file_data.extension];
+                // We unwrap here safely because we checked .is_none() in the previous step.
+                // This ensures we have the config loaded.
+                let config = get_config_for_extension(&file_data.extension).unwrap();
+                // ---------------
+
                 match extract_boundary(
                     &file_data.relative_path,
                     &file_data.content,
@@ -122,7 +115,6 @@ impl FileScanner {
                 ) {
                     Ok(mut boundary) => {
                         boundary.root_id = root_id.to_string();
-                        // Preserve ID if it existed
                         if let Some(&id) = existing_ids.get(&file_data.relative_path) {
                             boundary.id = id;
                         }
