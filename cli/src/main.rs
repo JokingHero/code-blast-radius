@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process;
 use anyhow::{Context, Result};
 
-use blast_radius_engine::query::traversal::{GraphWalker, TraversalMode};
+use blast_radius_engine::query::walker::JitWalker;
 use blast_radius_engine::query::output::generate_context_output;
 use blast_radius_engine::workspace::WorkspaceManager;
 use blast_radius_engine::recipes::executor::RecipeExecutor;
@@ -200,16 +200,8 @@ fn run() -> Result<()> {
                 RecipeAction::Run { name, metadata } => {
                     let recipe = manager.config.recipes.get(name)
                         .ok_or_else(|| anyhow::anyhow!("Recipe '{}' not found", name))?;
-                    let root_map: std::collections::HashMap<String, String> = manager.config.roots
-                        .iter()
-                        .map(|r| {
-                            let name = r.path.file_name()
-                                .map(|n| n.to_string_lossy().to_string())
-                                .unwrap_or_else(|| "root".to_string());
-                            (r.id.clone(), name)
-                        })
-                        .collect();
-                    let executor = RecipeExecutor::new(&manager.indexer, root_map);
+                    // map manager.index instead of manager.indexer
+                    let executor = RecipeExecutor::new(&manager.index, manager.get_root_map());
                     
                     if *metadata {
                         // MCP Mode: Return JSON list of files (no heavy content)
@@ -226,79 +218,81 @@ fn run() -> Result<()> {
 
         // --- QUERY: RADIUS ---
         Commands::Radius { symbol, no_tests, depth } => {
-            let indexer = &manager.indexer;
+            let index = &manager.index;
             
             // Step A: Check if input is a File Path
-            let matching_file_id = indexer.index.files.values()
-                .find(|f| f.relative_path.ends_with(symbol) || f.relative_path == *symbol)
+            // FIX: Using as_str() to satisfy ends_with trait bound
+            let matching_file_id = index.files.values()
+                .find(|f| f.path.ends_with(symbol.as_str()) || f.path == *symbol)
                 .map(|f| f.id);
 
             let mut start_ids = Vec::new();
 
             if let Some(fid) = matching_file_id {
-                for sym in indexer.index.symbols.values() {
-                    if sym.file_id == fid {
-                        start_ids.push(sym.id);
-                    }
-                }
+                start_ids.push(fid);
             } else {
-                if let Some(ids) = indexer.lookup.symbol_map.get(symbol) {
+                if let Some(ids) = index.symbol_map.get(symbol) {
                     start_ids.extend(ids.iter());
                 } else {
                     anyhow::bail!("Symbol or File not found: {}", symbol);
                 }
             }
 
-            // Step B: Traverse Graph
-            let walker = GraphWalker::new(
-                &indexer.index, 
-                &indexer.reverse_graph, 
-                TraversalMode::Impact,
-                *depth
-            );
+            // Step B: Traverse Graph (Using JitWalker)
+            let walker = JitWalker::new(index);
             
-            let mut related_ids = walker.walk_deep(&start_ids);
+            // Default depth if not provided
+            let d = depth.unwrap_or(5);
+            let mut related_ids = walker.walk_impact(&start_ids, d);
 
             if *no_tests {
                 related_ids.retain(|&id| {
-                    indexer.index.symbols.get(&id).map_or(true, |s| !s.is_test)
+                    if let Some(f) = index.files.get(&id) {
+                         !f.path.contains("test") && !f.path.contains("spec")
+                    } else {
+                        true
+                    }
                 });
             }
 
             // Radius command always uses full content output
-            let output = generate_context_output(&indexer.index, &related_ids, &indexer.id_map);
+            let id_map: std::collections::HashMap<u32, String> = index.files.values()
+                .map(|f| (f.id, f.path.clone()))
+                .collect();
+                
+            let output = generate_context_output(index, &related_ids, &id_map);
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
 
         // --- QUERY: FIND ---
         Commands::Find { query, limit } => {
-            let indexer = &manager.indexer;
+            let index = &manager.index;
             let mut matcher = Matcher::new(Config::DEFAULT);
             let mut results = Vec::new();
             let query_utf32 = Utf32String::from(query.as_str());
 
-            for sym in indexer.index.symbols.values() {
-                if let Some(score) = matcher.fuzzy_match(Utf32String::from(sym.name.as_str()).slice(..), query_utf32.slice(..)) {
-                    let file_path = indexer.index.files.values()
-                        .find(|f| f.id == sym.file_id)
-                        .map(|f| f.relative_path.as_str())
+            for (name, ids) in &index.symbol_map {
+                 if let Some(score) = matcher.fuzzy_match(Utf32String::from(name.as_str()).slice(..), query_utf32.slice(..)) {
+                    // For display, just pick the first file defining it
+                    let file_path = ids.first().and_then(|id| index.files.get(id))
+                        .map(|f| f.path.as_str())
                         .unwrap_or("unknown");
 
                     results.push(MatchResult {
-                        name: sym.name.clone(),
-                        kind: format!("{:?}", sym.kind),
+                        name: name.clone(),
+                        kind: "Symbol".to_string(), // We don't store Kind in symbol_map anymore, would need lookup
                         path: file_path.to_string(),
                         score,
                     });
-                }
+                 }
             }
 
-            for file in indexer.index.files.values() {
-                if let Some(score) = matcher.fuzzy_match(Utf32String::from(file.relative_path.as_str()).slice(..), query_utf32.slice(..)) {
+            for file in index.files.values() {
+                if let Some(score) = matcher.fuzzy_match(Utf32String::from(file.path.as_str()).slice(..), query_utf32.slice(..)) {
                     results.push(MatchResult {
-                        name: file.relative_path.clone(),
+                        name: file.path.clone(),
                         kind: "File".to_string(),
-                        path: file.relative_path.clone(),
+                        path: file.path.clone(),
                         score,
                     });
                 }

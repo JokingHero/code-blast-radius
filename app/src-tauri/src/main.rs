@@ -144,26 +144,41 @@ fn normalize_recipe(manager: &WorkspaceManager, mut recipe: Recipe) -> Recipe {
     for op in &mut recipe.operations {
         match op {
             RecipeOperation::AddFiles { pattern } | RecipeOperation::RemoveFiles { pattern } => {
-                // Check if pattern is an Absolute Path that exists in our index
+                // Check if pattern is checking for absolute path?
+                // The pattern string from UI might be absolute.
                 let path_buf = PathBuf::from(&*pattern);
-                // We attempt to canonicalize if it exists to match the keys in path_map
-                // If it doesn't exist (e.g. deleted file), we rely on raw path lookup or leave as is
+                
+                // We resolve to absolute path first
                 let lookup_path = if path_buf.exists() {
-                    std::fs::canonicalize(&path_buf).unwrap_or(path_buf)
+                     std::fs::canonicalize(&path_buf).unwrap_or(path_buf.clone())
                 } else {
-                    path_buf
+                     path_buf.clone()
                 };
 
-                if let Some(&id) = manager.indexer.path_map.get(&lookup_path) {
-                    // It's a known file! Retrieve its relative path.
-                    // We have to scan values because we don't have ID->Node map in O(1) inside this scope easily
-                    // Actually `index.files` is Key->Node. `index.files` values are nodes.
-                    if let Some(node) = manager.indexer.index.files.values().find(|f| f.id == id) {
-                        *pattern = node.relative_path.clone();
+                // Now we need to find if this Absolute Path matches a known file.
+                // Since path_map is relative segments, we can't look it up directly.
+                // We must map Abs -> Rel first.
+                
+                // Try to find which root contains this path
+                for root in &manager.config.roots {
+                    if lookup_path.starts_with(&root.path) {
+                        if let Ok(rel) = lookup_path.strip_prefix(&root.path) {
+                            let rel_str = rel.to_string_lossy().replace('\\', "/");
+                            // Now we have a relative path string. 
+                            // We can use it as the pattern!
+                            
+                            // Optionally verify it exists in index?
+                            if let Some(ids) = manager.index.path_map.get(&rel_str) {
+                                if !ids.is_empty() {
+                                    *pattern = rel_str;
+                                    break;
+                                }
+                            }
+                            
+                            // Even if not in index (maybe ignored/new), using relative path is safer for recipe portability.
+                            *pattern = rel_str;
+                        }
                     }
-                } else {
-                    // Fallback: It might already be a relative glob (e.g. "src/**/*.ts")
-                    // Do nothing.
                 }
             }
             _ => {}
@@ -328,39 +343,45 @@ async fn search_symbols(
 ) -> Result<Vec<SearchResult>, String> {
     let guard = state.manager.read().await;
     let manager = guard.as_ref().ok_or("Workspace not loaded")?;
-    let indexer = &manager.indexer;
+    let index = &manager.index; // Renamed from indexer
 
     let mut matcher = Matcher::new(Config::DEFAULT);
     let mut results = Vec::new();
     let query_utf32 = Utf32String::from(query.as_str());
 
     // 1. Search Symbols
-    for sym in indexer.index.symbols.values() {
+    // index.symbol_map is HashMap<String, Vec<FileId>>
+    for (name, ids) in &index.symbol_map {
         if
             let Some(score) = matcher.fuzzy_match(
-                Utf32String::from(sym.name.as_str()).slice(..),
+                Utf32String::from(name.as_str()).slice(..),
                 query_utf32.slice(..)
             )
         {
-            // Find Relative Path
-            let file_path = indexer.index.files
-                .values()
-                .find(|f| f.id == sym.file_id)
-                .map(|f| f.relative_path.clone())
-                .unwrap_or_default();
+            // Find Relative Path and Kind
+            // Just use the first file occurrence
+            if let Some(&file_id) = ids.first() {
+                if let Some(file_node) = index.files.get(&file_id) {
+                     // Look for definition to get kind
+                     let kind = file_node.defs.iter()
+                        .find(|d| d.name == *name)
+                        .map(|d| format!("{:?}", d.kind))
+                        .unwrap_or_else(|| "Unknown".to_string());
 
-            results.push(SearchResult {
-                name: sym.name.clone(),
-                kind: format!("{:?}", sym.kind),
-                path: file_path,
-                score,
-            });
+                     results.push(SearchResult {
+                        name: name.clone(),
+                        kind,
+                        path: file_node.path.clone(),
+                        score,
+                    });
+                }
+            }
         }
     }
 
     // 2. Search Files (Match against Relative Path)
-    for file in indexer.index.files.values() {
-        let display_name = file.relative_path.clone();
+    for file in index.files.values() {
+        let display_name = file.path.clone();
 
         if
             let Some(score) = matcher.fuzzy_match(
@@ -384,10 +405,7 @@ async fn search_symbols(
 
 fn get_root_map(manager: &WorkspaceManager) -> HashMap<String, String> {
     manager.config.roots.iter().map(|r| {
-        let name = r.path.file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "root".to_string());
-        (r.id.clone(), name)
+        (r.id.clone(), r.path.to_string_lossy().to_string())
     }).collect()
 }
 
@@ -405,7 +423,8 @@ async fn execute_recipe(
     // Normalize paths (Abs -> Rel)
     recipe = normalize_recipe(manager, recipe);
     let root_map = get_root_map(manager);
-    let executor = RecipeExecutor::new(&manager.indexer, root_map);
+    // manager.index instead of manager.indexer
+    let executor = RecipeExecutor::new(&manager.index, root_map);
 
     // Metadata only!
     let output = executor
@@ -429,7 +448,7 @@ async fn get_file_content(
 
     recipe = normalize_recipe(manager, recipe);
     let root_map = get_root_map(manager);
-    let executor = RecipeExecutor::new(&manager.indexer, root_map);
+    let executor = RecipeExecutor::new(&manager.index, root_map);
 
     match executor.get_file_content(file_id, &recipe) {
         Ok(Some(content)) => Ok(content),
@@ -451,7 +470,7 @@ async fn generate_xml_bundle(
 
     recipe = normalize_recipe(manager, recipe);
     let root_map = get_root_map(manager);
-    let executor = RecipeExecutor::new(&manager.indexer, root_map);
+    let executor = RecipeExecutor::new(&manager.index, root_map);
 
     // Full content execution
     let output = executor.execute_full(&recipe).map_err(|e| format!("Execution failed: {}", e))?;
@@ -514,7 +533,7 @@ async fn resolve_paths(
 ) -> Result<Vec<ResolvedPathDTO>, String> {
     let guard = state.manager.read().await;
     let manager = guard.as_ref().ok_or("Workspace not loaded")?;
-    let indexer = &manager.indexer;
+    let index = &manager.index;
 
     let mut results = Vec::new();
 
@@ -527,56 +546,55 @@ async fn resolve_paths(
             path_buf.clone()
         };
 
-        // 1. Check path_map (Absolute -> FileId)
-        if let Some(&file_id) = indexer.path_map.get(&lookup_path) {
-            // Found in index! Get the relative path.
-            if let Some(file_node) = indexer.index.files.values().find(|f| f.id == file_id) {
-                results.push(ResolvedPathDTO {
-                    original: path_str,
-                    relative_path: Some(file_node.relative_path.clone()),
-                    root_id: Some(file_node.root_id.clone()),
-                    is_indexed: true,
-                });
-                continue;
-            }
-        }
-
-        // 2. Handle Directory Drops (Partial Matches)
-        // If the user drops "src/utils/", and we have files inside it, 
-        // we need to return a glob like "src/utils/**"
-        // This is trickier with O(1) lookups. 
-        // For V1, let's check if the path is contained within any Root.
+        // 1. Manually match against Roots to get Relative Path
+        // Because index.path_map only stores relative segments
+        let mut found_match = false;
         
-        let mut found_root = None;
-        let mut rel_path_candidate = None;
-
         for root in &manager.config.roots {
             if lookup_path.starts_with(&root.path) {
-                // It is inside this root.
                 if let Ok(rel) = lookup_path.strip_prefix(&root.path) {
-                    // Convert to unix style for globs
                     let rel_str = rel.to_string_lossy().replace('\\', "/");
                     
-                    rel_path_candidate = Some(if lookup_path.is_dir() {
-                        format!("{}/**", rel_str)
-                    } else {
-                        rel_str
-                    });
+                    // Now check if this relative path exists in our index
+                    // We can check path_map for the exact relative path string
+                    if let Some(ids) = index.path_map.get(&rel_str) {
+                         // Double check against file nodes to be sure we have the exact file
+                         if let Some(&file_id) = ids.iter().find(|&&id| {
+                             if let Some(f) = index.files.get(&id) {
+                                 return f.path == rel_str;
+                             }
+                             false
+                         }) {
+                             // SUCCESS
+                             if let Some(file_node) = index.files.get(&file_id) {
+                                 results.push(ResolvedPathDTO {
+                                    original: path_str.clone(),
+                                    relative_path: Some(file_node.path.clone()),
+                                    root_id: Some(file_node.root_id.clone()),
+                                    is_indexed: true,
+                                 });
+                                 found_match = true;
+                                 break;
+                             }
+                         }
+                    }
                     
-                    found_root = Some(root.id.clone());
-                    break;
+                    // If not found in index, but it is inside a root (e.g. valid file but ignored/new)
+                    if !found_match {
+                        results.push(ResolvedPathDTO {
+                            original: path_str.clone(),
+                            relative_path: Some(rel_str),
+                            root_id: Some(root.id.clone()),
+                            is_indexed: false,
+                         });
+                         found_match = true;
+                         break;
+                    }
                 }
             }
         }
 
-        if let Some(root_id) = found_root {
-            results.push(ResolvedPathDTO {
-                original: path_str,
-                relative_path: rel_path_candidate,
-                root_id: Some(root_id),
-                is_indexed: false, // Not a specific file in the index, but valid for a glob
-            });
-        } else {
+        if !found_match {
             // Completely outside workspace
             results.push(ResolvedPathDTO {
                 original: path_str,

@@ -1,73 +1,122 @@
-mod common;
-use common::TestWorkspace;
-use blast_radius_engine::resolution::{Indexer, pipeline::Pipeline};
+use blast_radius_engine::models::BoundaryIndex;
+use blast_radius_engine::resolution::scanner::FileScanner;
+use blast_radius_engine::resolution::persistence::PersistenceManager;
+use std::fs;
+use tempfile::TempDir;
 
-fn has_func(index: &blast_radius_engine::models::WorkspaceIndex, name: &str) -> bool {
-    index.symbols.values().any(|s| s.name == name)
+// Helper to check for symbol existence in the new BoundaryIndex
+fn has_func(index: &BoundaryIndex, name: &str) -> bool {
+    index.symbol_map.contains_key(name)
 }
 
 #[test]
 fn test_persistence_lifecycle() {
-    let workspace = TestWorkspace::new();
-    let index_file = workspace.path.join(".index");
+    // Setup
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let workspace_path = temp_dir.path();
+    let index_file = workspace_path.join(".cblast.index");
+    let root_id = "root_1";
 
-    workspace.create_file("math.ts", r#"
-        function add(a, b) { return a + b; }
-    "#);
+    let persistence = PersistenceManager::new();
+    let scanner = FileScanner::new();
 
-    // Run 1
+    // Create Content
+    fs::write(
+        workspace_path.join("math.ts"),
+        r#"function add(a, b) { return a + b; }"#
+    ).expect("Failed to write math.ts");
+
+    // Run 1: Scan and Save
     {
-        let mut indexer = Indexer::new();
-        common::run_pipeline(&mut indexer, &workspace.path);
-        indexer.save(&index_file).expect("Failed to save index");
+        let mut index = BoundaryIndex::new();
+        scanner.scan(workspace_path, &mut index, root_id);
+        persistence.save_index(&index, &index_file).expect("Failed to save index");
     }
 
-    // Run 2
+    // Run 2: Load and Verify
     {
-        let loaded_indexer = Indexer::load_from_file(&index_file).expect("Failed to load");
-        assert!(has_func(&loaded_indexer.index, "add"), "Loaded index missing 'add'");
+        let loaded_index = persistence.load_index(&index_file).expect("Failed to load");
+        assert!(has_func(&loaded_index, "add"), "Loaded index missing 'add'");
     }
 }
 
 #[test]
 fn test_incremental_updates() {
-    let workspace = TestWorkspace::new();
-    let index_file = workspace.path.join(".index");
+    // Setup
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let workspace_path = temp_dir.path();
+    let index_file = workspace_path.join(".cblast.index");
+    let root_id = "root_1";
 
-    // Phase 1
-    workspace.create_file("logic.py", "def init_system():\n    pass");
+    let persistence = PersistenceManager::new();
+    let scanner = FileScanner::new();
+
+    // Phase 1: Initial State
+    fs::write(
+        workspace_path.join("logic.py"), 
+        "def init_system():\n    pass"
+    ).expect("Failed to write logic.py");
+
     {
-        let mut indexer = Indexer::new();
-        let pipeline = Pipeline::new();
-        pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
-        indexer.save(&index_file).unwrap();
+        let mut index = BoundaryIndex::new();
+        scanner.scan(workspace_path, &mut index, root_id);
+        persistence.save_index(&index, &index_file).expect("Failed to save index");
     }
 
-    // Phase 2
-    workspace.create_file("logic.py", "def init_system_v2():\n    pass");
-    workspace.create_file("utils.py", "def helper():\n    pass");
+    // Phase 2: Modify one file, Add another
+    fs::write(
+        workspace_path.join("logic.py"), 
+        "def init_system_v2():\n    pass"
+    ).expect("Failed to modify logic.py");
+    
+    fs::write(
+        workspace_path.join("utils.py"), 
+        "def helper():\n    pass"
+    ).expect("Failed to write utils.py");
 
     {
-        let mut indexer = Indexer::load_from_file(&index_file).unwrap();
+        // 1. Load previous state
+        let mut index = persistence.load_index(&index_file).expect("Failed to load");
         
-        assert!(has_func(&indexer.index, "init_system"));
-        assert!(!has_func(&indexer.index, "helper"));
+        // Sanity Check: Before scanning, it should look like the old state
+        assert!(has_func(&index, "init_system"), "Old symbol should be present before rescan");
+        assert!(!has_func(&index, "init_system_v2"), "New symbol should not be present before rescan");
+        assert!(!has_func(&index, "helper"), "New file symbol should not be present before rescan");
 
-        // 2. Create a FRESH staging area for the update scan
-        let pipeline = Pipeline::new();
-    pipeline.scan(&mut indexer, &workspace.path, Some("root_1"));
+        // 2. Incremental Scan
+        scanner.scan(workspace_path, &mut index, root_id);
 
-        assert!(has_func(&indexer.index, "helper"), "Incremental scan missed new file");
-        assert!(has_func(&indexer.index, "init_system_v2"), "Incremental scan missed modified function");
+        // 3. Assertions
+        assert!(
+            has_func(&index, "helper"), 
+            "Incremental scan missed new file 'utils.py'"
+        );
+        assert!(
+            has_func(&index, "init_system_v2"), 
+            "Incremental scan missed modified function in 'logic.py'"
+        );
+        assert!(
+            !has_func(&index, "init_system"), 
+            "Incremental scan failed to remove old function from 'logic.py'"
+        );
     }
 }
 
 #[test]
 fn test_corrupted_index_recovery() {
-    let workspace = TestWorkspace::new();
-    let index_file = workspace.path.join("corrupt.index");
-    workspace.create_file("corrupt.index", "This is not a valid rkyv archive");
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let workspace_path = temp_dir.path();
+    let index_file = workspace_path.join("corrupt.cblast.index");
     
-    let indexer = Indexer::load_from_file(&index_file).expect("Should recover from corruption");
-    assert!(indexer.index.files.is_empty());
+    // Write garbage data
+    fs::write(&index_file, "This is not a valid rkyv archive").expect("Failed to write corruption");
+    
+    let persistence = PersistenceManager::new();
+    
+    // Attempt load
+    let index = persistence.load_index(&index_file).expect("Should recover (return empty) from corruption, not panic");
+    
+    // Should result in a fresh, empty index
+    assert!(index.files.is_empty(), " recovered index should be empty");
+    assert!(index.symbol_map.is_empty(), " recovered symbol map should be empty");
 }

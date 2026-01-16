@@ -1,8 +1,8 @@
 pub mod models;
-pub mod resolution;
 pub mod analysis;
 pub mod manifest;
-pub mod topic;
-pub mod query;
 pub mod workspace;
 pub mod recipes;
+pub mod resolution; 
+pub mod query;
+pub mod topic;

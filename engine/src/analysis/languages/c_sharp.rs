@@ -12,6 +12,15 @@ pub fn config() -> LanguageConfig {
         (interface_declaration name: (identifier) @function.name) @function.definition
         (struct_declaration name: (identifier) @function.name) @function.definition
         (record_declaration name: (identifier) @function.name) @function.definition
+
+        ;; Support for C# 9+ top-level statements / local functions
+        (local_function_statement name: (identifier) @function.name) @function.definition
+
+        ;; Robust fallback: Identifier immediately followed by parameters is the function name
+        (method_declaration 
+            (identifier) @function.name
+            (parameter_list)
+        ) @function.definition
     "#)
     .calls(r#"
         (invocation_expression

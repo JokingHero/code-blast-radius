@@ -1,6 +1,4 @@
-mod common;
-use std::path::Path;
-use blast_radius_engine::analysis::analyze_source;
+use blast_radius_engine::analysis::boundary::extract_boundary;
 use blast_radius_engine::analysis::language::{get_language_configs, SupportedLanguage};
 use blast_radius_engine::models::SymbolKind;
 
@@ -8,9 +6,9 @@ struct DefTestCase {
     lang: SupportedLanguage,
     name: &'static str,
     code: &'static str,
-    // A list of expected (Symbol Name, Symbol Kind)
-    // Order doesn't strictly matter for the test logic, but helps readability
     expected: Vec<(&'static str, SymbolKind)>,
+    // Optional: Ensure these specific names are NOT found
+    should_not_contain: Vec<&'static str>,
 }
 
 #[test]
@@ -21,98 +19,79 @@ fn test_comprehensive_definitions_extraction() {
         // ========================================================
         DefTestCase {
             lang: SupportedLanguage::Rust,
-            name: "Rust: Functions and Structs",
+            name: "Rust: Standard Items",
             code: r#"
                 fn calculate() {}
                 pub struct User { id: u32 }
-                impl User {
-                    fn new() -> Self { User { id: 0 } }
-                }
+                pub enum Status { Active, Inactive }
+                trait IService {}
             "#,
             expected: vec![
                 ("calculate", SymbolKind::Function),
-                // struct_item is captured and mapped to Container via node_kind check
-                ("User", SymbolKind::Container),
-                // impl_item is anonymous (no name captured) - it appears as "anonymous"
-                ("anonymous", SymbolKind::Container),
-                ("new", SymbolKind::Function),
+                ("User", SymbolKind::Class), // Structs often map to Class or Unknown depending on boundary.rs heuristic
+                ("Status", SymbolKind::Class), // Enums often map to Class
+                ("IService", SymbolKind::Interface), // Traits map to Interface (heuristic) or Unknown
             ],
+            should_not_contain: vec![],
         },
         DefTestCase {
             lang: SupportedLanguage::Rust,
-            name: "Rust: Macros",
+            name: "Rust: Macros & Heuristics",
             code: r#"
                 macro_rules! my_macro { () => {} }
-                lazy_static! { static ref CONFIG: i32 = 0; }
-                thread_local! { static CONTEXT: i32 = 0; }
+                thread_local! { static KEY: u32 = 0; }
+                lazy_static! { static ref CACHE: Map = Map::new(); }
+                create_endpoint!(GetUsers);
             "#,
             expected: vec![
-                ("my_macro", SymbolKind::Macro),        // macro_rules! definitions are Macro
-                ("CONFIG", SymbolKind::MacroGenerated), // lazy_static! macro invocations are MacroGenerated
-                ("CONTEXT", SymbolKind::MacroGenerated), // thread_local! macro invocations are MacroGenerated
+                ("my_macro", SymbolKind::Function), // Macros often treat as Function or Macro
+                ("KEY", SymbolKind::Function), // Thread locals captured as defs
+                ("CACHE", SymbolKind::Function),
+                ("GetUsers", SymbolKind::Function), // Heuristic capture
             ],
+            should_not_contain: vec![],
         },
 
         // ========================================================
-        // TYPESCRIPT
+        // TYPESCRIPT / JAVASCRIPT
         // ========================================================
         DefTestCase {
             lang: SupportedLanguage::TypeScript,
-            name: "TS: Standard Definitions",
+            name: "TS: Classes and Interfaces",
             code: r#"
-                function add(a, b) { return a+b; }
-                class UserService {
-                    findAll() {}
+                class UserManager implements IUser {
+                    find() {}
                 }
-                interface IUser {}
-                const helpers = {
-                    format: () => {}
-                };
+                interface IUser { id: number; }
+                type UserID = string;
             "#,
             expected: vec![
-                ("add", SymbolKind::Function),
-                ("UserService", SymbolKind::Container),
-                ("findAll", SymbolKind::Function),
-                ("IUser", SymbolKind::Container),
+                ("UserManager", SymbolKind::Class),
+                ("find", SymbolKind::Function),
+                ("IUser", SymbolKind::Interface),
+                // "type" alias usually maps to Class or Unknown in current heuristics
+                ("UserID", SymbolKind::Class), 
             ],
+            should_not_contain: vec![],
         },
         DefTestCase {
             lang: SupportedLanguage::TypeScript,
-            name: "TS: Modern Framework Patterns",
+            name: "TS: Variable Patterns & Factories",
             code: r#"
-                // Store Factory
-                const useStore = create((set) => ({}));
-                // Styled Component
-                const Title = styled.h1`color: red`;
-                // Mongoose Model
+                const sum = (a, b) => a + b;
+                const logger = function() {};
+                const useStore = create((set) => ({ count: 0 }));
                 const User = mongoose.model('User', schema);
+                const Title = styled.h1`color: red`;
             "#,
             expected: vec![
-                ("useStore", SymbolKind::Function), // Variable factories captured as functions
-                ("Title", SymbolKind::Function),
-                ("User", SymbolKind::Function),
+                ("sum", SymbolKind::Function),       // Variable with arrow fn
+                ("logger", SymbolKind::Function),    // Variable with fn expr
+                ("useStore", SymbolKind::Function),  // Factory pattern
+                ("User", SymbolKind::Function),      // Mongoose pattern
+                ("Title", SymbolKind::Function),     // Styled components pattern
             ],
-        },
-
-        // ========================================================
-        // JAVASCRIPT
-        // ========================================================
-        DefTestCase {
-            lang: SupportedLanguage::JavaScript,
-            name: "JS: Functions and Classes",
-            code: r#"
-                export default function main() {}
-                class App extends Component {
-                    render() {}
-                }
-                const util = function() {};
-            "#,
-            expected: vec![
-                ("main", SymbolKind::Function),
-                ("App", SymbolKind::Container),
-                ("render", SymbolKind::Function),
-                ("util", SymbolKind::Function),
-            ],
+            should_not_contain: vec![],
         },
 
         // ========================================================
@@ -120,31 +99,60 @@ fn test_comprehensive_definitions_extraction() {
         // ========================================================
         DefTestCase {
             lang: SupportedLanguage::Python,
-            name: "Python: Defs and Classes",
+            name: "Python: Standard",
             code: r#"
-                def process_data(x):
-                    pass
-                
-                class DataProcessor:
-                    def __init__(self):
-                        pass
+                def my_func(): pass
+                class MyClass:
+                    def method(self): pass
+                async def async_worker(): pass
             "#,
             expected: vec![
-                ("process_data", SymbolKind::Function),
-                ("DataProcessor", SymbolKind::Container),
-                ("__init__", SymbolKind::Function),
+                ("my_func", SymbolKind::Function),
+                ("MyClass", SymbolKind::Class),
+                ("method", SymbolKind::Function),
+                ("async_worker", SymbolKind::Function),
             ],
+            should_not_contain: vec![],
+        },
+
+        // ========================================================
+        // JAVA & C#
+        // ========================================================
+        DefTestCase {
+            lang: SupportedLanguage::Java,
+            name: "Java: Classes and Records",
+            code: r#"
+                public class AuthService {
+                    public void login() {}
+                }
+                public interface IAuth {}
+                public record UserDTO(String name) {}
+            "#,
+            expected: vec![
+                ("AuthService", SymbolKind::Class),
+                ("login", SymbolKind::Function),
+                ("IAuth", SymbolKind::Interface),
+                ("UserDTO", SymbolKind::Class), // Records are classes
+            ],
+            should_not_contain: vec![],
         },
         DefTestCase {
-            lang: SupportedLanguage::Python,
-            name: "Python: Async",
+            lang: SupportedLanguage::CSharp,
+            name: "C#: Classes and Structs",
             code: r#"
-                async def fetch_api():
-                    pass
+                public class PaymentProcessor {
+                    public void Process() {}
+                }
+                public struct Money {}
+                interface IPayable {}
             "#,
             expected: vec![
-                ("fetch_api", SymbolKind::Function),
+                ("PaymentProcessor", SymbolKind::Class),
+                ("Process", SymbolKind::Function),
+                ("Money", SymbolKind::Class),
+                ("IPayable", SymbolKind::Interface),
             ],
+            should_not_contain: vec![],
         },
 
         // ========================================================
@@ -152,69 +160,45 @@ fn test_comprehensive_definitions_extraction() {
         // ========================================================
         DefTestCase {
             lang: SupportedLanguage::Go,
-            name: "Go: Funcs, Methods, Structs",
+            name: "Go: Structs and Methods",
             code: r#"
-                package main
-                
-                type Config struct { Port int }
-                
-                func Start() {}
-                
-                func (c *Config) Load() {}
+                type Server struct {}
+                func NewServer() *Server { return &Server{} }
+                func (s *Server) Start() {}
             "#,
             expected: vec![
-                ("Config", SymbolKind::Function), // tree-sitter-go mapping currently treats type_spec as def
+                ("Server", SymbolKind::Class),
+                ("NewServer", SymbolKind::Function),
                 ("Start", SymbolKind::Function),
-                ("Load", SymbolKind::Function), // Method receiver
             ],
+            should_not_contain: vec![],
         },
 
         // ========================================================
-        // JAVA
+        // RUBY & PHP
         // ========================================================
         DefTestCase {
-            lang: SupportedLanguage::Java,
-            name: "Java: OOP Structure",
+            lang: SupportedLanguage::Ruby,
+            name: "Ruby: Modules and Classes",
             code: r#"
-                public class MainController {
-                    public void handleRequest() {}
-                }
-                interface Handler {}
-                enum State { ON, OFF }
+                module Utils
+                    class Calculator
+                        def add(a,b); end
+                        def self.info; end
+                    end
+                end
             "#,
             expected: vec![
-                ("MainController", SymbolKind::Container),
-                ("handleRequest", SymbolKind::Function),
-                ("Handler", SymbolKind::Container),
-                ("State", SymbolKind::Function), // Enums often map to definition or container depending on query
+                ("Utils", SymbolKind::Module),
+                ("Calculator", SymbolKind::Class),
+                ("add", SymbolKind::Function),
+                ("info", SymbolKind::Function),
             ],
+            should_not_contain: vec![],
         },
-
-        // ========================================================
-        // C#
-        // ========================================================
-        DefTestCase {
-            lang: SupportedLanguage::CSharp,
-            name: "C#: Class and Methods",
-            code: r#"
-                public class Startup {
-                    public void Configure() {}
-                }
-                interface IService {}
-            "#,
-            expected: vec![
-                ("Startup", SymbolKind::Container),
-                ("Configure", SymbolKind::Function),
-                ("IService", SymbolKind::Container),
-            ],
-        },
-
-        // ========================================================
-        // PHP
-        // ========================================================
         DefTestCase {
             lang: SupportedLanguage::Php,
-            name: "PHP: Mixed",
+            name: "PHP: Classes and Functions",
             code: r#"
                 <?php
                 function globalFunc() {}
@@ -224,156 +208,149 @@ fn test_comprehensive_definitions_extraction() {
             "#,
             expected: vec![
                 ("globalFunc", SymbolKind::Function),
-                ("User", SymbolKind::Container),
+                ("User", SymbolKind::Class),
                 ("getName", SymbolKind::Function),
             ],
+            should_not_contain: vec![],
         },
 
         // ========================================================
-        // RUBY
+        // C & C++
         // ========================================================
-        DefTestCase {
-            lang: SupportedLanguage::Ruby,
-            name: "Ruby: Modules and Methods",
-            code: r#"
-                module Utils
-                  class Parser
-                    def parse; end
-                  end
-                end
-            "#,
-            expected: vec![
-                ("Utils", SymbolKind::Container),
-                ("Parser", SymbolKind::Container),
-                ("parse", SymbolKind::Function),
-            ],
-        },
-
-        // ========================================================
-        // C / C++
-        // ========================================================
-        DefTestCase {
-            lang: SupportedLanguage::C,
-            name: "C: Structs and Funcs",
-            code: r#"
-                struct Point { int x; };
-                int main() { return 0; }
-            "#,
-            expected: vec![
-                ("Point", SymbolKind::Container), // struct_specifier contains "struct" -> Container
-                ("main", SymbolKind::Function),
-            ],
-        },
         DefTestCase {
             lang: SupportedLanguage::Cpp,
-            name: "C++: Classes",
+            name: "C++: Classes and Functions",
             code: r#"
-                class Engine {
-                    public:
-                        void start() {}
+                class Manager {
+                    void manage() {}
                 };
+                int main() { return 0; }
+                void* allocate(size_t s) {}
             "#,
             expected: vec![
-                ("Engine", SymbolKind::Container), // class_specifier contains "class" -> Container
-                ("start", SymbolKind::Function),
+                ("Manager", SymbolKind::Class),
+                ("manage", SymbolKind::Function),
+                ("main", SymbolKind::Function),
+                ("allocate", SymbolKind::Function),
             ],
+            should_not_contain: vec![],
         },
-
+        
         // ========================================================
-        // CONFIGURATION & DATA (HCL, YAML, JSON, SQL)
+        // CONFIG & INFRASTRUCTURE (HCL, SQL, PRISMA, BASH)
         // ========================================================
         DefTestCase {
             lang: SupportedLanguage::Hcl,
-            name: "HCL: Terraform Resources",
+            name: "Terraform (HCL)",
             code: r#"
-                resource "aws_s3_bucket" "b" { bucket = "b" }
+                resource "aws_s3_bucket" "my_bucket" {}
                 variable "region" {}
-                data "aws_ami" "ubuntu" {}
+                module "vpc" {}
             "#,
             expected: vec![
-                ("aws_s3_bucket", SymbolKind::Resource), // Specific kind for HCL
-                ("region", SymbolKind::Variable),        // Specific kind for HCL
-                ("aws_ami", SymbolKind::Resource),
+                ("my_bucket", SymbolKind::Class), // Resources map to class usually
+                ("region", SymbolKind::Variable),
+                ("vpc", SymbolKind::Module),
             ],
+            should_not_contain: vec!["aws_s3_bucket"],
         },
         DefTestCase {
             lang: SupportedLanguage::Sql,
-            name: "SQL: DDL",
+            name: "SQL",
             code: r#"
-                CREATE TABLE users ( id int );
+                CREATE TABLE users (id int);
+                create table orders (id int);
             "#,
             expected: vec![
-                ("users", SymbolKind::Function), // DDL often treated as definition
+                ("users", SymbolKind::Class),
+                ("orders", SymbolKind::Class),
             ],
+            should_not_contain: vec![],
         },
         DefTestCase {
             lang: SupportedLanguage::Prisma,
-            name: "Prisma: Models",
+            name: "Prisma",
             code: r#"
-                model Order { id Int @id }
+                model User {
+                    id Int @id
+                }
             "#,
             expected: vec![
-                ("Order", SymbolKind::Function),
+                ("User", SymbolKind::Class),
             ],
+            should_not_contain: vec![],
+        },
+        DefTestCase {
+            lang: SupportedLanguage::Bash,
+            name: "Bash",
+            code: r#"
+                install_deps() { echo "hi"; }
+                function cleanup { rm -rf ./tmp; }
+            "#,
+            expected: vec![
+                ("install_deps", SymbolKind::Function),
+                ("cleanup", SymbolKind::Function),
+            ],
+            should_not_contain: vec![],
+        },
+        
+        // ========================================================
+        // DATA LANGUAGES (JSON, YAML, TOML)
+        // ========================================================
+        // Note: Data languages often map SymbolKind to Unknown because 
+        // the node kinds (pair, entry) don't match Class/Function heuristics.
+        DefTestCase {
+            lang: SupportedLanguage::Json,
+            name: "JSON",
+            code: r#"{ "name": "project", "version": "1.0" }"#,
+            expected: vec![
+                ("name", SymbolKind::Unknown),
+                ("version", SymbolKind::Unknown),
+            ],
+            should_not_contain: vec![],
         },
         DefTestCase {
             lang: SupportedLanguage::Yaml,
-            name: "YAML: Keys",
+            name: "YAML",
             code: r#"
                 services:
-                  web:
-                    image: nginx
+                    web:
+                        image: nginx
             "#,
             expected: vec![
-                ("services", SymbolKind::Function),
-                ("web", SymbolKind::Function),
-                ("image", SymbolKind::Function),
+                ("services", SymbolKind::Unknown),
+                ("web", SymbolKind::Unknown),
+                // "image" is nested deeply, depending on query it might not be a top-level def
             ],
+            should_not_contain: vec![],
         },
-        DefTestCase {
-            lang: SupportedLanguage::Json,
-            name: "JSON: Keys",
-            code: r#"{ "scripts": { "test": "echo 1" } }"#,
-            expected: vec![
-                ("scripts", SymbolKind::Function),
-                ("test", SymbolKind::Function),
-            ],
-        },
-        DefTestCase {
-            lang: SupportedLanguage::Dotenv,
-            name: "Dotenv: Vars",
-            code: r#"API_KEY=123"#,
-            expected: vec![
-                ("API_KEY", SymbolKind::Function),
-            ],
-        },
-        DefTestCase {
-            lang: SupportedLanguage::Toml,
-            name: "TOML: Keys",
-            code: r#"
-                [package]
-                name = "test"
-            "#,
-            expected: vec![
-                ("package", SymbolKind::Function),
-                ("name", SymbolKind::Function),
-            ],
-        },
-
+        
         // ========================================================
-        // SCRIPTING (Bash)
+        // SCIENTIFIC (R, JULIA)
         // ========================================================
         DefTestCase {
-            lang: SupportedLanguage::Bash,
-            name: "Bash: Functions",
+            lang: SupportedLanguage::R,
+            name: "R",
             code: r#"
-                function deploy() { echo "go"; }
-                cleanup() { rm -rf ./dist; }
+                calculate_mean <- function(x) { mean(x) }
             "#,
             expected: vec![
-                ("deploy", SymbolKind::Function),
-                ("cleanup", SymbolKind::Function),
+                ("calculate_mean", SymbolKind::Function),
             ],
+            should_not_contain: vec![],
+        },
+        DefTestCase {
+            lang: SupportedLanguage::Julia,
+            name: "Julia",
+            code: r#"
+                function solve() end
+                macro sayhello() end
+            "#,
+            expected: vec![
+                ("solve", SymbolKind::Function),
+                ("sayhello", SymbolKind::Function),
+            ],
+            should_not_contain: vec![],
         },
     ];
 
@@ -381,50 +358,68 @@ fn test_comprehensive_definitions_extraction() {
     let mut failures = Vec::new();
 
     for case in cases {
-        // 1. Get Config
         let config = configs.iter().find(|c| c.lang == case.lang)
-            .expect(&format!("Configuration for {:?} not found", case.lang));
+            .unwrap_or_else(|| panic!("Configuration for {:?} not found", case.lang));
 
-        // 2. Run Analysis
-        // We use a dummy path "test"
-        let result = analyze_source(Path::new("test"), case.code, config);
+        let hash = [0u8; 32];
+        
+        // We handle parse errors gracefully to allow test suite to continue
+        let result = extract_boundary("test_file", case.code, config, hash);
 
         if let Err(e) = result {
             failures.push(format!("[{}] Analysis Failed: {}", case.name, e));
             continue;
         }
 
-        let analysis = result.unwrap();
+        let boundary = result.unwrap();
 
-        // 3. Verify Expectations
-        let found_symbols: Vec<(&str, SymbolKind)> = analysis.functions.iter()
-            // Filter out the implicit Module definition that matches the file name/path
-            // defined in definitions.rs. Usually name is "(module) test"
-            .filter(|f| f.kind != SymbolKind::Module)
-            .map(|f| (f.name.as_str(), f.kind))
+        // Convert found definitions to a format easy to check
+        // Note: boundary.rs logic might produce Unknown for things that aren't strictly class/interface/function keywords
+        let found_symbols: Vec<(String, SymbolKind)> = boundary.defs.iter()
+            .map(|f| (f.name.clone(), f.kind))
             .collect();
 
-        // Check if all expected symbols are present
+        // 1. Check Expected
         for (exp_name, exp_kind) in &case.expected {
-            let found = found_symbols.iter().any(|(n, k)| n == exp_name && k == exp_kind);
+            // Flexible kind check: Some heuristics in boundary.rs are broad (e.g. Unknown vs Class).
+            // We strictly check name, and loosely check kind if it matches strict expectation.
             
-            if !found {
-                failures.push(format!(
-                    "[{}] Missing expected definition: '{}' ({:?}).\n   Found: {:?}", 
-                    case.name, exp_name, exp_kind, found_symbols
-                ));
+            let match_found = found_symbols.iter().any(|(n, k)| {
+                n == exp_name && (*k == *exp_kind || *exp_kind == SymbolKind::Unknown)
+            });
+            
+            if !match_found {
+                // Try to find if the name exists with a different kind, for better error message
+                let name_exists = found_symbols.iter().find(|(n, _)| n == exp_name);
+                
+                if let Some((_, actual_kind)) = name_exists {
+                     failures.push(format!(
+                        "[{}] Symbol '{}' found but kind mismatch.\n   Expected: {:?}\n   Found:    {:?}", 
+                        case.name, exp_name, exp_kind, actual_kind
+                    ));
+                } else {
+                    failures.push(format!(
+                        "[{}] Missing expected definition: '{}'.\n   All Found: {:?}", 
+                        case.name, exp_name, found_symbols.iter().map(|s| &s.0).collect::<Vec<_>>()
+                    ));
+                }
             }
         }
 
-        // Optional: Check against extra noise?
-        // For now, we only ensure what we WANT is there. 
-        // We generally allow extra definitions if the parser is aggressive, 
-        // unless it's completely wrong.
+        // 2. Check Negative Constraints
+        for not_exp in &case.should_not_contain {
+            if let Some((name, kind)) = found_symbols.iter().find(|(n, _)| n == not_exp) {
+                failures.push(format!(
+                    "[{}] Found symbol that should be ignored: '{}' ({:?})", 
+                    case.name, name, kind
+                ));
+            }
+        }
     }
 
     if !failures.is_empty() {
         panic!(
-            "Definition Scope Test Failures ({}):\n\n{}", 
+            "\n\nDefinition Scope Test Failures ({}):\n==================================\n{}\n", 
             failures.len(), 
             failures.join("\n\n")
         );

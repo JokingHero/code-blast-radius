@@ -1,186 +1,98 @@
-use rkyv::{ Archive, Deserialize, Serialize };
-use std::collections::{ HashMap, HashSet };
-// --- Analysis Structs ---
-#[derive(Archive, Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+use rkyv::{Archive, Deserialize, Serialize};
+use std::collections::HashMap;
+
+pub type FileId = u32;
+
+/// Simplified classification for UI icons and skeletal logic.
+#[derive(Archive, Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[archive(check_bytes)]
 pub enum SymbolKind {
+    File,
     Module,
     Function,
-    Method,
-    Container,
-    Macro,
-    MacroGenerated,
+    Class,
+    Interface,
     Variable,
-    External,
-    Resource,
-    Test,
+    Method,
+    Export,
     Unknown,
 }
-#[derive(Debug, Clone)]
-pub struct FunctionInfo {
+
+/// A simplified Definition found within a file.
+/// We store ranges immediately to avoid re-parsing during the "Run/Recipe" phase.
+#[derive(Archive, Deserialize, Serialize, Debug, Clone)]
+#[archive(check_bytes)]
+pub struct Definition {
     pub name: String,
     pub kind: SymbolKind,
-    pub is_anonymous: bool,
-    pub range_start: usize,
-    pub range_end: usize,
-    pub body_start: Option<usize>,
-    pub source_code: String,
-    pub documentation: Option<String>,
-    pub calls: Vec<String>,
-    pub type_refs: Vec<String>,
-    pub decorators: Vec<String>,
-    pub dispatched_actions: Vec<String>,
-    pub handled_actions: Vec<String>,
-    pub fingerprints: HashMap<String, Vec<String>>,
-    pub return_type: Option<String>,
-    pub local_types: HashMap<String, String>,
-    pub local_assigns: HashMap<String, String>,
-    pub config_keys: Vec<String>,
-    pub routes: Vec<String>,
+    
+    // Start/End byte offsets for the entire definition (e.g., "fn foo() { ... }")
+    pub range: (usize, usize),
+    
+    // Start/End byte offsets for the body to be skeletonized (e.g., "{ ... }")
+    // If None, the whole definition is atomic/one-line or cannot be skeletonized.
+    pub body_range: Option<(usize, usize)>,
 }
-pub struct FileAnalysis {
-    pub functions: Vec<FunctionInfo>,
-    pub imports: Vec<ImportNode>,
-    pub exports: Vec<ExportNode>,
-    pub literals: Vec<String>,
-    pub implementations: Vec<(String, String)>,
-    pub global_vars: HashMap<String, String>,
-    pub middleware_usage: Vec<String>,
-    pub defined_routes: Vec<String>,
-}
-// --- Persistence Structs ---
-pub type FileId = u32;
-pub type SymbolId = u32;
-/// Reserved ID for symbols that do not belong to a physical file in the workspace
-pub const EXTERNAL_FILE_ID: FileId = 0;
-#[derive(Archive, Deserialize, Serialize, Debug, Clone)]
+
+/// The atomic unit of our index. 
+/// Represents one file and its public boundary (definitions and outgoing references).
+#[derive(Archive, Deserialize, Serialize, Debug, Clone, Default)]
 #[archive(check_bytes)]
-pub struct ImportNode {
-    pub name: String,
-    pub source: String,
-    pub alias: Option<String>,
-}
-#[derive(Archive, Deserialize, Serialize, Debug, Clone)]
-#[archive(check_bytes)]
-pub struct ExportNode {
-    pub name: Option<String>,
-    pub source: String,
-}
-#[derive(Archive, Deserialize, Serialize, Debug)]
-#[archive(check_bytes)]
-pub struct FileNode {
+pub struct FileBoundary {
     pub id: FileId,
-    // Stores the ID of the root config this file belongs to.
+    
+    // Relative path from the workspace root (e.g., "src/utils.rs")
+    pub path: String, 
+    
+    // Tracks which root config this file belongs to (for multi-root workspaces)
     pub root_id: String,
-
-    // Stores path relative to the root (unix separators).
-    pub relative_path: String,
-
+    
+    // Blake3 hash of the file content for change detection
     pub hash: [u8; 32],
-    pub is_test: bool,
-    pub literals: Vec<String>,
-    pub middleware_usage: Vec<String>,
+    
+    // 1. What does this file define? (The API)
+    pub defs: Vec<Definition>,
+    
+    // 2. What files does it explicitly import? (Structural Dependencies)
+    // Stored as raw strings from source (e.g., "./utils", "react", "crate::models")
+    pub imports: Vec<String>, 
+    
+    // 3. What symbols does it mention? (Logical Dependencies)
+    // Extracted identifiers from the code flow (e.g., "User", "AuthService", "login")
+    pub symbol_refs: Vec<String>, 
 }
 
-#[derive(Archive, Deserialize, Serialize, Debug, Clone)]
-#[archive(check_bytes)]
-pub struct SymbolNode {
-    pub id: SymbolId,
-    pub file_id: FileId,
-    pub parent_id: Option<SymbolId>,
-    pub name: String,
-    pub kind: SymbolKind,
-    pub range_start: usize,
-    pub range_end: usize,
-    pub body_start: Option<usize>,
-    pub doc_comment: Option<String>,
-    pub return_type: Option<String>,
-    pub is_test: bool,
-    pub is_external: bool,
-    pub external_source: Option<String>,
-    pub decorators: Vec<String>,
-    pub routes: Vec<String>,
-    pub calls: Vec<String>,
-    pub type_refs: Vec<String>,
-    pub fingerprints: HashMap<String, Vec<String>>,
-    pub local_types: HashMap<String, String>,
-    pub config_keys: Vec<String>,
-    pub dispatched_actions: Vec<String>,
-    pub handled_actions: Vec<String>,
-}
-
-#[derive(Archive, Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[archive(check_bytes)]
-pub enum EdgeKind {
-    Contains,
-    Defines,
-    Calls,
-    Inherits,
-    Implements,
-    TypeReference,
-    Imports,
-    Constructs,
-    Injects,
-    Configures,
-    Dispatches,
-    Handles,
-    Related,
-}
-
-#[derive(Archive, Deserialize, Serialize, Debug, Clone)]
-#[archive(check_bytes)]
-pub struct Edge {
-    pub target_id: SymbolId,
-    pub kind: EdgeKind,
-}
-
-#[derive(Debug, Default)]
-pub struct StagingArea {
-    pub raw_calls: HashMap<SymbolId, Vec<String>>,
-    pub raw_literals: HashMap<FileId, Vec<String>>,
-    pub raw_implementations: HashMap<SymbolId, Vec<String>>,
-    pub fingerprints: HashMap<SymbolId, HashMap<String, Vec<String>>>,
-    pub container_methods: HashMap<SymbolId, HashSet<String>>,
-    pub local_variable_types: HashMap<SymbolId, HashMap<String, String>>,
-    pub symbol_config_refs: HashMap<SymbolId, Vec<String>>,
-    pub raw_type_refs: HashMap<SymbolId, Vec<String>>,
-    pub raw_decorators: HashMap<SymbolId, Vec<String>>,
-    pub raw_action_dispatches: HashMap<SymbolId, Vec<String>>,
-    pub raw_action_handlers: HashMap<SymbolId, Vec<String>>,
-    pub raw_middleware_usage: HashMap<FileId, Vec<String>>,
-}
-
-#[derive(Debug, Default)]
-pub struct SymbolIndex {
-    pub symbol_map: HashMap<String, Vec<SymbolId>>,
-    pub file_imports: HashMap<FileId, Vec<ImportNode>>,
-    pub file_exports: HashMap<FileId, Vec<ExportNode>>,
-    pub implicit_routes: HashMap<String, Vec<SymbolId>>,
-    pub import_mappings: HashMap<String, String>,
-    pub package_path_map: HashMap<String, String>,
-    pub external_symbols: HashSet<String>,
-    pub external_packages: HashSet<String>,
-    pub config_definitions: HashMap<String, Vec<SymbolId>>,
-    pub file_to_module: HashMap<FileId, SymbolId>,
-}
-
+/// The Main Index.
+/// Replaces the old Graph. It is essentially a flat list of files plus
+/// two inverted indices (HashMaps) for O(1) lookups.
 #[derive(Archive, Deserialize, Serialize, Debug, Default)]
 #[archive(check_bytes)]
-pub struct WorkspaceIndex {
-    // Metadata
+pub struct BoundaryIndex {
+    // Stability: Ensures consistent IDs across incremental scans
     pub next_file_id: u32,
-    pub next_symbol_id: u32,
-    // CHANGED: We don't store absolute roots in the binary blob to maintain portability.
-    // Validation is done by WorkspaceManager.
-    pub roots: Vec<String>,
 
-    // Core Data
-    // Key is now the Logical Key: "::{root_id}::{relative_path}"
-    pub files: HashMap<String, FileNode>,
+    // 1. The Source of Truth
+    pub files: HashMap<FileId, FileBoundary>,
 
-    pub symbols: HashMap<SymbolId, SymbolNode>,
-    pub file_imports: HashMap<FileId, Vec<ImportNode>>,
-    pub file_exports: HashMap<FileId, Vec<ExportNode>>,
-    pub graph: HashMap<SymbolId, Vec<Edge>>,
-    pub file_dependencies: HashMap<FileId, Vec<FileId>>,
+    // 2. The "Yellow Pages" (Inverted Index for Definitions)
+    // Key: Symbol Name (e.g., "AuthService")
+    // Value: List of FileIds that define this symbol
+    pub symbol_map: HashMap<String, Vec<FileId>>,
+
+    // 3. Path Suffix Map (Inverted Index for Imports)
+    // Allows fuzzy resolution of imports like "./utils" -> "src/utils.ts"
+    // Key: Path segments (e.g., "utils.ts", "src/utils.ts")
+    // Value: List of matching FileIds
+    pub path_map: HashMap<String, Vec<FileId>>,
+}
+
+impl BoundaryIndex {
+    pub fn new() -> Self {
+        Self {
+            next_file_id: 1, // Start at 1, 0 is reserved
+            files: HashMap::new(),
+            symbol_map: HashMap::new(),
+            path_map: HashMap::new(),
+        }
+    }
 }

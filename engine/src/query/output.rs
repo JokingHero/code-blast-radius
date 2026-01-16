@@ -1,5 +1,5 @@
 use serde::{Serialize, Deserialize};
-use crate::models::{WorkspaceIndex, FileId};
+use crate::models::{BoundaryIndex, FileId};
 use std::collections::HashMap;
 
 /// Generic container for context results. 
@@ -35,12 +35,6 @@ pub struct FileContent {
 pub struct LineRange {
     pub start: usize, // 1-based
     pub end: usize,
-}
-
-// Internal helper for range calculation
-struct RawByteRange {
-    start: usize,
-    end: usize,
 }
 
 // XML generation is only possible if we have the content
@@ -85,109 +79,82 @@ pub fn escape_xml_content(input: &str) -> String {
 /// Generates the full output (Metadata + Content).
 /// Used by CLI 'Radius' command which requires immediate full output.
 pub fn generate_context_output(
-    index: &WorkspaceIndex, 
-    symbol_ids: &[u32],
-    id_map: &HashMap<FileId, std::path::PathBuf> // Added
+    index: &BoundaryIndex, 
+    file_ids: &[FileId],
+    id_map: &HashMap<FileId, String> // Map FileId -> Relative Path? No, we need Absolute path to read file.
+    // Wait, the caller (CLI) passed id_map from files.values(), which are relative.
+    // CLI does NOT know absolute paths unless it resolved them.
+    // WorkspaceManager knows roots.
+    // For now, let's assume the CLI passes a map of FileId -> Absolute Path String if it can?
+    // Actually, in CLI main.rs:
+    // let id_map = index.files.values().map(|f| (f.id, f.path.clone())).collect();
+    // This passes RELATIVE paths.
+    // But we need to READ the file.
+    // If we only have relative path, we can't read it unless we know the CWD or Root.
+    // The WorkspaceManager knows the roots.
+    // The CLI manages the WorkspaceManager.
+    // So the CLI *could* resolve absolute paths.
+    // However, `generate_context_output` takes `id_map`.
+    // Let's change `id_map` to be `HashMap<FileId, PathBuf>` which are ABSOLUTE paths.
+    // The CLI will be responsible for creating this map correctly (joining root + relative).
 ) -> ContextOutput<FileContent> {
     
     // 1. Identify Target
+    // Just use the first file name
     let mut target_name = "Unknown".to_string();
-    if let Some(first) = symbol_ids.first() {
-        if let Some(sym) = index.symbols.get(first) {
-            target_name = sym.name.clone();
-        }
-    }
-
-    // 2. Group by File
-    let mut file_map: HashMap<FileId, Vec<RawByteRange>> = HashMap::new();
-    for &symbol_id in symbol_ids {
-        if let Some(symbol) = index.symbols.get(&symbol_id) {
-            if symbol.is_external { continue; }
-            file_map.entry(symbol.file_id).or_default().push(RawByteRange {
-                start: symbol.range_start,
-                end: symbol.range_end,
-            });
+    if let Some(first_id) = file_ids.first() {
+        if let Some(f) = index.files.get(first_id) {
+            target_name = f.path.clone();
         }
     }
 
     let mut output_files = Vec::new();
 
-    // 3. Process Files
-    for (file_id, mut ranges) in file_map {
-        let file_node = match index.files.values().find(|f| f.id == file_id) {
+    // 2. Process Files
+    for &file_id in file_ids {
+        let file_node = match index.files.get(&file_id) {
             Some(f) => f,
             None => continue,
         };
 
-        // Resolve absolute path from id_map
-        let abs_path = match id_map.get(&file_id) {
-            Some(p) => p,
-            None => continue, 
-        };
+        // We attempt to find the absolute path in the provided map
+        // If not found, we check if the relative path exists in CWD (Ad-hoc mode fallback)
+        let mut source_code = String::new();
+        
+        if let Some(abs_path_str) = id_map.get(&file_id) {
+             if let Ok(content) = std::fs::read_to_string(abs_path_str) {
+                 source_code = content;
+             }
+        } 
+        
+        if source_code.is_empty() {
+            // Fallback: Try reading relative path from CWD
+            if let Ok(content) = std::fs::read_to_string(&file_node.path) {
+                source_code = content;
+            }
+        }
 
-        // We must read the file here because this function returns ContextOutput<FileContent>
-        let source_code = match std::fs::read_to_string(abs_path) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
+        if source_code.is_empty() {
+             source_code = "// Failed to read file content".to_string();
+        }
 
         // Determine language from extension for metadata
-        let ext = abs_path
+        let ext = std::path::Path::new(&file_node.path)
             .extension()
             .and_then(|s| s.to_str())
             .unwrap_or("txt")
             .to_string();
 
-        // 4. Calculate Relevant Lines (Metadata)
-        ranges.sort_by_key(|r| r.start);
-        
-        let mut merged_ranges: Vec<RawByteRange> = Vec::new();
-        // Merge ranges closer than ~5 lines (approx 200 bytes) to reduce noise
-        let merge_threshold = 200; 
-
-        if !ranges.is_empty() {
-            let mut current = RawByteRange { start: ranges[0].start, end: ranges[0].end };
-            for next in ranges.iter().skip(1) {
-                if next.start <= current.end + merge_threshold {
-                    // Merge
-                    current.end = std::cmp::max(current.end, next.end);
-                } else {
-                    // Push and start new
-                    merged_ranges.push(current);
-                    current = RawByteRange { start: next.start, end: next.end };
-                }
-            }
-            merged_ranges.push(current);
-        }
-
-        // Convert Bytes to Lines
-        // Handle edge case where prefix ends with newline
-        let byte_to_line = |b: usize| -> usize {
-            let slice = &source_code[..b.min(source_code.len())];
-            let count = slice.lines().count();
-            if slice.ends_with('\n') {
-                count + 1
-            } else {
-                count.max(1)
-            }
-        };
-
-        let mut final_line_ranges = Vec::new();
-        for range in merged_ranges {
-            final_line_ranges.push(LineRange {
-                start: byte_to_line(range.start),
-                end: byte_to_line(range.end)
-            });
-        }
+        let line_count = source_code.lines().count();
 
         // Construct the Split Object
         let metadata = FileContextMetadata {
             file_id: file_node.id,
-            path: file_node.relative_path.clone(), // Use relative path for UI
+            path: file_node.path.clone(),
             root_name: None,
             language: ext,
-            is_test: file_node.is_test,
-            relevant_lines: final_line_ranges,
+            is_test: false, // We don't track is_test in BoundaryIndex yet
+            relevant_lines: vec![LineRange { start: 1, end: line_count.max(1) }],
         };
 
         output_files.push(FileContent {

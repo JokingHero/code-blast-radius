@@ -32,6 +32,12 @@ pub fn config() -> LanguageConfig {
 
           (interface_declaration name: [(type_identifier) (identifier)] @function.name) @function.definition
 
+          ;; Type Aliases
+          (type_alias_declaration
+            name: (type_identifier) @function.name
+            value: (_) @function.body
+          ) @function.definition
+
           ((variable_declarator
             name: (identifier) @function.name
             type: (type_annotation)? @variable.type

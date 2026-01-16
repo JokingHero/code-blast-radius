@@ -8,10 +8,11 @@ pub fn config() -> LanguageConfig {
     .skeleton("{ # ... {} ... }")
     .defs(r#"
         ;; Resources and Data sources have 2 labels: type and name
+        ;; The first label is the type (ignored for name), second is the name
         (block
             (identifier) @function.kind
+            (string_lit (template_literal) @resource.type)
             (string_lit (template_literal) @function.name)
-            (string_lit (template_literal) @resource.instance_name)
             (body)? @function.body
             (#match? @function.kind "^(resource|data)$")
         ) @function.definition

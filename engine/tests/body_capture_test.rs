@@ -1,6 +1,5 @@
-use blast_radius_engine::analysis::analyze_source;
+use blast_radius_engine::analysis::extract_boundary;
 use blast_radius_engine::analysis::language::{get_language_configs, SupportedLanguage};
-use std::path::Path;
 
 struct TestCase {
     lang: SupportedLanguage,
@@ -184,7 +183,8 @@ fn test_body_capture_across_languages() {
             lang: SupportedLanguage::Hcl,
             name: "Terraform Resource",
             code: "resource \"aws_s3_bucket\" \"b\" { bucket = \"my-bucket\" }",
-            symbol_name: "aws_s3_bucket", 
+            symbol_name: "b", 
+            // The parser captures the content inside the braces for HCL
             expected_body_start: Some("bucket"),
         },
 
@@ -256,43 +256,52 @@ fn test_body_capture_across_languages() {
         let config = configs.iter().find(|c| c.lang == case.lang)
             .expect(&format!("Config not found for {:?}", case.lang));
 
-        // Analyze
-        let result = analyze_source(Path::new("test"), case.code, config);
+        // --- Call extract_boundary with a dummy hash ---
+        // We provide a dummy 32-byte hash since we aren't testing caching here.
+        let result = extract_boundary("test", case.code, config, [0u8; 32]);
         
         if let Err(e) = result {
             failures.push(format!("[{}] Analysis failed: {}", case.name, e));
             continue;
         }
 
-        let analysis = result.unwrap();
+        let boundary = result.unwrap();
 
-        // Find Symbol
-        let symbol = analysis.functions.iter().find(|f| f.name == case.symbol_name);
+        // --- Iterate over 'defs' instead of 'functions' ---
+        let symbol = boundary.defs.iter().find(|d| d.name == case.symbol_name);
 
         if symbol.is_none() {
             failures.push(format!("[{}] Symbol '{}' not found", case.name, case.symbol_name));
             // Debug print found symbols
-            let found_names: Vec<_> = analysis.functions.iter().map(|f| f.name.clone()).collect();
+            let found_names: Vec<_> = boundary.defs.iter().map(|d| d.name.clone()).collect();
             println!("   > Found: {:?}", found_names);
             continue;
         }
 
         let sym = symbol.unwrap();
 
-        // Verify Range
-        if sym.range_start >= sym.range_end {
-            failures.push(format!("[{}] Invalid range: {}..{}", case.name, sym.range_start, sym.range_end));
+        // --- Update Range Accessors ---
+        if sym.range.0 >= sym.range.1 {
+            failures.push(format!("[{}] Invalid range: {}..{}", case.name, sym.range.0, sym.range.1));
         }
 
-        // Verify Body Start
-        match (sym.body_start, case.expected_body_start) {
+        // --- Update Body Start Accessor ---
+        // We map it to get just the start byte for comparison.
+        let actual_body_start = sym.body_range.map(|r| r.0);
+
+        match (actual_body_start, case.expected_body_start) {
             (Some(actual_idx), Some(expected_str)) => {
-                // Check bounds
-                if actual_idx < sym.range_start || actual_idx >= sym.range_end {
+                // Check bounds using sym.range.0 / sym.range.1
+                if actual_idx < sym.range.0 || actual_idx >= sym.range.1 {
                      failures.push(format!("[{}] body_start {} is outside range {}..{}", 
-                        case.name, actual_idx, sym.range_start, sym.range_end));
+                        case.name, actual_idx, sym.range.0, sym.range.1));
                 } else {
                     // Check content
+                    if actual_idx >= case.code.len() {
+                        failures.push(format!("[{}] body_start {} is out of bounds of source code", case.name, actual_idx));
+                        continue;
+                    }
+                    
                     let actual_slice = &case.code[actual_idx..];
                     if !actual_slice.trim().starts_with(expected_str) {
                          failures.push(format!("[{}] body content mismatch.\n   Expected start: '{}'\n   Actual start:   '{}...'", 

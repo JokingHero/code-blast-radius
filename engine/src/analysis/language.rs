@@ -35,46 +35,13 @@ pub fn get_language(lang: SupportedLanguage) -> Language {
     }
 }
 
-/// Groups all Tree-Sitter query strings.
-/// Using Option<&str> allows us to skip compiling queries for languages that don't need them.
-#[derive(Default, Clone)]
-pub struct QueryConfig {
-    pub defs: Option<&'static str>,
-    pub calls: Option<&'static str>,
-    pub docs: Option<&'static str>,
-    pub imports: Option<&'static str>,
-    pub exports: Option<&'static str>,
-    pub literals: Option<&'static str>,
-    pub implements: Option<&'static str>,
-    pub config: Option<&'static str>,
-    pub vals: Option<&'static str>,
-    pub types: Option<&'static str>,
-    pub decorators: Option<&'static str>,
-    pub actions: Option<&'static str>,
-    pub middleware: Option<&'static str>,
-    pub route_defs: Option<&'static str>,
-}
-
-/// Holds compiled Tree-Sitter queries for a language.
 #[derive(Clone, Default)]
 pub struct CompiledQueries {
-    pub defs: Option<Arc<Query>>,
-    pub calls: Option<Arc<Query>>,
-    pub docs: Option<Arc<Query>>,
+    pub definitions: Option<Arc<Query>>,
     pub imports: Option<Arc<Query>>,
-    pub exports: Option<Arc<Query>>,
-    pub literals: Option<Arc<Query>>,
-    pub implements: Option<Arc<Query>>,
-    pub config: Option<Arc<Query>>,
-    pub vals: Option<Arc<Query>>,
-    pub types: Option<Arc<Query>>,
-    pub decorators: Option<Arc<Query>>,
-    pub actions: Option<Arc<Query>>,
-    pub middleware: Option<Arc<Query>>,
-    pub route_defs: Option<Arc<Query>>,
+    pub references: Option<Arc<Query>>,
 }
 
-/// Groups heuristic lists for framework analysis.
 #[derive(Default, Clone)]
 pub struct HeuristicConfig {
     pub di_decorators: &'static [&'static str],
@@ -83,23 +50,24 @@ pub struct HeuristicConfig {
     pub project_config_files: &'static [&'static str],
 }
 
-/// The main configuration struct, now cleaner and grouped.
 #[derive(Clone)]
 pub struct LanguageConfig {
     pub lang: SupportedLanguage,
     pub file_extensions: &'static [&'static str],
-    pub queries: QueryConfig,
-    pub compiled_queries: CompiledQueries,
+    pub queries: CompiledQueries,
     pub heuristics: HeuristicConfig,
     pub skeleton_template: &'static str,
 }
 
-// --- Builder Pattern ---
-
 pub struct LanguageConfigBuilder {
     lang: SupportedLanguage,
     file_extensions: &'static [&'static str],
-    queries: QueryConfig,
+    
+    // Primary Queries
+    defs_query: Option<&'static str>,
+    imports_query: Option<&'static str>,
+    
+    // Heuristics (Keep for compatibility, though largely unused in dumb mode)
     heuristics: HeuristicConfig,
     skeleton_template: &'static str,
 }
@@ -109,92 +77,155 @@ impl LanguageConfigBuilder {
         Self {
             lang,
             file_extensions: extensions,
-            queries: QueryConfig::default(),
+            defs_query: None,
+            imports_query: None,
             heuristics: HeuristicConfig::default(),
-            // Default safe fallback for C-like languages
-            skeleton_template: "{ /* ... {} body hidden ... */ }",
+            skeleton_template: " ... ",
         }
     }
 
-    // --- Query Setters ---
+    // --- Core Setters (Used) ---
+    pub fn defs(mut self, q: &'static str) -> Self { self.defs_query = Some(q); self }
+    pub fn imports(mut self, q: &'static str) -> Self { self.imports_query = Some(q); self }
+    pub fn skeleton(mut self, s: &'static str) -> Self { self.skeleton_template = s; self }
 
-    pub fn defs(mut self, query: &'static str) -> Self { self.queries.defs = Some(query); self }
-    pub fn calls(mut self, query: &'static str) -> Self { self.queries.calls = Some(query); self }
-    pub fn docs(mut self, query: &'static str) -> Self { self.queries.docs = Some(query); self }
-    pub fn imports(mut self, query: &'static str) -> Self { self.queries.imports = Some(query); self }
-    pub fn exports(mut self, query: &'static str) -> Self { self.queries.exports = Some(query); self }
-    pub fn literals(mut self, query: &'static str) -> Self { self.queries.literals = Some(query); self }
-    pub fn implements(mut self, query: &'static str) -> Self { self.queries.implements = Some(query); self }
-    pub fn config_keys(mut self, query: &'static str) -> Self { self.queries.config = Some(query); self }
-    pub fn vals(mut self, query: &'static str) -> Self { self.queries.vals = Some(query); self }
-    pub fn types(mut self, query: &'static str) -> Self { self.queries.types = Some(query); self }
-    pub fn decorators(mut self, query: &'static str) -> Self { self.queries.decorators = Some(query); self }
-    pub fn actions(mut self, query: &'static str) -> Self { self.queries.actions = Some(query); self }
-    pub fn middleware(mut self, query: &'static str) -> Self { self.queries.middleware = Some(query); self }
-    pub fn routes(mut self, query: &'static str) -> Self { self.queries.route_defs = Some(query); self }
+    // --- Legacy Setters (No-ops or Metadata only) ---
+    // We keep these so that existing language files compile without changes.
+    // The specific "calls" logic is replaced by the generic reference scan.
+    pub fn calls(self, _q: &'static str) -> Self { self }
+    pub fn docs(self, _q: &'static str) -> Self { self }
+    pub fn exports(self, _q: &'static str) -> Self { self }
+    pub fn literals(self, _q: &'static str) -> Self { self }
+    pub fn implements(self, _q: &'static str) -> Self { self }
+    pub fn config_keys(self, _q: &'static str) -> Self { self }
+    pub fn vals(self, _q: &'static str) -> Self { self }
+    pub fn types(self, _q: &'static str) -> Self { self }
+    pub fn decorators(self, _q: &'static str) -> Self { self }
+    pub fn actions(self, _q: &'static str) -> Self { self }
+    pub fn middleware(self, _q: &'static str) -> Self { self }
+    pub fn routes(self, _q: &'static str) -> Self { self }
 
-    // --- Heuristic Setters ---
-
-    pub fn di_decorators(mut self, decorators: &'static [&'static str]) -> Self {
-        self.heuristics.di_decorators = decorators;
-        self
-    }
-
-    pub fn magic_methods(mut self, methods: &'static [&'static str]) -> Self {
-        self.heuristics.magic_methods = methods;
-        self
-    }
-
-    pub fn constructor_names(mut self, constructors: &'static [&'static str]) -> Self {
-        self.heuristics.constructor_names = constructors;
-        self
-    }
-
-    pub fn project_config_files(mut self, files: &'static [&'static str]) -> Self {
-        self.heuristics.project_config_files = files;
-        self
-    }
-
-    pub fn skeleton(mut self, template: &'static str) -> Self {
-        self.skeleton_template = template;
-        self
-    }
+    // --- Heuristic Setters (Keep Metadata) ---
+    pub fn di_decorators(mut self, d: &'static [&'static str]) -> Self { self.heuristics.di_decorators = d; self }
+    pub fn magic_methods(mut self, m: &'static [&'static str]) -> Self { self.heuristics.magic_methods = m; self }
+    pub fn constructor_names(mut self, c: &'static [&'static str]) -> Self { self.heuristics.constructor_names = c; self }
+    pub fn project_config_files(mut self, f: &'static [&'static str]) -> Self { self.heuristics.project_config_files = f; self }
 
     pub fn build(self) -> LanguageConfig {
         let language = get_language(self.lang);
-        let mut compiled = CompiledQueries::default();
+        
+        let compile = |q: Option<&str>| -> Option<Arc<Query>> {
+            q.and_then(|source| {
+                Query::new(&language, source).ok().map(Arc::new)
+            })
+        };
 
-        macro_rules! compile_query {
-            ($field:ident) => {
-                if let Some(q_str) = self.queries.$field {
-                    compiled.$field = Query::new(&language, q_str).ok().map(Arc::new);
-                }
-            };
-        }
-
-        compile_query!(defs);
-        compile_query!(calls);
-        compile_query!(docs);
-        compile_query!(imports);
-        compile_query!(exports);
-        compile_query!(literals);
-        compile_query!(implements);
-        compile_query!(config);
-        compile_query!(vals);
-        compile_query!(types);
-        compile_query!(decorators);
-        compile_query!(actions);
-        compile_query!(middleware);
-        compile_query!(route_defs);
+        // Inject the generic reference query automatically
+        let refs_source = get_default_refs_query(self.lang);
+        let refs_query = Query::new(&language, refs_source).ok().map(Arc::new);
 
         LanguageConfig {
             lang: self.lang,
             file_extensions: self.file_extensions,
-            queries: self.queries,
-            compiled_queries: compiled,
+            queries: CompiledQueries {
+                definitions: compile(self.defs_query),
+                imports: compile(self.imports_query),
+                references: refs_query,
+            },
             heuristics: self.heuristics,
             skeleton_template: self.skeleton_template,
         }
+    }
+}
+
+/// Provides a "good enough" generic identifier matcher for every supported language.
+/// This replaces the specific 'calls', 'types', 'decorators' queries.
+fn get_default_refs_query(lang: SupportedLanguage) -> &'static str {
+    match lang {
+        SupportedLanguage::Rust => r#"
+            (identifier) @ref
+            (type_identifier) @ref
+            (field_identifier) @ref
+        "#,
+        // TypeScript has type_identifier, JavaScript does NOT.
+        // Both can have JSX.
+        SupportedLanguage::TypeScript => r#"
+            (identifier) @ref
+            (property_identifier) @ref
+            (type_identifier) @ref
+            (shorthand_property_identifier_pattern) @ref
+        "#,
+        SupportedLanguage::JavaScript => r#"
+            (identifier) @ref
+            (property_identifier) @ref
+            (shorthand_property_identifier_pattern) @ref
+        "#,
+        SupportedLanguage::Python => r#"
+            (identifier) @ref
+            (attribute attribute: (identifier) @ref)
+        "#,
+        SupportedLanguage::Go => r#"
+            (identifier) @ref
+            (field_identifier) @ref
+            (type_identifier) @ref
+            (package_identifier) @ref
+        "#,
+        SupportedLanguage::Java => r#"
+            (identifier) @ref
+            (type_identifier) @ref
+        "#,
+        SupportedLanguage::CSharp => r#"
+            (identifier) @ref
+        "#,
+        SupportedLanguage::Ruby => r#"
+            (identifier) @ref
+            (constant) @ref
+            (simple_symbol) @ref
+            (hash_key_symbol) @ref
+        "#,
+        SupportedLanguage::Php => r#"
+            (name) @ref
+            (variable_name) @ref
+        "#,
+        SupportedLanguage::Bash | SupportedLanguage::Dotenv => r#"
+            (variable_name) @ref
+            (word) @ref
+            (command_name) @ref
+        "#,
+        SupportedLanguage::Html => r#"
+            (tag_name) @ref
+            (attribute_name) @ref
+        "#,
+        SupportedLanguage::Json => r#"
+            (string_content) @ref
+        "#,
+        SupportedLanguage::Yaml => r#"
+            (string_scalar) @ref
+        "#,
+        SupportedLanguage::Toml => r#"
+            (bare_key) @ref
+        "#,
+        SupportedLanguage::Hcl => r#"
+            (identifier) @ref
+        "#,
+        SupportedLanguage::Sql => r#"
+            (identifier) @ref
+        "#,
+        SupportedLanguage::Prisma => r#"
+            (identifier) @ref
+        "#,
+        SupportedLanguage::C => r#"
+            (identifier) @ref
+            (type_identifier) @ref
+            (field_identifier) @ref
+        "#,
+        SupportedLanguage::Cpp => r#"
+            (identifier) @ref
+            (type_identifier) @ref
+            (field_identifier) @ref
+            (namespace_identifier) @ref
+        "#,
+        _ => "(identifier) @ref"
     }
 }
 

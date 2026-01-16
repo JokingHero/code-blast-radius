@@ -25,6 +25,12 @@ pub fn config() -> LanguageConfig {
             body: (enum_variant_list) @function.body
         ) @function.definition
 
+        ;; 3b. Trait Definitions
+        (trait_item
+            name: (type_identifier) @function.name
+            body: (declaration_list) @function.body
+        ) @function.definition
+
         ;; 4. Macro Definitions (macro_rules! foo {})
         (macro_definition
             name: (identifier) @function.name

@@ -1,2 +1,2 @@
 pub mod output;
-pub mod traversal;
+pub mod walker;

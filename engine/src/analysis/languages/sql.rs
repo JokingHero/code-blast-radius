@@ -7,13 +7,11 @@ pub fn config() -> LanguageConfig {
     )
     .skeleton("( /* ... {} ... */ )")
     .defs(r#"
-        (statement
-            (create_table
-                (object_reference
-                    name: (identifier) @function.name
-                )
-                (column_definitions) @function.body
+        (create_table
+            (object_reference
+                name: (identifier) @function.name
             )
+            (column_definitions) @function.body
         ) @function.definition
     "#)
     .docs(r#"
