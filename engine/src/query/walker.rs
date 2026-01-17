@@ -28,7 +28,7 @@ impl<'a> JitWalker<'a> {
                 break;
             }
 
-            // 1. Build Query
+            // 1. Build Query (Targets we are looking for)
             let mut search_defs: HashSet<&str> = HashSet::new();
             let mut search_paths: Vec<&str> = Vec::new();
 
@@ -42,18 +42,20 @@ impl<'a> JitWalker<'a> {
             }
 
             // 2. Parallel Scan
+            // We iterate over every file in the index (candidates) to see if they
+            // import/reference anything in our 'search_paths' or 'search_defs'.
             let next_candidates: Vec<FileId> = self.index.files
                 .par_iter()
                 .map(|(_, f)| f)
                 .filter(|candidate| {
-                    // A. Logic Refs
+                    // A. Logic Refs (Keep strict: code symbols are usually case-sensitive)
                     for reference in &candidate.symbol_refs {
                         if search_defs.contains(reference.as_str()) {
                             return true;
                         }
                     }
 
-                    // B. Structural Imports
+                    // B. Structural Imports (Make lenient: file paths vary by OS/Dev habit)
                     for import_str in &candidate.imports {
                         // 1. Monorepo Alias Resolution
                         let effective_search_str = if let Some((alias, target_dir)) = self.index.package_map
@@ -71,28 +73,35 @@ impl<'a> JitWalker<'a> {
                             .strip_prefix("./")
                             .unwrap_or(&effective_search_str);
 
+                        // 3. Prepare for Case-Insensitive Comparison
+                        let import_lower = clean_search_str.to_lowercase();
+
                         for search_path in &search_paths {
-                            // HEURISTIC MATCHING
+                            let path_lower = search_path.to_lowercase();
+
+                            // HEURISTIC MATCHING (Case-Insensitive)
                             
                             // Check 1: Does the path contain the import string?
-                            if search_path.contains(clean_search_str) {
+                            if path_lower.contains(&import_lower) {
                                 
-                                // Sub-Check A: File Stem Match (The fix for "./utils" -> "src/utils.ts")
-                                // If import is "utils", and file is ".../utils.ts", this passes.
+                                // Sub-Check A: File Stem Match 
+                                // Matches import "utils" to file ".../Utils.ts"
                                 if let Some(stem) = Path::new(search_path).file_stem().and_then(|s| s.to_str()) {
-                                    if stem == clean_search_str {
+                                    if stem.to_lowercase() == import_lower {
                                         return true;
                                     }
                                 }
 
-                                // Sub-Check B: Suffix Match (e.g. import "src/utils.ts")
-                                if search_path.ends_with(clean_search_str) {
+                                // Sub-Check B: Suffix Match
+                                // Matches import "src/Utils" to file "src/Utils.ts"
+                                if path_lower.ends_with(&import_lower) {
                                     return true;
                                 }
 
-                                // Sub-Check C: Path Segment Match (e.g. import "components/Button")
-                                // Prevents "utils" from matching "utils_helper.ts" unless strictly stemmed above
-                                if clean_search_str.contains('/') {
+                                // Sub-Check C: Path Segment Match
+                                // Matches import "components/Button" to file "src/components/Button/index.tsx"
+                                // Prevents simple substring matching (e.g. "auth" matching "author.ts") unless slashes involve hierarchy.
+                                if import_lower.contains('/') {
                                     return true;
                                 }
                             }
