@@ -73,9 +73,11 @@ impl FileScanner {
                 let content = fs::read_to_string(&path).ok()?;
                 let hash = blake3::hash(content.as_bytes()).into();
 
-                // Normalize path to Forward Slashes for portability
-                let relative_path = pathdiff::diff_paths(&path, &root_abs)
-                    .unwrap_or_else(|| path.clone())
+                // If pathdiff fails (e.g. cross-drive on Windows), returns None
+                // so filter_map skips the file, ensuring we never store absolute paths.
+                let diff = pathdiff::diff_paths(&path, &root_abs)?;
+                
+                let relative_path = diff
                     .to_string_lossy()
                     .replace('\\', "/");
 
