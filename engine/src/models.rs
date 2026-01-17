@@ -84,6 +84,7 @@ pub struct BoundaryIndex {
     // Key: Path segments (e.g., "utils.ts", "src/utils.ts")
     // Value: List of matching FileIds
     pub path_map: HashMap<String, Vec<FileId>>,
+    pub package_map: HashMap<String, String>, 
 }
 
 impl BoundaryIndex {
@@ -93,6 +94,7 @@ impl BoundaryIndex {
             files: HashMap::new(),
             symbol_map: HashMap::new(),
             path_map: HashMap::new(),
+            package_map: HashMap::new(), 
         }
     }
 }
