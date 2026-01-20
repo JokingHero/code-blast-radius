@@ -71,20 +71,24 @@ pub struct BoundaryIndex {
     // Stability: Ensures consistent IDs across incremental scans
     pub next_file_id: u32,
 
-    // 1. The Source of Truth
+    // The Source of Truth
     pub files: HashMap<FileId, FileBoundary>,
 
-    // 2. The "Yellow Pages" (Inverted Index for Definitions)
+    // The "Yellow Pages" (Inverted Index for Definitions)
     // Key: Symbol Name (e.g., "AuthService")
     // Value: List of FileIds that define this symbol
     pub symbol_map: HashMap<String, Vec<FileId>>,
 
-    // 3. Path Suffix Map (Inverted Index for Imports)
+    // Path Suffix Map (Inverted Index for Imports)
     // Allows fuzzy resolution of imports like "./utils" -> "src/utils.ts"
     // Key: Path segments (e.g., "utils.ts", "src/utils.ts")
     // Value: List of matching FileIds
     pub path_map: HashMap<String, Vec<FileId>>,
     pub package_map: HashMap<String, String>, 
+
+    // Key: "Significant Token" (lowercase stem of import or symbol).
+    // Value: List of files that contain this token in their imports or refs.
+    pub usage_map: HashMap<String, Vec<FileId>>,
 }
 
 impl BoundaryIndex {
@@ -95,6 +99,7 @@ impl BoundaryIndex {
             symbol_map: HashMap::new(),
             path_map: HashMap::new(),
             package_map: HashMap::new(), 
+            usage_map: HashMap::new(),
         }
     }
 }

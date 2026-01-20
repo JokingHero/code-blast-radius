@@ -1,9 +1,7 @@
 use std::collections::HashSet;
 use crate::models::{BoundaryIndex, FileId};
-use rayon::prelude::*;
 use std::path::Path;
 
-/// Performs a search over the BoundaryIndex to find related files.
 pub struct JitWalker<'a> {
     index: &'a BoundaryIndex,
 }
@@ -28,35 +26,84 @@ impl<'a> JitWalker<'a> {
                 break;
             }
 
-            // 1. Build Query (Targets we are looking for)
+            // 1. Build Query & Identify "Target Anchors"
+            // We need to know which tokens point TO the files in our frontier.
             let mut search_defs: HashSet<&str> = HashSet::new();
             let mut search_paths: Vec<&str> = Vec::new();
+            
+            // New: Tokens that would be used to import/reference these files
+            let mut target_anchors: HashSet<String> = HashSet::new();
 
             for &id in &current_frontier {
                 if let Some(f) = self.index.files.get(&id) {
-                    for def in &f.defs {
-                        search_defs.insert(def.name.as_str());
-                    }
+                    // A. Path Anchors
                     search_paths.push(f.path.as_str());
-                }
-            }
-
-            // 2. Parallel Scan
-            // We iterate over every file in the index (candidates) to see if they
-            // import/reference anything in our 'search_paths' or 'search_defs'.
-            let next_candidates: Vec<FileId> = self.index.files
-                .par_iter()
-                .map(|(_, f)| f)
-                .filter(|candidate| {
-                    // A. Logic Refs (Keep strict: code symbols are usually case-sensitive)
-                    for reference in &candidate.symbol_refs {
-                        if search_defs.contains(reference.as_str()) {
-                            return true;
+                    
+                    // Logic: If I am "src/utils.ts", people import me via "utils".
+                    if let Some(stem) = extract_file_stem(&f.path) {
+                        target_anchors.insert(stem.clone());
+                        
+                        // FIX for Index/Mod files:
+                        // If I am "src/auth/index.ts", people import me via "auth".
+                        if is_generic_filename(&stem) {
+                            if let Some(parent) = extract_parent_dir_name(&f.path) {
+                                target_anchors.insert(parent);
+                            }
                         }
                     }
 
-                    // B. Structural Imports (Make lenient: file paths vary by OS/Dev habit)
-                    for import_str in &candidate.imports {
+                    // B. Symbol Anchors
+                    // If I define "AuthService", people reference me via "authservice".
+                    for def in &f.defs {
+                        search_defs.insert(def.name.as_str());
+                        target_anchors.insert(def.name.to_lowercase());
+                    }
+                }
+            }
+
+            // 2. Candidate Selection (The Speedup)
+            // Instead of scanning all files, we grab files that match our anchors from the usage_map.
+            let mut candidate_ids: HashSet<FileId> = HashSet::new();
+            
+            for anchor in target_anchors {
+                if let Some(ids) = self.index.usage_map.get(&anchor) {
+                    candidate_ids.extend(ids);
+                }
+            }
+            
+            // Edge case: If usage_map is empty (e.g. fresh scan issue?), 
+            // or we have zero anchors (unlikely), strictly we define no candidates.
+            // But we filter out files we've already visited to save time.
+            let candidates_to_check: Vec<FileId> = candidate_ids
+                .into_iter()
+                .filter(|id| !visited.contains(id))
+                .collect();
+
+            // 3. Verification (The Accuracy)
+            // We run the expensive heuristic logic ONLY on the candidates.
+            // Note: We removed 'par_iter' because candidates_to_check is likely small (~10-50 files).
+            // Overhead of thread spawning might exceed checking cost. Standard iter is fine.
+            let mut next_frontier = Vec::new();
+
+            for id in candidates_to_check {
+                 let candidate = match self.index.files.get(&id) {
+                     Some(c) => c,
+                     None => continue,
+                 };
+
+                 let mut is_match = false;
+
+                 // A. Logic Refs (Keep strict: code symbols are usually case-sensitive)
+                 for reference in &candidate.symbol_refs {
+                     if search_defs.contains(reference.as_str()) {
+                         is_match = true; 
+                         break;
+                     }
+                 }
+
+                 if !is_match {
+                     // B. Structural Imports (Make lenient)
+                     for import_str in &candidate.imports {
                         // 1. Monorepo Alias Resolution
                         let effective_search_str = if let Some((alias, target_dir)) = self.index.package_map
                             .iter()
@@ -68,60 +115,89 @@ impl<'a> JitWalker<'a> {
                         };
 
                         // 2. Normalize Relative Imports
-                        // remove "./" prefix if present, so "./utils" becomes "utils"
                         let clean_search_str = effective_search_str
                             .strip_prefix("./")
                             .unwrap_or(&effective_search_str);
 
-                        // 3. Prepare for Case-Insensitive Comparison
                         let import_lower = clean_search_str.to_lowercase();
 
                         for search_path in &search_paths {
                             let path_lower = search_path.to_lowercase();
 
-                            // HEURISTIC MATCHING (Case-Insensitive)
-                            
-                            // Check 1: Does the path contain the import string?
+                            // Heuristic Checks
                             if path_lower.contains(&import_lower) {
-                                
                                 // Sub-Check A: File Stem Match 
-                                // Matches import "utils" to file ".../Utils.ts"
-                                if let Some(stem) = Path::new(search_path).file_stem().and_then(|s| s.to_str()) {
-                                    if stem.to_lowercase() == import_lower {
-                                        return true;
+                                if let Some(stem) = extract_file_stem(search_path) {
+                                    if stem == import_lower {
+                                        is_match = true; break;
                                     }
                                 }
-
+                                
                                 // Sub-Check B: Suffix Match
-                                // Matches import "src/Utils" to file "src/Utils.ts"
                                 if path_lower.ends_with(&import_lower) {
-                                    return true;
+                                    is_match = true; break;
                                 }
 
                                 // Sub-Check C: Path Segment Match
-                                // Matches import "components/Button" to file "src/components/Button/index.tsx"
-                                // Prevents simple substring matching (e.g. "auth" matching "author.ts") unless slashes involve hierarchy.
                                 if import_lower.contains('/') {
-                                    return true;
+                                    is_match = true; break;
+                                }
+                                
+                                // Sub-Check D: Directory Import (Index file support)
+                                // If search_path is "auth/index.ts" and import is "auth"
+                                if is_generic_filename_path(search_path) {
+                                    if let Some(parent) = extract_parent_dir_name(search_path) {
+                                        if parent == import_lower {
+                                            is_match = true; break;
+                                        }
+                                    }
                                 }
                             }
                         }
+                        if is_match { break; }
                     }
-                    false
-                })
-                .map(|f| f.id)
-                .collect();
+                 }
 
-            let mut next_frontier = Vec::new();
-            for id in next_candidates {
-                if visited.insert(id) {
-                    results.push(id);
-                    next_frontier.push(id);
-                }
+                 if is_match {
+                     if visited.insert(id) {
+                         results.push(id);
+                         next_frontier.push(id);
+                     }
+                 }
             }
+            
             current_frontier = next_frontier;
         }
 
         results
+    }
+}
+
+// --- Helpers consistent with Scanner ---
+
+fn extract_file_stem(path: &str) -> Option<String> {
+    Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_lowercase())
+}
+
+fn extract_parent_dir_name(path: &str) -> Option<String> {
+    Path::new(path)
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_lowercase())
+}
+
+fn is_generic_filename(stem: &str) -> bool {
+    matches!(stem, "index" | "mod" | "__init__" | "main" | "lib")
+}
+
+fn is_generic_filename_path(path: &str) -> bool {
+    if let Some(stem) = extract_file_stem(path) {
+        is_generic_filename(&stem)
+    } else {
+        false
     }
 }

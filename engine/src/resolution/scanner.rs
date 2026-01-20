@@ -1,12 +1,12 @@
 use std::path::Path;
 use std::fs;
-use std::collections::{HashMap, HashSet};
+use std::collections::{ HashMap, HashSet };
 use ignore::WalkBuilder;
 use blake3;
 use rayon::prelude::*;
 use pathdiff;
 
-use crate::models::{BoundaryIndex, FileBoundary, FileId};
+use crate::models::{ BoundaryIndex, FileBoundary, FileId };
 use crate::analysis::boundary::extract_boundary;
 use crate::analysis::language::get_config_for_extension;
 use crate::manifest::scan_manifest_content; // Import the updated helper
@@ -32,19 +32,11 @@ impl FileScanner {
         Self
     }
 
-    pub fn scan(
-        &self,
-        root: &Path,
-        index: &mut BoundaryIndex,
-        root_id: &str
-    ) {
+    pub fn scan(&self, root: &Path, index: &mut BoundaryIndex, root_id: &str) {
         let root_abs = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-        
+
         // 1. Discovery Phase (IO Bound - optimized by ignore crate)
-        let walker = WalkBuilder::new(&root_abs)
-            .hidden(false)
-            .git_ignore(true)
-            .build();
+        let walker = WalkBuilder::new(&root_abs).hidden(false).git_ignore(true).build();
 
         let mut file_entries = Vec::new();
         for result in walker {
@@ -56,16 +48,23 @@ impl FileScanner {
         }
 
         // 2. Read Phase (IO/CPU Mixed - Parallelized)
-        // We read all files into memory. For large repos, this uses RAM, 
+        // We read all files into memory. For large repos, this uses RAM,
         // but ensures we have zero-latency access for parsing.
         let scanned_files: Vec<FileData> = file_entries
             .into_par_iter()
             .filter_map(|path| {
                 let filename = path.file_name()?.to_str()?;
-                let extension = path.extension().map(|s| s.to_str().unwrap_or("")).unwrap_or("").to_string();
-                
+                let extension = path
+                    .extension()
+                    .map(|s| s.to_str().unwrap_or(""))
+                    .unwrap_or("")
+                    .to_string();
+
                 // Filter: Is it a supported language OR a manifest?
-                let is_manifest = matches!(filename, "package.json" | "Cargo.toml" | "pyproject.toml");
+                let is_manifest = matches!(
+                    filename,
+                    "package.json" | "Cargo.toml" | "pyproject.toml"
+                );
                 if !is_manifest && get_config_for_extension(&extension).is_none() {
                     return None;
                 }
@@ -76,10 +75,8 @@ impl FileScanner {
                 // If pathdiff fails (e.g. cross-drive on Windows), returns None
                 // so filter_map skips the file, ensuring we never store absolute paths.
                 let diff = pathdiff::diff_paths(&path, &root_abs)?;
-                
-                let relative_path = diff
-                    .to_string_lossy()
-                    .replace('\\', "/");
+
+                let relative_path = diff.to_string_lossy().replace('\\', "/");
 
                 Some(FileData {
                     relative_path,
@@ -97,12 +94,14 @@ impl FileScanner {
             .collect();
 
         // Prepare existing state for Change Detection
-        let existing_files: HashMap<String, [u8; 32]> = index.files.values()
+        let existing_files: HashMap<String, [u8; 32]> = index.files
+            .values()
             .filter(|f| f.root_id == root_id)
             .map(|f| (f.path.clone(), f.hash))
             .collect();
-        
-        let existing_ids: HashMap<String, FileId> = index.files.values()
+
+        let existing_ids: HashMap<String, FileId> = index.files
+            .values()
             .filter(|f| f.root_id == root_id)
             .map(|f| (f.path.clone(), f.id))
             .collect();
@@ -112,26 +111,28 @@ impl FileScanner {
             .into_par_iter()
             .map(|file_data| {
                 let filename = Path::new(&file_data.relative_path)
-                    .file_name().and_then(|s| s.to_str()).unwrap_or("");
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("");
 
                 // A. Handle Manifests (Always re-parse to ensure map integrity)
                 // This is extremely fast (small JSON/TOML files)
                 if matches!(filename, "package.json" | "Cargo.toml" | "pyproject.toml") {
                     let meta = scan_manifest_content(filename, &file_data.content);
-                    
+
                     if let Some(pkg_name) = meta.package_name {
                         // Calculate directory of the package
                         let dir = Path::new(&file_data.relative_path)
                             .parent()
                             .map(|p| p.to_string_lossy().to_string().replace('\\', "/"))
                             .unwrap_or_else(|| String::from(""));
-                        
+
                         return ScanResult::PackageDef(pkg_name, dir);
                     }
-                    
+
                     // Even if it's a manifest, it might not define a package name.
                     // We don't track manifests as "Files" in the index, only their metadata.
-                    return ScanResult::None; 
+                    return ScanResult::None;
                 }
 
                 // B. Handle Source Code (Change Detection Optimization)
@@ -144,12 +145,14 @@ impl FileScanner {
                 // Parse Source Code
                 // get_config_for_extension is safe here (lazy static)
                 if let Some(config) = get_config_for_extension(&file_data.extension) {
-                    match extract_boundary(
-                        &file_data.relative_path,
-                        &file_data.content,
-                        config,
-                        file_data.hash
-                    ) {
+                    match
+                        extract_boundary(
+                            &file_data.relative_path,
+                            &file_data.content,
+                            config,
+                            file_data.hash
+                        )
+                    {
                         Ok(mut boundary) => {
                             boundary.root_id = root_id.to_string();
                             // Preserve ID if updating existing file
@@ -157,8 +160,10 @@ impl FileScanner {
                                 boundary.id = id;
                             }
                             return ScanResult::Boundary(boundary);
-                        },
-                        Err(_) => return ScanResult::None,
+                        }
+                        Err(_) => {
+                            return ScanResult::None;
+                        }
                     }
                 }
 
@@ -177,21 +182,22 @@ impl FileScanner {
                         index.next_file_id += 1;
                         new_id
                     };
-                    
+
                     let mut final_boundary = boundary;
                     final_boundary.id = id;
                     index.files.insert(id, final_boundary);
-                },
+                }
                 ScanResult::PackageDef(name, dir) => {
                     // Update global package map
                     index.package_map.insert(name, dir);
-                },
+                }
                 ScanResult::None => {}
             }
         }
 
         // 5. Cleanup Deleted Files
-        let ids_to_remove: Vec<FileId> = index.files.values()
+        let ids_to_remove: Vec<FileId> = index.files
+            .values()
             .filter(|f| f.root_id == root_id && !seen_paths.contains(&f.path))
             .map(|f| f.id)
             .collect();
@@ -207,9 +213,10 @@ impl FileScanner {
     fn rebuild_maps(&self, index: &mut BoundaryIndex) {
         index.symbol_map.clear();
         index.path_map.clear();
+        index.usage_map.clear(); // Clear the new map
 
         for file in index.files.values() {
-            // A. Populate Path Map
+            // A. Populate Path Map (Existing)
             let parts: Vec<&str> = file.path.split('/').collect();
             let len = parts.len();
             for i in 0..len {
@@ -217,10 +224,54 @@ impl FileScanner {
                 index.path_map.entry(suffix).or_default().push(file.id);
             }
 
-            // B. Populate Symbol Map
+            // B. Populate Symbol Map (Existing)
             for def in &file.defs {
                 index.symbol_map.entry(def.name.clone()).or_default().push(file.id);
             }
+
+            // We want to know: "Who uses me?"
+            // So we index: Token -> This File ID
+            // Index Imports
+            for import_str in &file.imports {
+                // Heuristic: The significant part of an import path is usually the last segment.
+                // e.g. "react" -> "react", "./utils" -> "utils", "src/components/Header" -> "header"
+                if let Some(token) = extract_significant_token(import_str) {
+                    index.usage_map.entry(token).or_default().push(file.id);
+                }
+            }
+
+            // Index Symbol References
+            for ref_str in &file.symbol_refs {
+                // Symbols are usually distinct enough, just lowercase them.
+                let token = ref_str.to_lowercase();
+                index.usage_map.entry(token).or_default().push(file.id);
+            }
+        }
+
+        // Deduplicate usage entries (files might ref the same token multiple times)
+        for list in index.usage_map.values_mut() {
+            list.sort_unstable();
+            list.dedup();
         }
     }
+}
+
+// Helper to normalize tokens consistently
+fn extract_significant_token(path: &str) -> Option<String> {
+    // 1. Split by directory separators
+    let last_segment = path.split('/').last()?;
+
+    if last_segment.is_empty() || last_segment == "." || last_segment == ".." {
+        return None;
+    }
+
+    // 2. Strip extension if present
+    let stem = std::path::Path
+        ::new(last_segment)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(last_segment);
+
+    // 3. Lowercase
+    Some(stem.to_lowercase())
 }
