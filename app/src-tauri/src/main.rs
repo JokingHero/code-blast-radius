@@ -103,6 +103,7 @@ fn map_to_dto(manager: &WorkspaceManager) -> WorkspaceConfigDTO {
 
 fn setup_watcher(app: &tauri::AppHandle, roots: Vec<PathBuf>) -> Option<RecommendedWatcher> {
     let app_handle = app.clone();
+    let last_emit = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
 
     let event_handler = move |res: notify::Result<Event>| {
         match res {
@@ -119,7 +120,11 @@ fn setup_watcher(app: &tauri::AppHandle, roots: Vec<PathBuf>) -> Option<Recommen
                 });
 
                 if is_relevant {
-                    let _ = app_handle.emit("workspace:dirty", ());
+                    let mut last = last_emit.lock().unwrap();
+                    if last.elapsed().as_millis() > 500 {
+                         let _ = app_handle.emit("workspace:dirty", ());
+                         *last = std::time::Instant::now();
+                    }
                 }
             }
             Err(e) => eprintln!("Watch error: {:?}", e),

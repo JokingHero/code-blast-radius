@@ -89,6 +89,9 @@ pub struct BoundaryIndex {
     // Key: "Significant Token" (lowercase stem of import or symbol).
     // Value: List of files that contain this token in their imports or refs.
     pub usage_map: HashMap<String, Vec<FileId>>,
+
+    // Maps prefixes ("@components/") to relative paths ("src/components/")
+    pub alias_map: HashMap<String, String>, 
 }
 
 impl BoundaryIndex {
@@ -100,6 +103,7 @@ impl BoundaryIndex {
             path_map: HashMap::new(),
             package_map: HashMap::new(), 
             usage_map: HashMap::new(),
+            alias_map: HashMap::new(),
         }
     }
 }

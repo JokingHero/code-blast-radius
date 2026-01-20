@@ -17,6 +17,7 @@ pub struct FileScanner;
 enum ScanResult {
     Boundary(FileBoundary),
     PackageDef(String, String), // (Package Name, Relative Directory)
+    Aliases(HashMap<String, String>),
     None,
 }
 
@@ -110,10 +111,50 @@ impl FileScanner {
         let results: Vec<ScanResult> = scanned_files
             .into_par_iter()
             .map(|file_data| {
-                let filename = Path::new(&file_data.relative_path)
-                    .file_name()
+                let path_obj = Path::new(&file_data.relative_path);
+                let filename = path_obj.file_name()
                     .and_then(|s| s.to_str())
                     .unwrap_or("");
+
+                // 1. Handle TSConfig / JSConfig Aliases
+                if filename == "tsconfig.json" || filename == "jsconfig.json" {
+                    let mut aliases = HashMap::new();
+                    
+                    // Calculate the directory this config file lives in.
+                    // If tsconfig is in "packages/ui/", then "@/*" -> "./src/*" 
+                    // actually means "@/" -> "packages/ui/src/"
+                    let config_dir = path_obj.parent().unwrap_or(Path::new(""));
+
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&file_data.content) {
+                        if let Some(paths) = json.get("compilerOptions")
+                            .and_then(|o| o.get("paths"))
+                            .and_then(|p| p.as_object()) 
+                        {
+                            for (key, val) in paths {
+                                // Clean the key: "@/*" -> "@/"
+                                let clean_key = key.replace("/*", "/");
+                                
+                                // Get first target path: ["src/*"] -> "src/"
+                                if let Some(first_path) = val.as_array().and_then(|a| a.get(0)).and_then(|v| v.as_str()) {
+                                    let clean_val = first_path.replace("/*", "/");
+                                    
+                                    // Resolve relative to the config file's directory
+                                    let resolved_path = config_dir.join(&clean_val);
+                                    let final_path = resolved_path.to_string_lossy().replace('\\', "/");
+                                    
+                                    aliases.insert(clean_key, final_path);
+                                }
+                            }
+                        }
+                    }
+                    
+                    if !aliases.is_empty() {
+                        return ScanResult::Aliases(aliases);
+                    }
+                    // Even if empty, we processed it, so we can return None or fall through.
+                    // Falling through allows it to be indexed as a file if needed, but usually we return:
+                    return ScanResult::None; 
+                }
 
                 // A. Handle Manifests (Always re-parse to ensure map integrity)
                 // This is extremely fast (small JSON/TOML files)
@@ -190,6 +231,9 @@ impl FileScanner {
                 ScanResult::PackageDef(name, dir) => {
                     // Update global package map
                     index.package_map.insert(name, dir);
+                }
+                ScanResult::Aliases(map) => {
+                    index.alias_map.extend(map);
                 }
                 ScanResult::None => {}
             }

@@ -171,6 +171,108 @@ impl<'a> JitWalker<'a> {
 
         results
     }
+
+    pub fn walk_dependencies(&self, start_ids: &[FileId], max_depth: usize) -> Vec<FileId> {
+        let mut visited = HashSet::new();
+        let mut current_frontier: Vec<FileId> = start_ids.to_vec();
+        let mut results = Vec::new();
+
+        for &id in start_ids {
+            visited.insert(id);
+            results.push(id);
+        }
+
+        for _depth in 0..max_depth {
+            if current_frontier.is_empty() {
+                break;
+            }
+
+            let mut next_frontier = Vec::new();
+
+            for &id in &current_frontier {
+                if let Some(file) = self.index.files.get(&id) {
+                    let file_dir = std::path::Path::new(&file.path).parent().unwrap_or(std::path::Path::new(""));
+
+                    // 1. Resolve Structural Imports
+                    for import_str in &file.imports {
+                        let clean = import_str.trim_matches(|c| c == '"' || c == '\'');
+                        
+                        let mut candidates = Vec::new();
+
+                        // A. Rust Crate Aliases
+                        if clean.starts_with("crate::") {
+                            let path = clean.replace("crate::", "src/").replace("::", "/");
+                            candidates.push(path);
+                        } 
+                        // B. Relative Imports
+                        else if clean.starts_with('.') {
+                            let joined = file_dir.join(clean);
+                            if let Some(normalized) = normalize_path_simple(&joined) {
+                                candidates.push(normalized);
+                            }
+                        } 
+                        // C. Absolute / Aliased / Package Imports
+                        else {
+                            // 1. Standard (e.g. "react")
+                            candidates.push(clean.to_string());
+                            
+                            // 2. Monorepo Packages (package.json "name")
+                            // e.g. "@my-org/ui" -> "packages/ui"
+                            for (pkg_name, pkg_path) in &self.index.package_map {
+                                if clean.starts_with(pkg_name) {
+                                    let resolved = clean.replace(pkg_name, pkg_path);
+                                    candidates.push(resolved);
+                                }
+                            }
+
+                            // 3. TSConfig Aliases (tsconfig.json "paths") --- THIS IS THE FINAL ADDITION
+                            // e.g. "@/" -> "src/"
+                            for (alias_key, target_path) in &self.index.alias_map {
+                                if clean.starts_with(alias_key) {
+                                    let resolved = clean.replace(alias_key, target_path);
+                                    candidates.push(resolved);
+                                }
+                            }
+                        }
+
+                        // D. Check Index
+                        let extensions = ["", ".ts", ".tsx", ".js", ".jsx", ".rs", ".py", ".java", ".go", "/index.ts", "/index.js"];
+                        
+                        for base_path in candidates {
+                            for ext in extensions.iter() {
+                                let probe = format!("{}{}", base_path, ext);
+                                
+                                if let Some(target_ids) = self.index.path_map.get(&probe) {
+                                    for &target_id in target_ids {
+                                        if visited.insert(target_id) {
+                                            results.push(target_id);
+                                            next_frontier.push(target_id);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Resolve Logical Symbols (Existing logic)
+                    for symbol_ref in &file.symbol_refs {
+                        if let Some(target_ids) = self.index.symbol_map.get(symbol_ref) {
+                            for &target_id in target_ids {
+                                if target_id == id { continue; }
+                                if visited.insert(target_id) {
+                                    results.push(target_id);
+                                    next_frontier.push(target_id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            current_frontier = next_frontier;
+        }
+
+        results
+    }
 }
 
 // --- Helpers consistent with Scanner ---
@@ -200,4 +302,20 @@ fn is_generic_filename_path(path: &str) -> bool {
     } else {
         false
     }
+}
+
+fn normalize_path_simple(path: &Path) -> Option<String> {
+    use std::path::Component;
+    let mut components = Vec::new();
+    
+    for component in path.components() {
+        match component {
+            Component::Normal(c) => components.push(c.to_str()?),
+            Component::ParentDir => { components.pop(); }, // Go back one level
+            Component::CurDir => {}, // Ignore "."
+            _ => {}
+        }
+    }
+    
+    Some(components.join("/"))
 }

@@ -238,17 +238,25 @@ fn run() -> Result<()> {
                 }
             }
 
-            // Step B: Traverse Graph (Using JitWalker)
             let walker = JitWalker::new(index);
-            
-            // Default depth if not provided
             let d = depth.unwrap_or(5);
-            let mut related_ids = walker.walk_impact(&start_ids, d);
+
+            let mut related_ids = std::collections::HashSet::new();
+            for &id in &start_ids { related_ids.insert(id); }
+            let deps = walker.walk_dependencies(&start_ids, d);
+            related_ids.extend(deps);
+            let impacted = walker.walk_impact(&start_ids, d);
+            related_ids.extend(impacted);
+            
+            let final_ids: Vec<u32> = related_ids.into_iter().collect();
+            // -------------------------------
+
+            let mut final_filtered_ids = final_ids.clone();
 
             if *no_tests {
-                related_ids.retain(|&id| {
+                final_filtered_ids.retain(|&id| {
                     if let Some(f) = index.files.get(&id) {
-                         !f.path.contains("test") && !f.path.contains("spec")
+                        !f.path.contains("test") && !f.path.contains("spec")
                     } else {
                         true
                     }
@@ -260,7 +268,8 @@ fn run() -> Result<()> {
                 .map(|f| (f.id, f.path.clone()))
                 .collect();
                 
-            let output = generate_context_output(index, &related_ids, &id_map);
+            // Pass final_filtered_ids instead of related_ids
+            let output = generate_context_output(index, &final_filtered_ids, &id_map);
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
 

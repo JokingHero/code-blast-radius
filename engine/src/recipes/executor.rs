@@ -8,6 +8,7 @@ use crate::models::{BoundaryIndex, FileId, Definition};
 use crate::query::walker::JitWalker;
 use crate::recipes::models::{Recipe, RecipeOperation, FileTransform};
 use crate::query::output::{ContextOutput, FileContent, FileContextMetadata, LineRange};
+use crate::resolution::utils::is_test_path;
 
 pub struct RecipeExecutor<'a> {
     index: &'a BoundaryIndex,
@@ -51,7 +52,7 @@ impl<'a> RecipeExecutor<'a> {
                         }
                     });
                 }
-                RecipeOperation::BlastRadius { symbol, max_depth, exclude_tests: _ } => {
+                RecipeOperation::BlastRadius { symbol, max_depth, exclude_tests } => {
                     // 1. Find seeds
                     let mut seeds = Vec::new();
                     
@@ -75,6 +76,18 @@ impl<'a> RecipeExecutor<'a> {
                     let walker = JitWalker::new(self.index);
                     let impacted = walker.walk_impact(&seeds, *max_depth as usize);
                     working_set.extend(impacted);
+                    let dependencies = walker.walk_dependencies(&seeds, *max_depth as usize);
+                    working_set.extend(dependencies);
+
+                    if *exclude_tests {
+                        working_set.retain(|id| {
+                            if let Some(f) = self.index.files.get(id) {
+                                !is_test_path(std::path::Path::new(&f.path))
+                            } else {
+                                true
+                            }
+                        });
+                    }
                 }
             }
         }
