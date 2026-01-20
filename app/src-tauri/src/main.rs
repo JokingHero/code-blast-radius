@@ -141,47 +141,53 @@ fn setup_watcher(app: &tauri::AppHandle, roots: Vec<PathBuf>) -> Option<Recommen
 
     Some(watcher)
 }
+
 /// Normalizes a Recipe received from the UI.
-/// The UI might send Absolute Paths (e.g. from Drag & Drop).
-/// This function looks them up in the path_map and converts them to relative_path globs
-/// to ensure the recipe works with the engine's Relative Path logic.
+/// The UI might send Absolute Paths (e.g. from Drag & Drop) or Relative Paths (e.g. typed manually).
+/// This function converts Absolute paths to Relative paths if they reside within a Workspace Root,
+/// and validates Relative paths against the Roots to ensure they refer to actual files.
 fn normalize_recipe(manager: &WorkspaceManager, mut recipe: Recipe) -> Recipe {
     for op in &mut recipe.operations {
         match op {
             RecipeOperation::AddFiles { pattern } | RecipeOperation::RemoveFiles { pattern } => {
-                // Check if pattern is checking for absolute path?
-                // The pattern string from UI might be absolute.
                 let path_buf = PathBuf::from(&*pattern);
-                
-                // We resolve to absolute path first
-                let lookup_path = if path_buf.exists() {
-                     std::fs::canonicalize(&path_buf).unwrap_or(path_buf.clone())
-                } else {
-                     path_buf.clone()
-                };
 
-                // Now we need to find if this Absolute Path matches a known file.
-                // Since path_map is relative segments, we can't look it up directly.
-                // We must map Abs -> Rel first.
-                
-                // Try to find which root contains this path
-                for root in &manager.config.roots {
-                    if lookup_path.starts_with(&root.path) {
-                        if let Ok(rel) = lookup_path.strip_prefix(&root.path) {
-                            let rel_str = rel.to_string_lossy().replace('\\', "/");
-                            // Now we have a relative path string. 
-                            // We can use it as the pattern!
-                            
-                            // Optionally verify it exists in index?
-                            if let Some(ids) = manager.index.path_map.get(&rel_str) {
-                                if !ids.is_empty() {
-                                    *pattern = rel_str;
+                // Case 1: Handle Absolute Paths (e.g. from Drag & Drop)
+                if path_buf.is_absolute() {
+                    // Only try to resolve if the file actually exists on disk
+                    if path_buf.exists() {
+                        let canonical = std::fs::canonicalize(&path_buf).unwrap_or(path_buf.clone());
+
+                        // Try to find which root contains this path
+                        for root in &manager.config.roots {
+                            if canonical.starts_with(&root.path) {
+                                if let Ok(rel) = canonical.strip_prefix(&root.path) {
+                                    // Successfully mapped Absolute -> Relative
+                                    *pattern = rel.to_string_lossy().replace('\\', "/");
                                     break;
                                 }
                             }
-                            
-                            // Even if not in index (maybe ignored/new), using relative path is safer for recipe portability.
-                            *pattern = rel_str;
+                        }
+                    }
+                } 
+                // Case 2: Handle Relative Paths (e.g. typed manually)
+                else {
+                    // Do NOT check path_buf.exists() here, as that relies on the process CWD 
+                    // (Current Working Directory), which is unpredictable in a GUI app.
+                    
+                    // Skip glob patterns, we can't resolve existence for them
+                    if pattern.contains('*') || pattern.contains('?') {
+                        continue;
+                    }
+
+                    // Check if this relative path exists inside any known root
+                    for root in &manager.config.roots {
+                        let candidate = root.path.join(&path_buf);
+                        if candidate.exists() {
+                            // It is a valid file in this root.
+                            // We normalize separators (Windows \ -> /) to ensure consistency.
+                            *pattern = path_buf.to_string_lossy().replace('\\', "/");
+                            break;
                         }
                     }
                 }
