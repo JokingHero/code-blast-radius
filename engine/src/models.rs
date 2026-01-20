@@ -60,6 +60,14 @@ pub struct FileBoundary {
     // 3. What symbols does it mention? (Logical Dependencies)
     // Extracted identifiers from the code flow (e.g., "User", "AuthService", "login")
     pub symbol_refs: Vec<String>, 
+
+    // Raw string literals found in the file (e.g. "/api/users", "GET")
+    // These are candidates for "Synthetic Reference" promotion.
+    pub literals: Vec<String>,
+
+    // Logical definitions inferred from the file path/structure
+    // e.g. "route:/api/users"
+    pub synthetic_defs: Vec<String>,
 }
 
 /// The Main Index.

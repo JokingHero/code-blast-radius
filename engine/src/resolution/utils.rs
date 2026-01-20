@@ -13,40 +13,12 @@ pub fn to_index_path(path: &Path) -> String {
     }
 }
 
-/// Detects if a file path corresponds to a framework route (e.g. Next.js pages/api)
-pub fn detect_framework_route(path: &Path) -> Option<String> {
-    let path_str = path.to_string_lossy().replace('\\', "/");
-    
-    // 1. Next.js Pages Router
-    if let Some(idx) = path_str.find("/pages/api/") {
-        let relative = &path_str[idx + "/pages".len()..]; 
-        if let Some(dot_idx) = relative.rfind('.') {
-                let route = &relative[..dot_idx];
-                if route.ends_with("/index") {
-                    return Some(route[..route.len() - "/index".len()].to_string());
-                }
-                return Some(route.to_string());
-        }
-    }
-
-    // 2. Next.js App Router
-    if path_str.ends_with("/route.ts") || path_str.ends_with("/route.js") {
-        if let Some(app_idx) = path_str.find("/app/") {
-            if let Some(route_idx) = path_str.rfind("/route.") {
-                    let relative = &path_str[app_idx + 4..route_idx]; 
-                    return Some(relative.to_string());
-            }
-        }
-    }
-
-    None
-}
-
 pub fn is_test_path(path: &Path) -> bool {
     let path_str = path.to_string_lossy();
     let normalized = path_str.replace('\\', "/").to_lowercase();
     let path_obj = Path::new(&normalized);
 
+    // 1. Check for directory names
     let has_test_folder = path_obj.components().any(|c| {
         let s = c.as_os_str().to_string_lossy();
         matches!(
@@ -59,6 +31,7 @@ pub fn is_test_path(path: &Path) -> bool {
 
     if has_test_folder { return true; }
 
+    // 2. Check for filename patterns
     let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
 
     if filename.ends_with(".test.ts") || filename.ends_with(".test.tsx") ||

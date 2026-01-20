@@ -6,3 +6,4 @@ pub mod recipes;
 pub mod resolution; 
 pub mod query;
 pub mod topic;
+pub mod inference;

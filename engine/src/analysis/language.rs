@@ -40,6 +40,8 @@ pub struct CompiledQueries {
     pub definitions: Option<Arc<Query>>,
     pub imports: Option<Arc<Query>>,
     pub references: Option<Arc<Query>>,
+    // REACTIVATED: Stores the compiled query for string literals
+    pub literals: Option<Arc<Query>>, 
 }
 
 #[derive(Default, Clone)]
@@ -67,6 +69,9 @@ pub struct LanguageConfigBuilder {
     defs_query: Option<&'static str>,
     imports_query: Option<&'static str>,
     
+    // REACTIVATED: The query string for literals
+    literals_query: Option<&'static str>, 
+
     // Heuristics (Keep for compatibility, though largely unused in dumb mode)
     heuristics: HeuristicConfig,
     skeleton_template: &'static str,
@@ -79,23 +84,28 @@ impl LanguageConfigBuilder {
             file_extensions: extensions,
             defs_query: None,
             imports_query: None,
+            literals_query: None, // Initialize as None
             heuristics: HeuristicConfig::default(),
             skeleton_template: " ... ",
         }
     }
 
-    // --- Core Setters (Used) ---
+    // --- Core Setters ---
     pub fn defs(mut self, q: &'static str) -> Self { self.defs_query = Some(q); self }
     pub fn imports(mut self, q: &'static str) -> Self { self.imports_query = Some(q); self }
     pub fn skeleton(mut self, s: &'static str) -> Self { self.skeleton_template = s; self }
 
-    // --- Legacy Setters (No-ops or Metadata only) ---
-    // We keep these so that existing language files compile without changes.
-    // The specific "calls" logic is replaced by the generic reference scan.
+    // REACTIVATED: This now stores the query instead of ignoring it.
+    // This allows us to use the complex regexes/node-types defined in your language files
+    // (e.g., heredocs in Bash, template strings in JS).
+    pub fn literals(mut self, q: &'static str) -> Self { self.literals_query = Some(q); self }
+
+    // --- Legacy Setters (No-ops) ---
+    // We keep these so that existing language files (which are very detailed) 
+    // compile without changes, even if we don't use this metadata currently.
     pub fn calls(self, _q: &'static str) -> Self { self }
     pub fn docs(self, _q: &'static str) -> Self { self }
     pub fn exports(self, _q: &'static str) -> Self { self }
-    pub fn literals(self, _q: &'static str) -> Self { self }
     pub fn implements(self, _q: &'static str) -> Self { self }
     pub fn config_keys(self, _q: &'static str) -> Self { self }
     pub fn vals(self, _q: &'static str) -> Self { self }
@@ -131,6 +141,7 @@ impl LanguageConfigBuilder {
                 definitions: compile(self.defs_query),
                 imports: compile(self.imports_query),
                 references: refs_query,
+                literals: compile(self.literals_query), // Compile the literals query
             },
             heuristics: self.heuristics,
             skeleton_template: self.skeleton_template,
@@ -147,8 +158,6 @@ fn get_default_refs_query(lang: SupportedLanguage) -> &'static str {
             (type_identifier) @ref
             (field_identifier) @ref
         "#,
-        // TypeScript has type_identifier, JavaScript does NOT.
-        // Both can have JSX.
         SupportedLanguage::TypeScript => r#"
             (identifier) @ref
             (property_identifier) @ref
@@ -343,7 +352,7 @@ pub fn get_config_by_language(lang: SupportedLanguage) -> Option<&'static Langua
         SupportedLanguage::JavaScript => "js",
         SupportedLanguage::Python => "py",
         SupportedLanguage::Java => "java",
-        SupportedLanguage::Bash | SupportedLanguage::Dotenv => "sh", // Dotenv shares logic or maps to specific loader
+        SupportedLanguage::Bash | SupportedLanguage::Dotenv => "sh",
         SupportedLanguage::Html => "html",
         SupportedLanguage::Julia => "jl",
         SupportedLanguage::R => "r",
@@ -361,8 +370,6 @@ pub fn get_config_by_language(lang: SupportedLanguage) -> Option<&'static Langua
         SupportedLanguage::Cpp => "cpp",
     };
     
-    // Special handling for Dotenv if it has a unique loader separate from Bash in your logic,
-    // otherwise the match above handles the mapping.
     if lang == SupportedLanguage::Dotenv {
         return get_config_for_extension("env");
     }

@@ -20,6 +20,7 @@ pub fn extract_boundary(
     let mut defs = Vec::new();
     let mut imports = Vec::new();
     let mut symbol_refs = HashSet::new();
+    let mut literals = HashSet::new(); // Store unique literals found in this file
 
     let mut cursor = QueryCursor::new();
 
@@ -45,6 +46,7 @@ pub fn extract_boundary(
                         def_range = (node.start_byte(), node.end_byte());
                         let k = node.kind();
 
+                        // Detailed Symbol Inference Logic
                         kind = if k.contains("class") || k.contains("struct") || k.contains("record") || k.contains("object") || k.contains("model") || k.contains("enum") {
                              SymbolKind::Class
                         } else if k.contains("interface") || k.contains("trait") || k.contains("impl") {
@@ -59,8 +61,8 @@ pub fn extract_boundary(
                         } else if k.contains("const") || k.contains("let") || k.contains("var") || k.contains("declarator") {
                             // Check if this variable holds a function (JS/TS pattern: const foo = () => {})
                             let mut is_fn_var = false;
-                            // Check immediate children for function/arrow_function
-                            // We use a new cursor for the lightweight child check
+                            
+                            // Check immediate children for function signatures
                             let mut child_cursor = node.walk();
                             for child in node.children(&mut child_cursor) {
                                 let ck = child.kind();
@@ -91,11 +93,12 @@ pub fn extract_boundary(
                         body_range = Some((node.start_byte(), node.end_byte()));
                     },
                     "function.kind" => {
+                        // Special handling for HCL/Terraform blocks
                         let k_text = node.utf8_text(source_bytes).unwrap_or("");
                         match k_text {
                             "resource" | "data" => kind = SymbolKind::Class,
                             "variable" | "output" | "provider" => kind = SymbolKind::Variable,
-                            "module" => kind = SymbolKind::Module, // FIXED: Handle module explicitly
+                            "module" => kind = SymbolKind::Module,
                             _ => {}
                         }
                     }
@@ -107,8 +110,7 @@ pub fn extract_boundary(
                 name = "anonymous".to_string();
             }
 
-            // HCL fix: If name is strict matches of generic types, ignore them if we have better
-            // (This logic is handled better by fixing the HCL query, but we keep a filter just in case)
+            // HCL fix: If name is strict matches of generic types, ignore them if we have better.
             if name == "resource" || name == "data" { continue; }
 
             if def_range.0 != def_range.1 {
@@ -146,7 +148,7 @@ pub fn extract_boundary(
             for cap in m.captures {
                 let text = cap.node.utf8_text(source_bytes).unwrap_or("");
                 
-                // Heuristic filtering for "Dumb" references
+                // Heuristic filtering for "Dumb" references to reduce noise
                 if text.len() < 2 { continue; } 
                 if text.chars().next().map_or(false, |c| !c.is_alphabetic() && c != '_') { continue; }
                 
@@ -154,8 +156,30 @@ pub fn extract_boundary(
             }
         }
     }
+
+    // 4. Extract String Literals
+    // These are crucial for the Inference Engine to link code strings (e.g. "/api/users")
+    // to Synthetic Definitions (e.g. route:/api/users).
+    if let Some(query) = &config.queries.literals {
+        let mut matches = cursor.matches(query, root_node, source_bytes);
+        while let Some(m) = matches.next() {
+            for cap in m.captures {
+                let text = cap.node.utf8_text(source_bytes).unwrap_or("");
+                // Clean the quotes off the literal
+                let clean = text.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                
+                // Only store "interesting" literals to keep the index size manageable.
+                // Short literals (1 char) or empty strings are rarely useful for concept linking.
+                if clean.len() > 1 {
+                    literals.insert(clean.to_string());
+                }
+            }
+        }
+    }
     
-    // Cleanup: Remove self-definitions from references
+    // Cleanup: Remove self-definitions from references.
+    // A file technically "references" itself when defining a function, 
+    // but for dependency graphs, we care about external dependencies.
     for def in &defs {
         symbol_refs.remove(&def.name);
     }
@@ -168,5 +192,7 @@ pub fn extract_boundary(
         defs,
         imports,
         symbol_refs: symbol_refs.into_iter().collect(),
+        literals: literals.into_iter().collect(), // NEW: Populated from step 4
+        synthetic_defs: Vec::new(), // NEW: To be populated by Inference Engine
     })
 }

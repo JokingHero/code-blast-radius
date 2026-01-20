@@ -9,7 +9,8 @@ use pathdiff;
 use crate::models::{ BoundaryIndex, FileBoundary, FileId };
 use crate::analysis::boundary::extract_boundary;
 use crate::analysis::language::get_config_for_extension;
-use crate::manifest::scan_manifest_content; // Import the updated helper
+use crate::manifest::scan_manifest_content;
+use crate::inference::{InferenceEngine, routes::NextJsRouteRule};
 
 pub struct FileScanner;
 
@@ -36,6 +37,12 @@ impl FileScanner {
     pub fn scan(&self, root: &Path, index: &mut BoundaryIndex, root_id: &str) {
         let root_abs = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
 
+        // 0. Setup Inference Engine
+        // We create it here and pass it into the parallel iterator.
+        // It must be Send + Sync (which it is, as it contains Box<dyn InferenceRule>).
+        let mut inference_engine = InferenceEngine::new();
+        inference_engine.register(NextJsRouteRule);
+
         // 1. Discovery Phase (IO Bound - optimized by ignore crate)
         let walker = WalkBuilder::new(&root_abs).hidden(false).git_ignore(true).build();
 
@@ -49,8 +56,6 @@ impl FileScanner {
         }
 
         // 2. Read Phase (IO/CPU Mixed - Parallelized)
-        // We read all files into memory. For large repos, this uses RAM,
-        // but ensures we have zero-latency access for parsing.
         let scanned_files: Vec<FileData> = file_entries
             .into_par_iter()
             .filter_map(|path| {
@@ -61,7 +66,6 @@ impl FileScanner {
                     .unwrap_or("")
                     .to_string();
 
-                // Filter: Is it a supported language OR a manifest?
                 let is_manifest = matches!(
                     filename,
                     "package.json" | "Cargo.toml" | "pyproject.toml"
@@ -73,10 +77,7 @@ impl FileScanner {
                 let content = fs::read_to_string(&path).ok()?;
                 let hash = blake3::hash(content.as_bytes()).into();
 
-                // If pathdiff fails (e.g. cross-drive on Windows), returns None
-                // so filter_map skips the file, ensuring we never store absolute paths.
                 let diff = pathdiff::diff_paths(&path, &root_abs)?;
-
                 let relative_path = diff.to_string_lossy().replace('\\', "/");
 
                 Some(FileData {
@@ -119,10 +120,6 @@ impl FileScanner {
                 // 1. Handle TSConfig / JSConfig Aliases
                 if filename == "tsconfig.json" || filename == "jsconfig.json" {
                     let mut aliases = HashMap::new();
-                    
-                    // Calculate the directory this config file lives in.
-                    // If tsconfig is in "packages/ui/", then "@/*" -> "./src/*" 
-                    // actually means "@/" -> "packages/ui/src/"
                     let config_dir = path_obj.parent().unwrap_or(Path::new(""));
 
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&file_data.content) {
@@ -131,38 +128,26 @@ impl FileScanner {
                             .and_then(|p| p.as_object()) 
                         {
                             for (key, val) in paths {
-                                // Clean the key: "@/*" -> "@/"
                                 let clean_key = key.replace("/*", "/");
-                                
-                                // Get first target path: ["src/*"] -> "src/"
                                 if let Some(first_path) = val.as_array().and_then(|a| a.get(0)).and_then(|v| v.as_str()) {
                                     let clean_val = first_path.replace("/*", "/");
-                                    
-                                    // Resolve relative to the config file's directory
                                     let resolved_path = config_dir.join(&clean_val);
                                     let final_path = resolved_path.to_string_lossy().replace('\\', "/");
-                                    
                                     aliases.insert(clean_key, final_path);
                                 }
                             }
                         }
                     }
-                    
                     if !aliases.is_empty() {
                         return ScanResult::Aliases(aliases);
                     }
-                    // Even if empty, we processed it, so we can return None or fall through.
-                    // Falling through allows it to be indexed as a file if needed, but usually we return:
                     return ScanResult::None; 
                 }
 
-                // A. Handle Manifests (Always re-parse to ensure map integrity)
-                // This is extremely fast (small JSON/TOML files)
+                // A. Handle Manifests
                 if matches!(filename, "package.json" | "Cargo.toml" | "pyproject.toml") {
                     let meta = scan_manifest_content(filename, &file_data.content);
-
                     if let Some(pkg_name) = meta.package_name {
-                        // Calculate directory of the package
                         let dir = Path::new(&file_data.relative_path)
                             .parent()
                             .map(|p| p.to_string_lossy().to_string().replace('\\', "/"))
@@ -170,24 +155,18 @@ impl FileScanner {
 
                         return ScanResult::PackageDef(pkg_name, dir);
                     }
-
-                    // Even if it's a manifest, it might not define a package name.
-                    // We don't track manifests as "Files" in the index, only their metadata.
                     return ScanResult::None;
                 }
 
-                // B. Handle Source Code (Change Detection Optimization)
+                // B. Handle Source Code
                 if let Some(&old_hash) = existing_files.get(&file_data.relative_path) {
                     if old_hash == file_data.hash {
-                        return ScanResult::None; // Skip unchanged files
+                        return ScanResult::None; // Skip unchanged
                     }
                 }
 
-                // Parse Source Code
-                // get_config_for_extension is safe here (lazy static)
                 if let Some(config) = get_config_for_extension(&file_data.extension) {
-                    match
-                        extract_boundary(
+                    match extract_boundary(
                             &file_data.relative_path,
                             &file_data.content,
                             config,
@@ -196,15 +175,18 @@ impl FileScanner {
                     {
                         Ok(mut boundary) => {
                             boundary.root_id = root_id.to_string();
-                            // Preserve ID if updating existing file
+                            
+                            // --- INFERENCE STEP ---
+                            // Look at physical facts and infer logical concepts
+                            inference_engine.run(&mut boundary);
+                            // ----------------------
+
                             if let Some(&id) = existing_ids.get(&file_data.relative_path) {
                                 boundary.id = id;
                             }
                             return ScanResult::Boundary(boundary);
                         }
-                        Err(_) => {
-                            return ScanResult::None;
-                        }
+                        Err(_) => { return ScanResult::None; }
                     }
                 }
 
@@ -212,7 +194,7 @@ impl FileScanner {
             })
             .collect();
 
-        // 4. Update Index (Sequential - very fast map operations)
+        // 4. Update Index (Sequential)
         for res in results {
             match res {
                 ScanResult::Boundary(boundary) => {
@@ -223,13 +205,11 @@ impl FileScanner {
                         index.next_file_id += 1;
                         new_id
                     };
-
                     let mut final_boundary = boundary;
                     final_boundary.id = id;
                     index.files.insert(id, final_boundary);
                 }
                 ScanResult::PackageDef(name, dir) => {
-                    // Update global package map
                     index.package_map.insert(name, dir);
                 }
                 ScanResult::Aliases(map) => {
@@ -250,17 +230,22 @@ impl FileScanner {
             index.files.remove(&id);
         }
 
-        // 6. Global Map Rebuild (Inverted Indices)
+        // 6. Global Map Rebuild
         self.rebuild_maps(index);
     }
 
     fn rebuild_maps(&self, index: &mut BoundaryIndex) {
         index.symbol_map.clear();
         index.path_map.clear();
-        index.usage_map.clear(); // Clear the new map
+        index.usage_map.clear();
+
+        // --- PASS 1: Build Knowledge Base (Definitions) ---
+        // We need to know what "Concepts" exist in the workspace before we can 
+        // link literals to them.
+        let mut known_concepts: HashSet<String> = HashSet::new();
 
         for file in index.files.values() {
-            // A. Populate Path Map (Existing)
+            // A. Path Map
             let parts: Vec<&str> = file.path.split('/').collect();
             let len = parts.len();
             for i in 0..len {
@@ -268,31 +253,60 @@ impl FileScanner {
                 index.path_map.entry(suffix).or_default().push(file.id);
             }
 
-            // B. Populate Symbol Map (Existing)
+            // B. Symbol Map (Physical)
             for def in &file.defs {
                 index.symbol_map.entry(def.name.clone()).or_default().push(file.id);
             }
 
-            // We want to know: "Who uses me?"
-            // So we index: Token -> This File ID
-            // Index Imports
+            // C. Symbol Map (Synthetic/Logical)
+            for syn_def in &file.synthetic_defs {
+                index.symbol_map.entry(syn_def.clone()).or_default().push(file.id);
+                known_concepts.insert(syn_def.clone());
+            }
+        }
+
+        // --- PASS 2: Link Usages (References & Promoted Literals) ---
+        for file in index.files.values() {
+            // 1. Imports
             for import_str in &file.imports {
-                // Heuristic: The significant part of an import path is usually the last segment.
-                // e.g. "react" -> "react", "./utils" -> "utils", "src/components/Header" -> "header"
                 if let Some(token) = extract_significant_token(import_str) {
                     index.usage_map.entry(token).or_default().push(file.id);
                 }
             }
 
-            // Index Symbol References
+            // 2. Symbol References (Code)
             for ref_str in &file.symbol_refs {
-                // Symbols are usually distinct enough, just lowercase them.
                 let token = ref_str.to_lowercase();
                 index.usage_map.entry(token).or_default().push(file.id);
             }
+
+            // 3. Literal Promotion (The Magic)
+            // If a literal matches a Known Concept, promote it to a usage.
+            for literal in &file.literals {
+                // Heuristic A: Exact Match (Rare, but possible for internal IDs)
+                if known_concepts.contains(literal) {
+                    index.usage_map.entry(literal.clone()).or_default().push(file.id);
+                    continue;
+                }
+
+                // Heuristic B: Route Promotion
+                // If the literal looks like a path ("/api/foo") and we have a concept "route:/api/foo"
+                if literal.starts_with('/') {
+                    let route_key = format!("route:{}", literal);
+                    if known_concepts.contains(&route_key) {
+                        // Crucial: We map the *Concept Key* to this file.
+                        // The Walker will search for "route:/api/foo", find it in usage_map (this file),
+                        // and find it in symbol_map (the definition file).
+                        index.usage_map.entry(route_key).or_default().push(file.id);
+                    }
+                }
+                
+                // Heuristic C: Database Tables / Topics (Future extensions)
+                // if literal.contains('_') && known_concepts.contains(&format!("db:{}", literal)) ...
+            }
         }
 
-        // Deduplicate usage entries (files might ref the same token multiple times)
+        // Deduplicate usage entries
         for list in index.usage_map.values_mut() {
             list.sort_unstable();
             list.dedup();
@@ -302,20 +316,13 @@ impl FileScanner {
 
 // Helper to normalize tokens consistently
 fn extract_significant_token(path: &str) -> Option<String> {
-    // 1. Split by directory separators
     let last_segment = path.split('/').last()?;
-
     if last_segment.is_empty() || last_segment == "." || last_segment == ".." {
         return None;
     }
-
-    // 2. Strip extension if present
-    let stem = std::path::Path
-        ::new(last_segment)
+    let stem = std::path::Path::new(last_segment)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(last_segment);
-
-    // 3. Lowercase
     Some(stem.to_lowercase())
 }
