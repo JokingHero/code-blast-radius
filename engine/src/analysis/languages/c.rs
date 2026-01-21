@@ -21,6 +21,18 @@ pub fn config() -> LanguageConfig {
             body: (field_declaration_list) @function.body
         ) @function.definition
     "#)
+    // --- NEW: Inference Engine Hooks (Generic Macro Support) ---
+    .frameworks(r#"
+        ;; Captures: DEFINE_COMMAND("ping", ping_handler) -> key="DEFINE_COMMAND", value="ping"
+        (call_expression
+            function: (identifier) @framework.key
+            arguments: (argument_list
+                (string_literal) @framework.value
+            )
+            (#match? @framework.key "^[A-Z_]+$") ;; Heuristic: Macros are usually UPPERCASE
+        )
+    "#)
+    // --- EXISTING LOGIC ---
     .calls(r#"
         (call_expression
             function: (identifier) @call.name

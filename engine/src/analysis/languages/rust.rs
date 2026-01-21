@@ -36,16 +36,13 @@ pub fn config() -> LanguageConfig {
             name: (identifier) @function.name
         ) @function.definition
 
-        ;; 5. Impl blocks - anonymous container (the type name is captured for context but not as the definition name)
+        ;; 5. Impl blocks - anonymous container
         (impl_item
             type: (type_identifier)
             body: (declaration_list) @function.body
         ) @function.definition
 
         ;; 4. Common Library Patterns
-
-        ;; thread_local! { static FOO: ... }
-        ;; Pattern: thread_local! { static NAME: type }
         (macro_invocation
             macro: (identifier) @m (#eq? @m "thread_local")
             (token_tree
@@ -54,8 +51,6 @@ pub fn config() -> LanguageConfig {
             )
         ) @function.definition
 
-        ;; lazy_static! { static ref FOO: ... }
-        ;; Pattern: lazy_static! { static ref NAME: type }
         (macro_invocation
             macro: (identifier) @m (#eq? @m "lazy_static")
             (token_tree
@@ -65,9 +60,6 @@ pub fn config() -> LanguageConfig {
         ) @function.definition
 
         ;; 4. Improved Heuristic: "Definers"
-        ;; We use #not-match? to skip keywords like 'pub', 'async', 'crate'
-        
-        ;; Case A: Direct Identifier (e.g., create_struct!(MyStruct))
         (macro_invocation
             macro: (identifier) @macro_type
             (token_tree 
@@ -77,7 +69,6 @@ pub fn config() -> LanguageConfig {
             (#not-match? @function.name "^(pub|async|unsafe|extern|crate|use)$")
         ) @function.definition
 
-        ;; Case B: Visibility Modifier (e.g., create_struct!(pub MyStruct))
         (macro_invocation
             macro: (identifier) @macro_type
             (token_tree 
@@ -90,7 +81,6 @@ pub fn config() -> LanguageConfig {
         ) @function.definition
 
         ;; 5. Heuristic: Route Definitions (Web Frameworks)
-        ;; Matches: route!(GET, "/path", MyHandler) -> Captures MyHandler
         (macro_invocation
             macro: (identifier) @m (#match? @m "(route|endpoint)")
             (token_tree
@@ -107,6 +97,33 @@ pub fn config() -> LanguageConfig {
             (#match? @macro_type "_suite$")
         ) @function.definition
     "#)
+    // --- NEW: Inference Engine Hooks ---
+    .frameworks(r#"
+        ;; --- ACTIX WEB / ROCKET ATTRIBUTES ---
+        ;; Captures: #[get("/api")] -> key="actix.get", value="/api"
+        (attribute_item
+            (attribute
+                (identifier) @framework.key
+                (token_tree
+                    (string_literal) @framework.value
+                )
+            )
+            (#match? @framework.key "^(get|post|put|delete|patch)$")
+        )
+
+        ;; --- AXUM ROUTER ---
+        ;; Captures: .route("/users", get(users_handler)) -> key="axum.route", value="/users"
+        (call_expression
+            function: (field_expression
+                field: (field_identifier) @framework.key
+            )
+            arguments: (arguments
+                (string_literal) @framework.value
+            )
+            (#eq? @framework.key "route")
+        )
+    "#)
+    // --- EXISTING LOGIC ---
     .calls(r#"(call_expression function: [(identifier) @call.name (field_expression field: (field_identifier) @call.name)])"#)
     .docs(r#"
         (
@@ -134,7 +151,6 @@ pub fn config() -> LanguageConfig {
             type: (type_identifier) @impl.child
         )
     "#)
-    // Environment variable detection
     .config_keys(r#"
         (call_expression
             function: (scoped_identifier

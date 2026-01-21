@@ -17,6 +17,49 @@ pub fn config() -> LanguageConfig {
             (record_declaration name: (identifier) @function.name) @function.definition
         ]
     "#)
+    // --- NEW: Inference Engine Hooks ---
+    .frameworks(r#"
+        ;; --- SPRING BOOT / JAKARTA EE ---
+
+        ;; 1. DI Providers (Implicit Class Name)
+        ;; Captures: @Service class UserService -> key="Service", value="UserService"
+        (class_declaration
+            modifiers: (modifiers (marker_annotation name: (identifier) @framework.key))
+            name: (identifier) @framework.value
+            (#match? @framework.key "^(Service|Component|Repository|Controller|RestController|Configuration)$")
+        )
+
+        ;; 2. Routes & Config (Simple Value)
+        ;; Captures: @GetMapping("/users") -> key="GetMapping", value="'/users'"
+        ;; Captures: @Service("myService") -> key="Service", value="'myService'"
+        (annotation
+            name: (identifier) @framework.key
+            arguments: (annotation_argument_list (string_literal) @framework.value)
+        )
+
+        ;; 3. Routes & Config (Named Attributes)
+        ;; Captures: @RequestMapping(value = "/users") -> key="RequestMapping", value="'/users'"
+        ;; Captures: @Table(name = "users") -> key="Table", value="'users'"
+        (annotation
+            name: (identifier) @framework.key
+            arguments: (annotation_argument_list
+                (element_value_pair
+                    key: (identifier) @arg_name
+                    value: (string_literal) @framework.value
+                )
+            )
+            (#match? @arg_name "^(value|path|name)$")
+        )
+
+        ;; 4. Bean Producers (Methods)
+        ;; Captures: @Bean public DataSource myDataSource() -> key="Bean", value="myDataSource"
+        (method_declaration
+            modifiers: (modifiers (marker_annotation name: (identifier) @framework.key))
+            name: (identifier) @framework.value
+            (#eq? @framework.key "Bean")
+        )
+    "#)
+    // --- EXISTING LOGIC PRESERVED BELOW ---
     .calls(r#"
         [
             (method_invocation name: (identifier) @call.name)

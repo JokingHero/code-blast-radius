@@ -6,11 +6,13 @@ use blake3;
 use rayon::prelude::*;
 use pathdiff;
 
+use crate::inference::frameworks::FrameworkManager;
+use crate::inference::{InferenceEngine, configs};
+use crate::inference::conventions::ConventionEngine;
 use crate::models::{ BoundaryIndex, FileBoundary, FileId };
 use crate::analysis::boundary::extract_boundary;
 use crate::analysis::language::get_config_for_extension;
 use crate::manifest::scan_manifest_content;
-use crate::inference::{InferenceEngine, routes::NextJsRouteRule};
 
 pub struct FileScanner;
 
@@ -41,7 +43,13 @@ impl FileScanner {
         // We create it here and pass it into the parallel iterator.
         // It must be Send + Sync (which it is, as it contains Box<dyn InferenceRule>).
         let mut inference_engine = InferenceEngine::new();
-        inference_engine.register(NextJsRouteRule);
+        // Register the Path-Based Convention Engine
+        inference_engine.register(ConventionEngine::new());
+        
+        // Register the Content-Based Framework Engine
+        let mut fw_manager = FrameworkManager::new();
+        configs::register_all(&mut fw_manager);
+        inference_engine.register(fw_manager);
 
         // 1. Discovery Phase (IO Bound - optimized by ignore crate)
         let walker = WalkBuilder::new(&root_abs).hidden(false).git_ignore(true).build();

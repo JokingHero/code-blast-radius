@@ -15,11 +15,22 @@ pub fn config() -> LanguageConfig {
             ) @function.definition
         ]
     "#)
+    // --- NEW: Inference Engine Hooks ---
+    .frameworks(r#"
+        ;; --- SHINY APPS ---
+        ;; Captures: ui <- fluidPage(...) -> key="fluidPage", value="ui"
+        (binary_operator
+            lhs: (identifier) @framework.value
+            rhs: (call
+                function: (identifier) @framework.key
+            )
+            (#eq? @framework.key "fluidPage")
+        )
+    "#)
+    // --- EXISTING LOGIC ---
     .calls(r#"
         [
             (call function: (identifier) @call.name)
-            
-            ;; Capture namespaced calls: pkg::func()
             (call 
                 function: (namespace_operator 
                     rhs: (identifier) @call.name
@@ -38,13 +49,11 @@ pub fn config() -> LanguageConfig {
     "#)
     .imports(r#"
         [
-            ;; library(dplyr) or require(data.table)
             (call
                 function: (identifier) @fn
                 arguments: (arguments [(identifier) (string)] @import.source)
                 (#match? @fn "^(library|require)$")
             )
-            ;; source("utils.R")
             (call
                 function: (identifier) @fn
                 arguments: (arguments (string) @import.source)

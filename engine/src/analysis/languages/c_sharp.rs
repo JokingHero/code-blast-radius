@@ -16,12 +16,31 @@ pub fn config() -> LanguageConfig {
         ;; Support for C# 9+ top-level statements / local functions
         (local_function_statement name: (identifier) @function.name) @function.definition
 
-        ;; Robust fallback: Identifier immediately followed by parameters is the function name
+        ;; Robust fallback
         (method_declaration 
             (identifier) @function.name
             (parameter_list)
         ) @function.definition
     "#)
+    // --- NEW: Inference Engine Hooks ---
+    .frameworks(r#"
+        ;; --- ASP.NET CORE ATTRIBUTES ---
+        ;; Captures: [Route("api/users")] -> key="Route", value="api/users"
+        (attribute
+            name: (identifier) @framework.key
+            (attribute_argument_list
+                (string_literal) @framework.value
+            )
+            (#match? @framework.key "^(Route|HttpGet|HttpPost|HttpPut|HttpDelete)$")
+        )
+        
+        ;; Captures: [ApiController] -> key="ApiController" (no value)
+        (attribute
+            name: (identifier) @framework.key
+            (#eq? @framework.key "ApiController")
+        )
+    "#)
+    // --- EXISTING LOGIC ---
     .calls(r#"
         (invocation_expression
             function: [

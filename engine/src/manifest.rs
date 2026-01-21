@@ -162,6 +162,50 @@ pub fn scan_manifest_content(filename: &str, content: &str) -> ManifestResult {
                 }
             }
         }
+    } else if filename == "DESCRIPTION" {
+        // Simple manual parser for Debian Control format
+        let mut in_deps = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() { continue; }
+
+            // Handle continuation lines (indented)
+            if line.starts_with(' ') || line.starts_with('\t') {
+                if in_deps {
+                    // Extract package name from "    dplyr (>= 1.0),"
+                    let pkg = trimmed.split('(').next().unwrap_or(trimmed).replace(',', "").trim().to_string();
+                    if !pkg.is_empty() && pkg != "R" {
+                        result.externals.insert(pkg);
+                    }
+                }
+                continue;
+            }
+
+            // Detect Field Headers
+            if let Some((key, value)) = line.split_once(':') {
+                let key = key.trim();
+
+                if key == "Package" {
+                    result.package_name = Some(value.trim().to_string());
+                    in_deps = false;
+                } else if key == "Imports" || key == "Depends" || key == "Suggests" || key == "LinkingTo" {
+                    in_deps = true;
+                    // Handle inline values: "Imports: dplyr, ggplot2"
+                    let deps_line = value.trim();
+                    if !deps_line.is_empty() {
+                        for part in deps_line.split(',') {
+                            let pkg = part.split('(').next().unwrap_or(part).trim().to_string();
+                            if !pkg.is_empty() && pkg != "R" {
+                                result.externals.insert(pkg);
+                            }
+                        }
+                    }
+                } else {
+                    in_deps = false;
+                }
+            }
+        }
     }
 
     result

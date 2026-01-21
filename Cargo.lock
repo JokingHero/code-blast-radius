@@ -394,6 +394,7 @@ dependencies = [
  "nucleo-matcher",
  "pathdiff",
  "rayon",
+ "regex",
  "rkyv",
  "serde",
  "serde_json",

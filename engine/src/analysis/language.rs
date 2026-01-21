@@ -1,12 +1,31 @@
-use tree_sitter::{Language, Query};
-use std::sync::{Arc, OnceLock};
+use tree_sitter::{ Language, Query };
+use std::sync::{ Arc, OnceLock };
 use crate::analysis::languages;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SupportedLanguage {
-    Rust, TypeScript, Python, Java, JavaScript, Bash, Html,
-    Julia, R, Json, Yaml, Toml, Dotenv, Sql, Prisma, Hcl,
-    Go, CSharp, Php, Ruby, C, Cpp,
+    Rust,
+    TypeScript,
+    Python,
+    Java,
+    JavaScript,
+    Bash,
+    Html,
+    Julia,
+    R,
+    Json,
+    Yaml,
+    Toml,
+    Dotenv,
+    Sql,
+    Prisma,
+    Hcl,
+    Go,
+    CSharp,
+    Php,
+    Ruby,
+    C,
+    Cpp,
 }
 
 pub fn get_language(lang: SupportedLanguage) -> Language {
@@ -40,8 +59,8 @@ pub struct CompiledQueries {
     pub definitions: Option<Arc<Query>>,
     pub imports: Option<Arc<Query>>,
     pub references: Option<Arc<Query>>,
-    // REACTIVATED: Stores the compiled query for string literals
-    pub literals: Option<Arc<Query>>, 
+    pub literals: Option<Arc<Query>>,
+    pub frameworks: Option<Arc<Query>>,
 }
 
 #[derive(Default, Clone)]
@@ -64,13 +83,12 @@ pub struct LanguageConfig {
 pub struct LanguageConfigBuilder {
     lang: SupportedLanguage,
     file_extensions: &'static [&'static str],
-    
+
     // Primary Queries
     defs_query: Option<&'static str>,
     imports_query: Option<&'static str>,
-    
-    // REACTIVATED: The query string for literals
-    literals_query: Option<&'static str>, 
+    literals_query: Option<&'static str>,
+    frameworks_query: Option<&'static str>,
 
     // Heuristics (Keep for compatibility, though largely unused in dumb mode)
     heuristics: HeuristicConfig,
@@ -84,50 +102,98 @@ impl LanguageConfigBuilder {
             file_extensions: extensions,
             defs_query: None,
             imports_query: None,
-            literals_query: None, // Initialize as None
+            literals_query: None,
+            frameworks_query: None,
             heuristics: HeuristicConfig::default(),
             skeleton_template: " ... ",
         }
     }
 
     // --- Core Setters ---
-    pub fn defs(mut self, q: &'static str) -> Self { self.defs_query = Some(q); self }
-    pub fn imports(mut self, q: &'static str) -> Self { self.imports_query = Some(q); self }
-    pub fn skeleton(mut self, s: &'static str) -> Self { self.skeleton_template = s; self }
+    pub fn defs(mut self, q: &'static str) -> Self {
+        self.defs_query = Some(q);
+        self
+    }
+    pub fn imports(mut self, q: &'static str) -> Self {
+        self.imports_query = Some(q);
+        self
+    }
+    pub fn skeleton(mut self, s: &'static str) -> Self {
+        self.skeleton_template = s;
+        self
+    }
 
-    // REACTIVATED: This now stores the query instead of ignoring it.
     // This allows us to use the complex regexes/node-types defined in your language files
     // (e.g., heredocs in Bash, template strings in JS).
-    pub fn literals(mut self, q: &'static str) -> Self { self.literals_query = Some(q); self }
+    pub fn literals(mut self, q: &'static str) -> Self {
+        self.literals_query = Some(q);
+        self
+    }
+    pub fn frameworks(mut self, q: &'static str) -> Self {
+        self.frameworks_query = Some(q);
+        self
+    }
 
     // --- Legacy Setters (No-ops) ---
-    // We keep these so that existing language files (which are very detailed) 
+    // We keep these so that existing language files (which are very detailed)
     // compile without changes, even if we don't use this metadata currently.
-    pub fn calls(self, _q: &'static str) -> Self { self }
-    pub fn docs(self, _q: &'static str) -> Self { self }
-    pub fn exports(self, _q: &'static str) -> Self { self }
-    pub fn implements(self, _q: &'static str) -> Self { self }
-    pub fn config_keys(self, _q: &'static str) -> Self { self }
-    pub fn vals(self, _q: &'static str) -> Self { self }
-    pub fn types(self, _q: &'static str) -> Self { self }
-    pub fn decorators(self, _q: &'static str) -> Self { self }
-    pub fn actions(self, _q: &'static str) -> Self { self }
-    pub fn middleware(self, _q: &'static str) -> Self { self }
-    pub fn routes(self, _q: &'static str) -> Self { self }
+    pub fn calls(self, _q: &'static str) -> Self {
+        self
+    }
+    pub fn docs(self, _q: &'static str) -> Self {
+        self
+    }
+    pub fn exports(self, _q: &'static str) -> Self {
+        self
+    }
+    pub fn implements(self, _q: &'static str) -> Self {
+        self
+    }
+    pub fn config_keys(self, _q: &'static str) -> Self {
+        self
+    }
+    pub fn vals(self, _q: &'static str) -> Self {
+        self
+    }
+    pub fn types(self, _q: &'static str) -> Self {
+        self
+    }
+    pub fn decorators(self, _q: &'static str) -> Self {
+        self
+    }
+    pub fn actions(self, _q: &'static str) -> Self {
+        self
+    }
+    pub fn middleware(self, _q: &'static str) -> Self {
+        self
+    }
+    pub fn routes(self, _q: &'static str) -> Self {
+        self
+    }
 
     // --- Heuristic Setters (Keep Metadata) ---
-    pub fn di_decorators(mut self, d: &'static [&'static str]) -> Self { self.heuristics.di_decorators = d; self }
-    pub fn magic_methods(mut self, m: &'static [&'static str]) -> Self { self.heuristics.magic_methods = m; self }
-    pub fn constructor_names(mut self, c: &'static [&'static str]) -> Self { self.heuristics.constructor_names = c; self }
-    pub fn project_config_files(mut self, f: &'static [&'static str]) -> Self { self.heuristics.project_config_files = f; self }
+    pub fn di_decorators(mut self, d: &'static [&'static str]) -> Self {
+        self.heuristics.di_decorators = d;
+        self
+    }
+    pub fn magic_methods(mut self, m: &'static [&'static str]) -> Self {
+        self.heuristics.magic_methods = m;
+        self
+    }
+    pub fn constructor_names(mut self, c: &'static [&'static str]) -> Self {
+        self.heuristics.constructor_names = c;
+        self
+    }
+    pub fn project_config_files(mut self, f: &'static [&'static str]) -> Self {
+        self.heuristics.project_config_files = f;
+        self
+    }
 
     pub fn build(self) -> LanguageConfig {
         let language = get_language(self.lang);
-        
+
         let compile = |q: Option<&str>| -> Option<Arc<Query>> {
-            q.and_then(|source| {
-                Query::new(&language, source).ok().map(Arc::new)
-            })
+            q.and_then(|source| { Query::new(&language, source).ok().map(Arc::new) })
         };
 
         // Inject the generic reference query automatically
@@ -141,7 +207,8 @@ impl LanguageConfigBuilder {
                 definitions: compile(self.defs_query),
                 imports: compile(self.imports_query),
                 references: refs_query,
-                literals: compile(self.literals_query), // Compile the literals query
+                literals: compile(self.literals_query),
+                frameworks: compile(self.frameworks_query),
             },
             heuristics: self.heuristics,
             skeleton_template: self.skeleton_template,
@@ -153,55 +220,65 @@ impl LanguageConfigBuilder {
 /// This replaces the specific 'calls', 'types', 'decorators' queries.
 fn get_default_refs_query(lang: SupportedLanguage) -> &'static str {
     match lang {
-        SupportedLanguage::Rust => r#"
+        SupportedLanguage::Rust =>
+            r#"
             (identifier) @ref
             (type_identifier) @ref
             (field_identifier) @ref
         "#,
-        SupportedLanguage::TypeScript => r#"
+        SupportedLanguage::TypeScript =>
+            r#"
             (identifier) @ref
             (property_identifier) @ref
             (type_identifier) @ref
             (shorthand_property_identifier_pattern) @ref
         "#,
-        SupportedLanguage::JavaScript => r#"
+        SupportedLanguage::JavaScript =>
+            r#"
             (identifier) @ref
             (property_identifier) @ref
             (shorthand_property_identifier_pattern) @ref
         "#,
-        SupportedLanguage::Python => r#"
+        SupportedLanguage::Python =>
+            r#"
             (identifier) @ref
             (attribute attribute: (identifier) @ref)
         "#,
-        SupportedLanguage::Go => r#"
+        SupportedLanguage::Go =>
+            r#"
             (identifier) @ref
             (field_identifier) @ref
             (type_identifier) @ref
             (package_identifier) @ref
         "#,
-        SupportedLanguage::Java => r#"
+        SupportedLanguage::Java =>
+            r#"
             (identifier) @ref
             (type_identifier) @ref
         "#,
         SupportedLanguage::CSharp => r#"
             (identifier) @ref
         "#,
-        SupportedLanguage::Ruby => r#"
+        SupportedLanguage::Ruby =>
+            r#"
             (identifier) @ref
             (constant) @ref
             (simple_symbol) @ref
             (hash_key_symbol) @ref
         "#,
-        SupportedLanguage::Php => r#"
+        SupportedLanguage::Php =>
+            r#"
             (name) @ref
             (variable_name) @ref
         "#,
-        SupportedLanguage::Bash | SupportedLanguage::Dotenv => r#"
+        SupportedLanguage::Bash | SupportedLanguage::Dotenv =>
+            r#"
             (variable_name) @ref
             (word) @ref
             (command_name) @ref
         "#,
-        SupportedLanguage::Html => r#"
+        SupportedLanguage::Html =>
+            r#"
             (tag_name) @ref
             (attribute_name) @ref
         "#,
@@ -223,18 +300,20 @@ fn get_default_refs_query(lang: SupportedLanguage) -> &'static str {
         SupportedLanguage::Prisma => r#"
             (identifier) @ref
         "#,
-        SupportedLanguage::C => r#"
+        SupportedLanguage::C =>
+            r#"
             (identifier) @ref
             (type_identifier) @ref
             (field_identifier) @ref
         "#,
-        SupportedLanguage::Cpp => r#"
+        SupportedLanguage::Cpp =>
+            r#"
             (identifier) @ref
             (type_identifier) @ref
             (field_identifier) @ref
             (namespace_identifier) @ref
         "#,
-        _ => "(identifier) @ref"
+        _ => "(identifier) @ref",
     }
 }
 
@@ -242,15 +321,15 @@ pub fn get_config_for_extension(ext: &str) -> Option<&'static LanguageConfig> {
     match ext {
         // Rust
         "rs" => Some(get_rust_config()),
-        
+
         // JavaScript / TypeScript ecosystem
         "ts" | "tsx" => Some(get_typescript_config()),
         "js" | "jsx" | "mjs" | "cjs" | "vue" => Some(get_javascript_config()),
         "json" => Some(get_json_config()),
-        
+
         // Python
         "py" | "pyi" | "pyw" => Some(get_python_config()),
-        
+
         // Backend / Systems
         "java" => Some(get_java_config()),
         "go" => Some(get_go_config()),
@@ -259,21 +338,27 @@ pub fn get_config_for_extension(ext: &str) -> Option<&'static LanguageConfig> {
         "cpp" | "hpp" | "cc" | "cxx" | "hh" => Some(get_cpp_config()),
         "php" => Some(get_php_config()),
         "rb" => Some(get_ruby_config()),
-        
+
         // Data / Config
         "sql" => Some(get_sql_config()),
         "yaml" | "yml" => Some(get_yaml_config()),
         "toml" => Some(get_toml_config()),
         "tf" | "hcl" | "tfvars" => Some(get_hcl_config()),
         "prisma" => Some(get_prisma_config()),
-        "env" | "env.example" | "env.template" | "env.local" | "env.development" | "env.test" | "env.production" => Some(get_dotenv_config()),
-        
+        | "env"
+        | "env.example"
+        | "env.template"
+        | "env.local"
+        | "env.development"
+        | "env.test"
+        | "env.production" => Some(get_dotenv_config()),
+
         // Scripts / Other
         "sh" | "bash" | "zsh" => Some(get_bash_config()),
         "html" | "htm" | "xhtml" => Some(get_html_config()),
         "jl" => Some(get_julia_config()),
         "R" | "r" | "Rscript" => Some(get_r_config()),
-        
+
         _ => None,
     }
 }
@@ -369,7 +454,7 @@ pub fn get_config_by_language(lang: SupportedLanguage) -> Option<&'static Langua
         SupportedLanguage::C => "c",
         SupportedLanguage::Cpp => "cpp",
     };
-    
+
     if lang == SupportedLanguage::Dotenv {
         return get_config_for_extension("env");
     }

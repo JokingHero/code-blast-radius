@@ -24,6 +24,28 @@ pub fn config() -> LanguageConfig {
             ) @function.definition
         ]
     "#)
+    // --- NEW: Inference Engine Hooks ---
+    .frameworks(r#"
+        ;; --- GENIE.JL ROUTES ---
+        ;; Captures: route("/hello") -> key="route", value="/hello"
+        (call_expression
+            (identifier) @framework.key
+            (argument_list
+                (string_literal) @framework.value
+            )
+            (#eq? @framework.key "route")
+        )
+        
+        ;; Captures: @route "/hello" -> key="route", value="/hello"
+        (macro_call_expression
+            (identifier) @framework.key
+            (argument_list
+                (string_literal) @framework.value
+            )
+            (#eq? @framework.key "@route")
+        )
+    "#)
+    // --- EXISTING LOGIC ---
     .calls(r#"
         [
             (call_expression

@@ -34,6 +34,14 @@ pub struct Definition {
     pub body_range: Option<(usize, usize)>,
 }
 
+#[derive(Archive, Deserialize, Serialize, Debug, Clone, Default)]
+#[archive(check_bytes)]
+pub struct FrameworkHint {
+    pub key: String,      // e.g., "@Controller", "render", "route"
+    pub value: String,    // e.g., "/api/users", "user_view", "{ selector: 'app-root' }"
+    pub range: (usize, usize), // Where it was found (for debugging/highlighting)
+}
+
 /// The atomic unit of our index. 
 /// Represents one file and its public boundary (definitions and outgoing references).
 #[derive(Archive, Deserialize, Serialize, Debug, Clone, Default)]
@@ -68,6 +76,10 @@ pub struct FileBoundary {
     // Logical definitions inferred from the file path/structure
     // e.g. "route:/api/users"
     pub synthetic_defs: Vec<String>,
+
+    // Carries framework-specific raw data extracted during parsing.
+    // The parser doesn't know what it means, it just knows it looks interesting.
+    pub framework_hints: Vec<FrameworkHint>, 
 }
 
 /// The Main Index.

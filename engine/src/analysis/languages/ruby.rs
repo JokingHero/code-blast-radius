@@ -28,6 +28,29 @@ pub fn config() -> LanguageConfig {
             (scope_resolution name: (constant) @function.name)
         ]) @function.definition
     "#)
+    // --- NEW: Inference Engine Hooks ---
+    .frameworks(r#"
+        ;; --- RAILS ROUTES ---
+        ;; Captures: get '/login', to: 'sessions#new' -> key="get", value="'/login'"
+        ;; Captures: post '/login' -> key="post", value="'/login'"
+        (call
+            method: (identifier) @framework.key
+            arguments: (argument_list
+                (string (string_content) @framework.value)
+            )
+            (#match? @framework.key "^(get|post|put|delete|patch|match)$")
+        )
+
+        ;; Captures: resources :photos -> key="resources", value=":photos"
+        (call
+            method: (identifier) @framework.key
+            arguments: (argument_list
+                (simple_symbol) @framework.value
+            )
+            (#eq? @framework.key "resources")
+        )
+    "#)
+    // --- EXISTING LOGIC ---
     .calls(r#"
         (call method: (identifier) @call.name)
     "#)

@@ -12,6 +12,49 @@ pub fn config() -> LanguageConfig {
             (class_definition name: (identifier) @function.name body: (block) @function.body) @function.definition
         ]
     "#)
+    // --- NEW: Inference Engine Hooks ---
+    .frameworks(r#"
+        ;; --- FLASK / FASTAPI DECORATORS ---
+        ;; Captures: @app.route('/api') -> key="route", value="'/api'"
+        ;; Captures: @router.get('/users') -> key="get", value="'/users'"
+        (decorator
+            (call
+                function: (attribute attribute: (identifier) @framework.key)
+                arguments: (argument_list 
+                    (string) @framework.value
+                )
+            )
+            (#match? @framework.key "^(route|get|post|put|delete|patch)$")
+        )
+
+        ;; --- DJANGO URLS ---
+        ;; Captures: path('polls/', views.index) -> key="path", value="'polls/'"
+        ;; Captures: re_path(r'^auth/', include(...)) -> key="re_path", value="'^auth/'"
+        (call
+            function: (identifier) @framework.key
+            arguments: (argument_list 
+                (string) @framework.value
+            )
+            (#match? @framework.key "^(path|re_path|url)$")
+        )
+
+        ;; --- CELERY TASKS ---
+        ;; Captures: @app.task(name='do_work') -> key="task", value="'do_work'"
+        (decorator
+            (call
+                function: (attribute attribute: (identifier) @framework.key)
+                arguments: (argument_list
+                    (keyword_argument 
+                        name: (identifier) @k
+                        value: (string) @framework.value
+                    )
+                )
+            )
+            (#match? @framework.key "^(task|shared_task)$")
+            (#eq? @k "name")
+        )
+    "#)
+    // --- EXISTING LOGIC PRESERVED BELOW ---
     .calls(r#"
         [
             (call function: [(identifier) @call.name (attribute attribute: (identifier) @call.name)])

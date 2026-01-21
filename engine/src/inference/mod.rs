@@ -1,4 +1,6 @@
-pub mod routes;
+pub mod conventions;
+pub mod frameworks;
+pub mod configs;
 use crate::models::FileBoundary;
 
 pub trait InferenceRule: Send + Sync {

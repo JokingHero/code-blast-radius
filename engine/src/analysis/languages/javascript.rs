@@ -45,6 +45,61 @@ pub fn config() -> LanguageConfig {
             )
           ) @function.definition
     "#)
+    // --- NEW: Inference Engine Hooks ---
+    .frameworks(r#"
+        ;; --- EXPRESS JS ROUTES ---
+        ;; Captures: app.get('/users') -> key="get", value="'/users'"
+        (call_expression
+            function: (member_expression
+                property: (property_identifier) @framework.key
+            )
+            arguments: (arguments 
+                (string) @framework.value
+            )
+            (#match? @framework.key "^(get|post|put|delete|patch|use)$")
+        )
+
+        ;; --- MONGOOSE / SEQUELIZE MODELS ---
+        ;; Captures: mongoose.model('User', schema) -> key="model", value="'User'"
+        (call_expression
+            function: (member_expression
+                property: (property_identifier) @framework.key
+            )
+            arguments: (arguments 
+                (string) @framework.value
+            )
+            (#match? @framework.key "^(model|define)$")
+        )
+
+        ;; --- VUE JS COMPONENTS ---
+        ;; Captures: Vue.component('my-component', ...) -> key="component", value="'my-component'"
+        (call_expression
+            function: (member_expression
+                property: (property_identifier) @framework.key
+            )
+            arguments: (arguments 
+                (string) @framework.value
+            )
+            (#eq? @framework.key "component")
+        )
+
+        ;; --- REDUX (Plain JS) ---
+        ;; Captures: dispatch({ type: 'LOGIN' }) -> key="dispatch", value="'LOGIN'"
+        (call_expression
+            function: (identifier) @framework.key
+            arguments: (arguments 
+                (object 
+                    (pair 
+                        key: (property_identifier) @k 
+                        value: [(string) (identifier)] @framework.value
+                    )
+                )
+            )
+            (#eq? @framework.key "dispatch")
+            (#eq? @k "type") 
+        )
+    "#)
+    // --- EXISTING LOGIC PRESERVED BELOW ---
     .calls(r#"
         [
           (call_expression 
@@ -94,7 +149,6 @@ pub fn config() -> LanguageConfig {
           )
         ]
     "#)
-    // Support for ES6 exports which were missing
     .exports(r#"
         [
             (export_statement
@@ -223,7 +277,6 @@ pub fn config() -> LanguageConfig {
             (#eq? @prop "use")
         )
     "#)
-    // Express.js style route definitions
     .routes(r#"
         (call_expression
             function: (member_expression

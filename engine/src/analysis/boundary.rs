@@ -1,6 +1,6 @@
 use tree_sitter::{Parser, QueryCursor, StreamingIterator};
 use std::collections::HashSet;
-use crate::models::{FileBoundary, Definition, SymbolKind};
+use crate::models::{Definition, FileBoundary, FrameworkHint, SymbolKind};
 use crate::analysis::language::{LanguageConfig, get_language};
 
 pub fn extract_boundary(
@@ -20,7 +20,8 @@ pub fn extract_boundary(
     let mut defs = Vec::new();
     let mut imports = Vec::new();
     let mut symbol_refs = HashSet::new();
-    let mut literals = HashSet::new(); // Store unique literals found in this file
+    let mut literals = HashSet::new();
+    let mut framework_hints = Vec::new(); 
 
     let mut cursor = QueryCursor::new();
 
@@ -176,6 +177,43 @@ pub fn extract_boundary(
             }
         }
     }
+
+    if let Some(query) = &config.queries.frameworks {
+        let mut matches = cursor.matches(query, root_node, source_bytes);
+        
+        while let Some(m) = matches.next() {
+            let mut key: Option<String> = None;
+            let mut value: Option<String> = None;
+            let mut range = (0, 0);
+
+            for cap in m.captures {
+                let cap_name = query.capture_names()[cap.index as usize];
+                let node = cap.node;
+
+                if cap_name == "framework.key" {
+                    let text = node.utf8_text(source_bytes).unwrap_or("").to_string();
+                    key = Some(text);
+                    range = (node.start_byte(), node.end_byte());
+                } else if cap_name == "framework.value" {
+                    let text = node.utf8_text(source_bytes).unwrap_or("").to_string();
+                    // We perform basic cleanup here (trimming quotes) 
+                    // so the Regex in the inference engine can be simpler.
+                    let clean_text = text.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                    value = Some(clean_text.to_string());
+                }
+            }
+
+            if let Some(k) = key {
+                framework_hints.push(FrameworkHint {
+                    key: k,
+                    // If no value captured, default to empty string.
+                    // (e.g. marker decorators like @Injectable() might not capture a value)
+                    value: value.unwrap_or_default(), 
+                    range
+                });
+            }
+        }
+    }
     
     // Cleanup: Remove self-definitions from references.
     // A file technically "references" itself when defining a function, 
@@ -192,7 +230,8 @@ pub fn extract_boundary(
         defs,
         imports,
         symbol_refs: symbol_refs.into_iter().collect(),
-        literals: literals.into_iter().collect(), // NEW: Populated from step 4
-        synthetic_defs: Vec::new(), // NEW: To be populated by Inference Engine
+        literals: literals.into_iter().collect(), 
+        framework_hints, 
+        synthetic_defs: Vec::new(),
     })
 }

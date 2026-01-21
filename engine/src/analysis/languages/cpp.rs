@@ -27,6 +27,35 @@ pub fn config() -> LanguageConfig {
             body: (field_declaration_list) @function.body
         ) @function.definition
     "#)
+    // --- NEW: Inference Engine Hooks ---
+    .frameworks(r#"
+        ;; --- CROW ROUTES ---
+        ;; Captures: CROW_ROUTE(app, "/hello") -> key="CROW_ROUTE", value="/hello"
+        (call_expression
+            function: (identifier) @framework.key
+            arguments: (argument_list
+                (identifier) ;; app variable
+                (string_literal) @framework.value
+            )
+            (#eq? @framework.key "CROW_ROUTE")
+        )
+
+        ;; --- PISTACHE ROUTES ---
+        ;; Captures: Routes::Get(router, "/resource", ...) -> key="Get", value="/resource"
+        (call_expression
+            function: (qualified_identifier
+                scope: (namespace_identifier) @scope
+                name: (identifier) @framework.key
+            )
+            arguments: (argument_list
+                (identifier) ;; router
+                (string_literal) @framework.value
+            )
+            (#eq? @scope "Routes")
+            (#match? @framework.key "^(Get|Post|Put|Delete)$")
+        )
+    "#)
+    // --- EXISTING LOGIC ---
     .calls(r#"
         (call_expression
             function: [

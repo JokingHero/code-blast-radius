@@ -6,10 +6,19 @@ pub fn config() -> LanguageConfig {
         &["html", "htm", "xhtml"]
     )
     .skeleton("<!-- ... {} ... -->")
-    // Preserved logic: treat elements with 'id' attributes as definitions
+    // 1. IDs are definitions (for #fragment links)
     .defs(r#"(attribute (attribute_name) @attr (#eq? @attr "id") (attribute_value) @function.name) @function.definition"#)
     
-    // Capture script sources and link hrefs as imports
+    // 2. Custom Elements (with hyphens) are CALLS to components
+    // This allows walker.rs to link <app-user> to the TS definition "html:tag:app-user"
+    .calls(r#"
+        (start_tag
+            (tag_name) @call.name
+            (#match? @call.name "-")
+        )
+    "#)
+    
+    // 3. Script/Link tags are IMPORTS
     .imports(r#"
         (start_tag
             (tag_name) @tag

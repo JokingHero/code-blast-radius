@@ -56,7 +56,6 @@ pub fn config() -> LanguageConfig {
 
           ;; --- Factories / Framework Patterns ---
 
-          ;; 1. Direct Call (e.g., const useStore = create(...))
           (variable_declarator
             name: (identifier) @function.name
             value: (call_expression
@@ -66,7 +65,6 @@ pub fn config() -> LanguageConfig {
             (#match? @fn_name "^(create|make|define|build|atom|selector)$")
           ) @function.definition
 
-          ;; 2. Member Factory (e.g., mongoose.model, sequelize.define)
           (variable_declarator
             name: (identifier) @function.name
             value: (call_expression
@@ -77,8 +75,7 @@ pub fn config() -> LanguageConfig {
             (#match? @fn_name "^(create|make|define|model|component|router|styled)$")
           ) @function.definition
 
-          ;; 3. Styled Components: Tagged Template as Call (Observed Structure)
-          ;; Matches: styled.h1`...` parsed as call(function: styled.h1, args: template_string)
+          ;; Styled Components
           (variable_declarator
             name: (identifier) @function.name
             value: (call_expression
@@ -90,8 +87,6 @@ pub fn config() -> LanguageConfig {
             (#eq? @obj_name "styled")
           ) @function.definition
 
-          ;; 4. Styled Components: Curried Call (e.g. styled('div')`...`)
-          ;; Matches: styled('div')`...`
           (variable_declarator
             name: (identifier) @function.name
             value: (call_expression
@@ -116,6 +111,144 @@ pub fn config() -> LanguageConfig {
             pattern: (identifier) @variable.name
             type: (type_annotation)? @variable.type
           )
+    "#)
+    // --- Generic Framework Hints for Inference Engine ---
+    .frameworks(r#"
+        ;; --- DECORATORS (Angular / NestJS) ---
+        ;; Captures: @Component({ selector: '...' }) -> key="Component", value="{...}"
+        ;; Captures: @Get('/users') -> key="Get", value="'/users'"
+        (decorator
+            (call_expression
+                function: (identifier) @framework.key
+                arguments: (arguments 
+                    [
+                        (string) 
+                        (object)
+                        (template_string)
+                    ] @framework.value
+                )
+            )
+        )
+        ;; Captures marker decorators: @Injectable() -> key="Injectable"
+        (decorator
+            (call_expression
+                function: (identifier) @framework.key
+                arguments: (arguments)
+            )
+        )
+
+        ;; --- EXPRESS / HTTP FRAMEWORKS ---
+        ;; Captures: app.get('/users') -> key="get", value="'/users'"
+        (call_expression
+            function: (member_expression
+                property: (property_identifier) @framework.key
+            )
+            arguments: (arguments 
+                (string) @framework.value
+            )
+            (#match? @framework.key "^(get|post|put|delete|patch|use)$")
+        )
+
+        ;; --- REDUX DISPATCH ---
+        ;; Captures: dispatch({ type: 'USER_LOGIN' }) -> key="dispatch", value="'USER_LOGIN'"
+        (call_expression
+            function: (identifier) @framework.key
+            arguments: (arguments 
+                (object 
+                    (pair 
+                        key: (property_identifier) @k 
+                        value: [(string) (identifier)] @framework.value
+                    )
+                )
+            )
+            (#eq? @framework.key "dispatch")
+            (#eq? @k "type") 
+        )
+        
+        ;; --- NGRX / REDUX TOOLKIT ACTIONS ---
+        ;; Captures: createAction('[User] Login') -> key="createAction", value="'[User] Login'"
+        (call_expression
+            function: (identifier) @framework.key
+            arguments: (arguments (string) @framework.value)
+            (#eq? @framework.key "createAction")
+        )
+    "#)
+    // --- OLD: Preserved for Enrichment/Metadata Display ---
+    .actions(r#"
+        (call_expression
+            function: (identifier) @fn 
+            arguments: (arguments 
+                (object 
+                    (pair 
+                        key: (property_identifier) @k 
+                        value: [(string) (template_string) (identifier)] @action.dispatch
+                    )
+                )
+            )
+            (#match? @fn "^(dispatch|put|emit|commit)$")
+            (#eq? @k "type") 
+        )
+        (switch_case value: [(string) (template_string) (identifier)] @action.handle)
+        (pair key: [(string) (template_string) (identifier)] @action.handle value: [(arrow_function) (function_expression)])
+
+        (call_expression
+            function: (identifier) @fn 
+            arguments: (arguments 
+                [(string) (template_string) (identifier)] @action.dispatch
+            )
+            (#match? @fn "^(emit|dispatch|trigger|pub|publish|commit)$")
+        )
+        (call_expression
+            function: (member_expression property: (property_identifier) @fn)
+            arguments: (arguments 
+                [(string) (template_string) (identifier)] @action.dispatch
+            )
+            (#match? @fn "^(emit|dispatch|trigger|pub|publish|commit)$")
+        )
+        (call_expression
+            function: (identifier) @fn 
+            arguments: (arguments 
+                [(string) (template_string) (identifier)] @action.handle
+            )
+            (#match? @fn "^(on|once|subscribe|sub|listen)$")
+        )
+        (call_expression
+            function: (member_expression property: (property_identifier) @fn)
+            arguments: (arguments 
+                [(string) (template_string) (identifier)] @action.handle
+            )
+            (#match? @fn "^(on|once|subscribe|sub|listen)$")
+        )
+    "#)
+    .middleware(r#"
+        (call_expression
+            function: (member_expression
+                property: (property_identifier) @prop
+            )
+            arguments: (arguments 
+                [(identifier) (call_expression)] @middleware.use
+            )
+            (#eq? @prop "use")
+        )
+    "#)
+    .routes(r#"
+        (decorator
+            (call_expression
+                function: (identifier) @fn
+                arguments: (arguments [(string) (template_string)] @route.path)
+            )
+            (#match? @fn "^(Controller|Get|Post|Put|Delete|Patch)$")
+        )
+        ;; Express Routes
+        (call_expression
+            function: (member_expression
+                property: (property_identifier) @method
+            )
+            arguments: (arguments 
+                (string) @route.path
+            )
+            (#match? @method "^(get|post|put|delete|patch|options|head|all)$")
+        )
     "#)
     .calls(r#"
         [
@@ -186,7 +319,7 @@ pub fn config() -> LanguageConfig {
             arguments: (arguments [(string) (template_string)] @import.source)
             (#eq? @req "require")
           )
-
+          
           (call_expression
             function: (identifier) @req 
             arguments: (arguments (identifier) @import.dynamic)
@@ -259,10 +392,6 @@ pub fn config() -> LanguageConfig {
             value: [(string) (template_string)] @val.value
         )
     "#)
-    // Simplified to use broad node captures.
-    // - (type_identifier) catches almost all types (interfaces, generics, array types, etc.)
-    // - (predefined_type) catches things like 'string', 'number' (less useful for linking but valid)
-    // - Specific rules for extends/new where a simple (identifier) acts as a type.
     .types(r#"
         [
             (type_identifier) @type.ref
@@ -277,72 +406,6 @@ pub fn config() -> LanguageConfig {
                 (call_expression function: (identifier) @decorator.name)
                 (identifier) @decorator.name
             ]
-        )
-    "#)
-    .actions(r#"
-        (call_expression
-            function: (identifier) @fn 
-            arguments: (arguments 
-                (object 
-                    (pair 
-                        key: (property_identifier) @k 
-                        value: [(string) (template_string) (identifier)] @action.dispatch
-                    )
-                )
-            )
-            (#match? @fn "^(dispatch|put|emit|commit)$")
-            (#eq? @k "type") 
-        )
-        (switch_case value: [(string) (template_string) (identifier)] @action.handle)
-        (pair key: [(string) (template_string) (identifier)] @action.handle value: [(arrow_function) (function_expression)])
-
-        (call_expression
-            function: (identifier) @fn 
-            arguments: (arguments 
-                [(string) (template_string) (identifier)] @action.dispatch
-            )
-            (#match? @fn "^(emit|dispatch|trigger|pub|publish|commit)$")
-        )
-        (call_expression
-            function: (member_expression property: (property_identifier) @fn)
-            arguments: (arguments 
-                [(string) (template_string) (identifier)] @action.dispatch
-            )
-            (#match? @fn "^(emit|dispatch|trigger|pub|publish|commit)$")
-        )
-        (call_expression
-            function: (identifier) @fn 
-            arguments: (arguments 
-                [(string) (template_string) (identifier)] @action.handle
-            )
-            (#match? @fn "^(on|once|subscribe|sub|listen)$")
-        )
-        (call_expression
-            function: (member_expression property: (property_identifier) @fn)
-            arguments: (arguments 
-                [(string) (template_string) (identifier)] @action.handle
-            )
-            (#match? @fn "^(on|once|subscribe|sub|listen)$")
-        )
-    "#)
-    .middleware(r#"
-        (call_expression
-            function: (member_expression
-                property: (property_identifier) @prop
-            )
-            arguments: (arguments 
-                [(identifier) (call_expression)] @middleware.use
-            )
-            (#eq? @prop "use")
-        )
-    "#)
-    .routes(r#"
-        (decorator
-            (call_expression
-                function: (identifier) @fn
-                arguments: (arguments [(string) (template_string)] @route.path)
-            )
-            (#match? @fn "^(Controller|Get|Post|Put|Delete|Patch)$")
         )
     "#)
     .di_decorators(&["Injectable", "Component", "Directive", "Pipe", "Service"])
