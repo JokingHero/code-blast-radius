@@ -1,5 +1,7 @@
 use blast_radius_engine::analysis::boundary::extract_boundary;
-use blast_radius_engine::analysis::language::{ get_config_by_language, ALL_LANGUAGES, SupportedLanguage };
+use blast_radius_engine::analysis::language::{
+    get_config_by_language, SupportedLanguage, ALL_LANGUAGES,
+};
 struct MalformedCase {
     lang: SupportedLanguage,
     name: &'static str,
@@ -39,7 +41,6 @@ fn test_specific_malformed_syntax_resilience() {
             name: "Python: Unclosed Decorator",
             code: "@app.route(\n def index(): pass",
         },
-
         // --- JAVASCRIPT / TYPESCRIPT ---
         MalformedCase {
             lang: SupportedLanguage::TypeScript,
@@ -56,7 +57,6 @@ fn test_specific_malformed_syntax_resilience() {
             name: "TS: Bad Generics",
             code: "function foo<T extends >() {}",
         },
-
         // --- JAVA / C# ---
         MalformedCase {
             lang: SupportedLanguage::Java,
@@ -68,21 +68,18 @@ fn test_specific_malformed_syntax_resilience() {
             name: "C#: Unclosed Attribute",
             code: "[HttpGet\npublic void Foo() {}",
         },
-
         // --- HTML / JSX ---
         MalformedCase {
             lang: SupportedLanguage::Html,
             name: "HTML: Unclosed Tags",
             code: "<div><span>oops</div>",
         },
-
         // --- SQL ---
         MalformedCase {
             lang: SupportedLanguage::Sql,
             name: "SQL: Half Query",
             code: "CREATE TABLE ",
         },
-
         // --- JSON / YAML ---
         MalformedCase {
             lang: SupportedLanguage::Json,
@@ -93,7 +90,7 @@ fn test_specific_malformed_syntax_resilience() {
             lang: SupportedLanguage::Yaml,
             name: "YAML: Bad Tab/Space Mix",
             code: "key:\n\tvalue", // YAML forbids tabs
-        }
+        },
     ];
 
     let mut failures = Vec::new();
@@ -120,7 +117,11 @@ fn test_specific_malformed_syntax_resilience() {
                     println!("[{}] Gracefully returned error: {}", case.name, e);
                 } else {
                     let boundary = inner_result.unwrap();
-                    println!("[{}] Survived. Found {} defs.", case.name, boundary.defs.len());
+                    println!(
+                        "[{}] Survived. Found {} defs.",
+                        case.name,
+                        boundary.defs.len()
+                    );
                 }
             }
             Err(_) => {
@@ -130,7 +131,10 @@ fn test_specific_malformed_syntax_resilience() {
     }
 
     if !failures.is_empty() {
-        panic!("Resilience tests failed (Panics detected):\n{}", failures.join("\n"));
+        panic!(
+            "Resilience tests failed (Panics detected):\n{}",
+            failures.join("\n")
+        );
     }
 }
 
@@ -152,7 +156,7 @@ fn test_universal_fuzzing() {
         "// unclosed comment",
         "/* unclosed block",
         "русский текст", // UTF-8 check
-        "😊 🚀" // Emoji check
+        "😊 🚀",         // Emoji check
     ];
 
     let mut panics = Vec::new();
@@ -167,7 +171,10 @@ fn test_universal_fuzzing() {
             });
 
             if result.is_err() {
-                panics.push(format!("Language: {}, Input Case: #{} ({})", lang_name, i, garbage));
+                panics.push(format!(
+                    "Language: {}, Input Case: #{} ({})",
+                    lang_name, i, garbage
+                ));
             }
         }
     }
@@ -191,9 +198,11 @@ fn test_stack_overflow_resilience() {
     // Test against a C-style language (Rust) which uses braces extensively
     let config = get_config_by_language(SupportedLanguage::Rust).unwrap();
 
-    let result = std::panic::catch_unwind(|| {
-        extract_boundary("deep.rs", &deep_code, config, [0u8; 32])
-    });
+    let result =
+        std::panic::catch_unwind(|| extract_boundary("deep.rs", &deep_code, config, [0u8; 32]));
 
-    assert!(result.is_ok(), "Engine panicked on deeply nested code (Stack Overflow?)");
+    assert!(
+        result.is_ok(),
+        "Engine panicked on deeply nested code (Stack Overflow?)"
+    );
 }

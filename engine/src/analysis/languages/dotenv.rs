@@ -3,33 +3,49 @@ use crate::analysis::language::{LanguageConfig, LanguageConfigBuilder, Supported
 pub fn config() -> LanguageConfig {
     LanguageConfigBuilder::new(
         SupportedLanguage::Dotenv,
-        &["env", "env.example", "env.template", "env.local", "env.development", "env.test", "env.production"]
+        &[
+            "env",
+            "env.example",
+            "env.template",
+            "env.local",
+            "env.development",
+            "env.test",
+            "env.production",
+        ],
     )
     .skeleton("")
-    .defs(r#"
+    .defs(
+        r#"
         (variable_assignment
             name: (variable_name) @function.name
             value: (_) @function.body
         ) @function.definition
-    "#)
-    .vals(r#"
+    "#,
+    )
+    .vals(
+        r#"
         (variable_assignment
             name: (variable_name) @val.name
             value: [(word) (string) (raw_string)] @val.value
         )
-    "#)
-    .docs(r#"
+    "#,
+    )
+    .docs(
+        r#"
         (
             (comment)+ @function.docs 
             . 
             (variable_assignment) @function.definition
         )
-    "#)
-    .literals(r#"
+    "#,
+    )
+    .literals(
+        r#"
         [
             (string)
             (raw_string)
         ] @string
-    "#)
+    "#,
+    )
     .build()
 }

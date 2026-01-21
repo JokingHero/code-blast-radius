@@ -1,18 +1,18 @@
-use std::path::Path;
-use std::fs;
-use std::collections::{ HashMap, HashSet };
-use ignore::WalkBuilder;
 use blake3;
-use rayon::prelude::*;
+use ignore::WalkBuilder;
 use pathdiff;
+use rayon::prelude::*;
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::Path;
 
-use crate::inference::frameworks::FrameworkManager;
-use crate::inference::{InferenceEngine, configs};
-use crate::inference::conventions::ConventionEngine;
-use crate::models::{ BoundaryIndex, FileBoundary, FileId };
 use crate::analysis::boundary::extract_boundary;
 use crate::analysis::language::get_config_for_extension;
+use crate::inference::conventions::ConventionEngine;
+use crate::inference::frameworks::FrameworkManager;
+use crate::inference::{configs, InferenceEngine};
 use crate::manifest::scan_manifest_content;
+use crate::models::{BoundaryIndex, FileBoundary, FileId};
 
 pub struct FileScanner;
 
@@ -45,14 +45,17 @@ impl FileScanner {
         let mut inference_engine = InferenceEngine::new();
         // Register the Path-Based Convention Engine
         inference_engine.register(ConventionEngine::new());
-        
+
         // Register the Content-Based Framework Engine
         let mut fw_manager = FrameworkManager::new();
         configs::register_all(&mut fw_manager);
         inference_engine.register(fw_manager);
 
         // 1. Discovery Phase (IO Bound - optimized by ignore crate)
-        let walker = WalkBuilder::new(&root_abs).hidden(false).git_ignore(true).build();
+        let walker = WalkBuilder::new(&root_abs)
+            .hidden(false)
+            .git_ignore(true)
+            .build();
 
         let mut file_entries = Vec::new();
         for result in walker {
@@ -74,10 +77,8 @@ impl FileScanner {
                     .unwrap_or("")
                     .to_string();
 
-                let is_manifest = matches!(
-                    filename,
-                    "package.json" | "Cargo.toml" | "pyproject.toml"
-                );
+                let is_manifest =
+                    matches!(filename, "package.json" | "Cargo.toml" | "pyproject.toml");
                 if !is_manifest && get_config_for_extension(&extension).is_none() {
                     return None;
                 }
@@ -104,13 +105,15 @@ impl FileScanner {
             .collect();
 
         // Prepare existing state for Change Detection
-        let existing_files: HashMap<String, [u8; 32]> = index.files
+        let existing_files: HashMap<String, [u8; 32]> = index
+            .files
             .values()
             .filter(|f| f.root_id == root_id)
             .map(|f| (f.path.clone(), f.hash))
             .collect();
 
-        let existing_ids: HashMap<String, FileId> = index.files
+        let existing_ids: HashMap<String, FileId> = index
+            .files
             .values()
             .filter(|f| f.root_id == root_id)
             .map(|f| (f.path.clone(), f.id))
@@ -121,26 +124,31 @@ impl FileScanner {
             .into_par_iter()
             .map(|file_data| {
                 let path_obj = Path::new(&file_data.relative_path);
-                let filename = path_obj.file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("");
+                let filename = path_obj.file_name().and_then(|s| s.to_str()).unwrap_or("");
 
                 // 1. Handle TSConfig / JSConfig Aliases
                 if filename == "tsconfig.json" || filename == "jsconfig.json" {
                     let mut aliases = HashMap::new();
                     let config_dir = path_obj.parent().unwrap_or(Path::new(""));
 
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&file_data.content) {
-                        if let Some(paths) = json.get("compilerOptions")
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&file_data.content)
+                    {
+                        if let Some(paths) = json
+                            .get("compilerOptions")
                             .and_then(|o| o.get("paths"))
-                            .and_then(|p| p.as_object()) 
+                            .and_then(|p| p.as_object())
                         {
                             for (key, val) in paths {
                                 let clean_key = key.replace("/*", "/");
-                                if let Some(first_path) = val.as_array().and_then(|a| a.get(0)).and_then(|v| v.as_str()) {
+                                if let Some(first_path) = val
+                                    .as_array()
+                                    .and_then(|a| a.get(0))
+                                    .and_then(|v| v.as_str())
+                                {
                                     let clean_val = first_path.replace("/*", "/");
                                     let resolved_path = config_dir.join(&clean_val);
-                                    let final_path = resolved_path.to_string_lossy().replace('\\', "/");
+                                    let final_path =
+                                        resolved_path.to_string_lossy().replace('\\', "/");
                                     aliases.insert(clean_key, final_path);
                                 }
                             }
@@ -149,7 +157,7 @@ impl FileScanner {
                     if !aliases.is_empty() {
                         return ScanResult::Aliases(aliases);
                     }
-                    return ScanResult::None; 
+                    return ScanResult::None;
                 }
 
                 // A. Handle Manifests
@@ -175,15 +183,14 @@ impl FileScanner {
 
                 if let Some(config) = get_config_for_extension(&file_data.extension) {
                     match extract_boundary(
-                            &file_data.relative_path,
-                            &file_data.content,
-                            config,
-                            file_data.hash
-                        )
-                    {
+                        &file_data.relative_path,
+                        &file_data.content,
+                        config,
+                        file_data.hash,
+                    ) {
                         Ok(mut boundary) => {
                             boundary.root_id = root_id.to_string();
-                            
+
                             // --- INFERENCE STEP ---
                             // Look at physical facts and infer logical concepts
                             inference_engine.run(&mut boundary);
@@ -194,7 +201,9 @@ impl FileScanner {
                             }
                             return ScanResult::Boundary(boundary);
                         }
-                        Err(_) => { return ScanResult::None; }
+                        Err(_) => {
+                            return ScanResult::None;
+                        }
                     }
                 }
 
@@ -228,7 +237,8 @@ impl FileScanner {
         }
 
         // 5. Cleanup Deleted Files
-        let ids_to_remove: Vec<FileId> = index.files
+        let ids_to_remove: Vec<FileId> = index
+            .files
             .values()
             .filter(|f| f.root_id == root_id && !seen_paths.contains(&f.path))
             .map(|f| f.id)
@@ -248,7 +258,7 @@ impl FileScanner {
         index.usage_map.clear();
 
         // --- PASS 1: Build Knowledge Base (Definitions) ---
-        // We need to know what "Concepts" exist in the workspace before we can 
+        // We need to know what "Concepts" exist in the workspace before we can
         // link literals to them.
         let mut known_concepts: HashSet<String> = HashSet::new();
 
@@ -263,12 +273,20 @@ impl FileScanner {
 
             // B. Symbol Map (Physical)
             for def in &file.defs {
-                index.symbol_map.entry(def.name.clone()).or_default().push(file.id);
+                index
+                    .symbol_map
+                    .entry(def.name.clone())
+                    .or_default()
+                    .push(file.id);
             }
 
             // C. Symbol Map (Synthetic/Logical)
             for syn_def in &file.synthetic_defs {
-                index.symbol_map.entry(syn_def.clone()).or_default().push(file.id);
+                index
+                    .symbol_map
+                    .entry(syn_def.clone())
+                    .or_default()
+                    .push(file.id);
                 known_concepts.insert(syn_def.clone());
             }
         }
@@ -293,7 +311,11 @@ impl FileScanner {
             for literal in &file.literals {
                 // Heuristic A: Exact Match (Rare, but possible for internal IDs)
                 if known_concepts.contains(literal) {
-                    index.usage_map.entry(literal.clone()).or_default().push(file.id);
+                    index
+                        .usage_map
+                        .entry(literal.clone())
+                        .or_default()
+                        .push(file.id);
                     continue;
                 }
 
@@ -308,7 +330,7 @@ impl FileScanner {
                         index.usage_map.entry(route_key).or_default().push(file.id);
                     }
                 }
-                
+
                 // Heuristic C: Database Tables / Topics (Future extensions)
                 // if literal.contains('_') && known_concepts.contains(&format!("db:{}", literal)) ...
             }

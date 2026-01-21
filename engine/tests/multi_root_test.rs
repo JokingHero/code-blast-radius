@@ -1,6 +1,6 @@
 use blast_radius_engine::workspace::WorkspaceManager;
-use tempfile::tempdir;
 use std::fs;
+use tempfile::tempdir;
 
 #[test]
 fn test_workspace_full_lifecycle() {
@@ -9,7 +9,7 @@ fn test_workspace_full_lifecycle() {
     // =========================================================================
     let dir = tempdir().unwrap();
     let env_path = dir.path().to_path_buf();
-    
+
     // Create physical folders
     let root_core = env_path.join("core_lib");
     let root_app = env_path.join("app_service");
@@ -23,7 +23,11 @@ fn test_workspace_full_lifecycle() {
     println!("--- STEP 1: Init Workspace with Core Lib ---");
 
     // core_lib/utils.ts -> function helper() {}
-    fs::write(root_core.join("utils.ts"), "export function helper() { return 1; }").unwrap();
+    fs::write(
+        root_core.join("utils.ts"),
+        "export function helper() { return 1; }",
+    )
+    .unwrap();
 
     // Use new_in_memory() first
     let mut manager = WorkspaceManager::new_in_memory(vec![]).expect("Failed to init manager");
@@ -32,7 +36,10 @@ fn test_workspace_full_lifecycle() {
     manager.add_root(root_core.clone());
 
     // Assert: Helper exists using new index API
-    assert!(manager.index.symbol_map.contains_key("helper"), "Helper symbol should be indexed");
+    assert!(
+        manager.index.symbol_map.contains_key("helper"),
+        "Helper symbol should be indexed"
+    );
     assert_eq!(manager.config.roots.len(), 1);
 
     // =========================================================================
@@ -46,14 +53,21 @@ fn test_workspace_full_lifecycle() {
         r#"
     import { helper } from "./anywhere"; 
     function main() { helper(); }
-"#
-    ).unwrap();
+"#,
+    )
+    .unwrap();
 
     manager.add_root(root_app.clone());
 
     // Assert: Both symbols exist
-    assert!(manager.index.symbol_map.contains_key("main"), "Main symbol should be indexed");
-    assert!(manager.index.symbol_map.contains_key("helper"), "Helper symbol should still exist");
+    assert!(
+        manager.index.symbol_map.contains_key("main"),
+        "Main symbol should be indexed"
+    );
+    assert!(
+        manager.index.symbol_map.contains_key("helper"),
+        "Helper symbol should still exist"
+    );
 
     // =========================================================================
     // 3. FILE MODIFICATION (Refactor)
@@ -63,8 +77,9 @@ fn test_workspace_full_lifecycle() {
     // Rename helper -> super_helper
     fs::write(
         root_core.join("utils.ts"),
-        "export function super_helper() { return 9000; }"
-    ).unwrap();
+        "export function super_helper() { return 9000; }",
+    )
+    .unwrap();
 
     // Trigger Sync (Simulate "Refresh")
     manager.sync();

@@ -1,8 +1,8 @@
-use std::fs;
-use std::path::Path;
-use std::collections::{HashSet, HashMap};
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::Path;
 
 // --- Cargo.toml Definitions ---
 
@@ -65,7 +65,7 @@ struct CompilerOptions {
 pub struct ManifestResult {
     /// The name of the package defined in this manifest (e.g. "@my-org/ui" or "my-crate").
     /// Used for Monorepo/Workspace local resolution.
-    pub package_name: Option<String>, 
+    pub package_name: Option<String>,
     /// External libraries used by this package (e.g. "react", "serde").
     pub externals: HashSet<String>,
     /// Path aliases defined in this config (e.g. "@/*" -> "src/*").
@@ -119,9 +119,15 @@ pub fn scan_manifest_content(filename: &str, content: &str) -> ManifestResult {
     } else if filename == "requirements.txt" {
         for line in content.lines() {
             let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
             // Handle version specifiers like "numpy>=1.20" or "requests==2.0"
-            let name = trimmed.split(|c| c == '=' || c == '<' || c == '>').next().unwrap_or("").trim();
+            let name = trimmed
+                .split(|c| c == '=' || c == '<' || c == '>')
+                .next()
+                .unwrap_or("")
+                .trim();
             if !name.is_empty() {
                 result.externals.insert(name.to_string());
             }
@@ -154,7 +160,7 @@ pub fn scan_manifest_content(filename: &str, content: &str) -> ManifestResult {
                         // Example: "~": ["src"]      =>  "~"  -> "src"
                         let key_clean = key.replace('*', "");
                         let target_clean = target.replace('*', "");
-                        
+
                         if !key_clean.is_empty() && !target_clean.is_empty() {
                             result.aliases.insert(key_clean, target_clean);
                         }
@@ -168,13 +174,21 @@ pub fn scan_manifest_content(filename: &str, content: &str) -> ManifestResult {
 
         for line in content.lines() {
             let trimmed = line.trim();
-            if trimmed.is_empty() { continue; }
+            if trimmed.is_empty() {
+                continue;
+            }
 
             // Handle continuation lines (indented)
             if line.starts_with(' ') || line.starts_with('\t') {
                 if in_deps {
                     // Extract package name from "    dplyr (>= 1.0),"
-                    let pkg = trimmed.split('(').next().unwrap_or(trimmed).replace(',', "").trim().to_string();
+                    let pkg = trimmed
+                        .split('(')
+                        .next()
+                        .unwrap_or(trimmed)
+                        .replace(',', "")
+                        .trim()
+                        .to_string();
                     if !pkg.is_empty() && pkg != "R" {
                         result.externals.insert(pkg);
                     }
@@ -189,7 +203,11 @@ pub fn scan_manifest_content(filename: &str, content: &str) -> ManifestResult {
                 if key == "Package" {
                     result.package_name = Some(value.trim().to_string());
                     in_deps = false;
-                } else if key == "Imports" || key == "Depends" || key == "Suggests" || key == "LinkingTo" {
+                } else if key == "Imports"
+                    || key == "Depends"
+                    || key == "Suggests"
+                    || key == "LinkingTo"
+                {
                     in_deps = true;
                     // Handle inline values: "Imports: dplyr, ggplot2"
                     let deps_line = value.trim();

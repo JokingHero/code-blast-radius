@@ -1,12 +1,10 @@
 use crate::analysis::language::{LanguageConfig, LanguageConfigBuilder, SupportedLanguage};
 
 pub fn config() -> LanguageConfig {
-    LanguageConfigBuilder::new(
-        SupportedLanguage::R,
-        &["R", "r", "Rscript"]
-    )
-    .skeleton("{}")
-    .defs(r#"
+    LanguageConfigBuilder::new(SupportedLanguage::R, &["R", "r", "Rscript"])
+        .skeleton("{}")
+        .defs(
+            r#"
         [
             ;; R functions are assignments: f <- function() {}
             (binary_operator
@@ -14,9 +12,11 @@ pub fn config() -> LanguageConfig {
                 rhs: (function_definition)
             ) @function.definition
         ]
-    "#)
-    // --- NEW: Inference Engine Hooks ---
-    .frameworks(r#"
+    "#,
+        )
+        // --- NEW: Inference Engine Hooks ---
+        .frameworks(
+            r#"
         ;; --- SHINY APPS ---
         ;; Captures: ui <- fluidPage(...) -> key="fluidPage", value="ui"
         (binary_operator
@@ -26,9 +26,11 @@ pub fn config() -> LanguageConfig {
             )
             (#eq? @framework.key "fluidPage")
         )
-    "#)
-    // --- EXISTING LOGIC ---
-    .calls(r#"
+    "#,
+        )
+        // --- EXISTING LOGIC ---
+        .calls(
+            r#"
         [
             (call function: (identifier) @call.name)
             (call 
@@ -37,8 +39,10 @@ pub fn config() -> LanguageConfig {
                 )
             )
         ]
-    "#)
-    .docs(r#"
+    "#,
+        )
+        .docs(
+            r#"
         (
             (comment)+ @function.docs
             .
@@ -46,8 +50,10 @@ pub fn config() -> LanguageConfig {
                 (binary_operator rhs: (function_definition))
             ] @function.definition
         )
-    "#)
-    .imports(r#"
+    "#,
+        )
+        .imports(
+            r#"
         [
             (call
                 function: (identifier) @fn
@@ -60,15 +66,18 @@ pub fn config() -> LanguageConfig {
                 (#eq? @fn "source")
             )
         ]
-    "#)
-    .literals(r#"(string) @string"#)
-    .vals(r#"
+    "#,
+        )
+        .literals(r#"(string) @string"#)
+        .vals(
+            r#"
         [
             (binary_operator
                 lhs: (identifier) @val.name
                 rhs: (string) @val.value
             )
         ]
-    "#)
-    .build()
+    "#,
+        )
+        .build()
 }

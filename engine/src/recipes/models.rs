@@ -18,7 +18,11 @@ pub enum RecipeOperation {
     /// Remove files where the path matches the glob pattern
     RemoveFiles { pattern: String },
     /// Select files part of the blast radius of a symbol
-    BlastRadius { symbol: String, max_depth: u32, exclude_tests: bool },
+    BlastRadius {
+        symbol: String,
+        max_depth: u32,
+        exclude_tests: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

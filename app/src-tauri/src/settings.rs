@@ -44,7 +44,7 @@ impl SettingsState {
 
     pub fn update_recent(&self, path: String) {
         let mut settings = self.settings.lock().unwrap();
-        
+
         // Update Last Opened
         settings.last_opened_path = Some(path.clone());
 
@@ -54,14 +54,14 @@ impl SettingsState {
         if settings.recent_workspaces.len() > 10 {
             settings.recent_workspaces.truncate(10);
         }
-        
-        // Release lock before saving to avoid deadlocks (save re-locks internally if we weren't careful, 
+
+        // Release lock before saving to avoid deadlocks (save re-locks internally if we weren't careful,
         // but here save() takes &self and locks again. To be safe, we drop the guard explicitly).
-        drop(settings); 
-        
+        drop(settings);
+
         let _ = self.save();
     }
-    
+
     pub fn clear_recent(&self) {
         let mut settings = self.settings.lock().unwrap();
         settings.recent_workspaces.clear();
@@ -72,10 +72,10 @@ impl SettingsState {
 
     pub fn remove_recent(&self, path: &str) {
         let mut settings = self.settings.lock().unwrap();
-        
+
         // Retain only paths that do NOT match the one being removed
         settings.recent_workspaces.retain(|p| p != path);
-        
+
         // If the removed path was the last opened, clear it
         if let Some(last) = &settings.last_opened_path {
             if last == path {

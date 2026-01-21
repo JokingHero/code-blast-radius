@@ -1,10 +1,10 @@
+pub mod configs;
 pub mod conventions;
 pub mod frameworks;
-pub mod configs;
 use crate::models::FileBoundary;
 
 pub trait InferenceRule: Send + Sync {
-    /// Inspects a file's physical boundary and returns a list of logical 
+    /// Inspects a file's physical boundary and returns a list of logical
     /// definitions derived from it.
     fn infer_definitions(&self, boundary: &FileBoundary) -> Vec<String>;
 }

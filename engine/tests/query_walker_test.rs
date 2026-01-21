@@ -1,9 +1,14 @@
-use blast_radius_engine::{models::{BoundaryIndex, FileBoundary}, query::walker::JitWalker};
+use blast_radius_engine::{
+    models::{BoundaryIndex, FileBoundary},
+    query::walker::JitWalker,
+};
 
 #[test]
 fn test_monorepo_alias_resolution() {
     let mut index = BoundaryIndex::new();
-    index.package_map.insert("@my-org/ui".to_string(), "packages/ui".to_string());
+    index
+        .package_map
+        .insert("@my-org/ui".to_string(), "packages/ui".to_string());
 
     let producer_id = 1;
     let producer = FileBoundary {
@@ -17,11 +22,13 @@ fn test_monorepo_alias_resolution() {
     let consumer = FileBoundary {
         id: consumer_id,
         path: "apps/web/src/App.tsx".to_string(),
-        imports: vec!["@my-org/ui/src/Button".to_string()], 
+        imports: vec!["@my-org/ui/src/Button".to_string()],
         ..Default::default()
     };
     index.files.insert(consumer_id, consumer);
-    index.usage_map.insert("button".to_string(), vec![consumer_id]);
+    index
+        .usage_map
+        .insert("button".to_string(), vec![consumer_id]);
     // ----------------------------------------
 
     let walker = JitWalker::new(&index);

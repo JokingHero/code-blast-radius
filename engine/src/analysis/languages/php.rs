@@ -11,10 +11,9 @@ pub fn config() -> LanguageConfig {
         (method_declaration name: (name) @function.name body: (compound_statement) @function.body) @function.definition
         (class_declaration name: (name) @function.name body: (declaration_list) @function.body) @function.definition
     "#)
-    // --- NEW: Inference Engine Hooks ---
     .frameworks(r#"
         ;; --- LARAVEL ROUTES ---
-        ;; Captures: Route::get('/api/user', ...) -> key="get", value="'/api/user'"
+        ;; Route::get('/user', ...)
         (scoped_call_expression
             scope: (name) @scope
             name: (name) @framework.key
@@ -24,14 +23,26 @@ pub fn config() -> LanguageConfig {
         )
 
         ;; --- SYMFONY ATTRIBUTES (PHP 8+) ---
-        ;; Captures: #[Route('/api/user')] -> key="Route", value="'/api/user'"
+        ;; #[Route('/api')]
         (attribute
-            name: (name) @framework.key
-            arguments: (arguments (argument (string) @framework.value))
+            (name) @framework.key
+            parameters: (arguments (argument (string) @framework.value))
             (#eq? @framework.key "Route")
         )
+        
+        ;; #[Route(path: '/api')]
+        (attribute
+            (name) @framework.key
+            parameters: (arguments 
+                (argument 
+                    name: (name) @arg_name
+                    (string) @framework.value
+                )
+            )
+            (#eq? @framework.key "Route")
+            (#eq? @arg_name "path")
+        )
     "#)
-    // --- EXISTING LOGIC ---
     .calls(r#"
         (function_call_expression
             function: [

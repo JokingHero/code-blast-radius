@@ -1,12 +1,10 @@
 use crate::analysis::language::{LanguageConfig, LanguageConfigBuilder, SupportedLanguage};
 
 pub fn config() -> LanguageConfig {
-    LanguageConfigBuilder::new(
-        SupportedLanguage::Hcl,
-        &["tf", "hcl", "tfvars"]
-    )
-    .skeleton("{ # ... {} ... }")
-    .defs(r#"
+    LanguageConfigBuilder::new(SupportedLanguage::Hcl, &["tf", "hcl", "tfvars"])
+        .skeleton("{ # ... {} ... }")
+        .defs(
+            r#"
         ;; Resources and Data sources have 2 labels: type and name
         ;; The first label is the type (ignored for name), second is the name
         (block
@@ -24,23 +22,31 @@ pub fn config() -> LanguageConfig {
             (body)? @function.body
             (#match? @function.kind "^(variable|output|module|provider)$")
         ) @function.definition
-    "#)
-    .docs(r#"
+    "#,
+        )
+        .docs(
+            r#"
         ((comment) @function.docs . (block) @function.definition)
-    "#)
-    .literals(r#"
+    "#,
+        )
+        .literals(
+            r#"
         [
             (string_lit) 
             (heredoc_template)
         ] @string
-    "#)
-    .vals(r#"
+    "#,
+        )
+        .vals(
+            r#"
         (attribute
             (identifier) @val.name
             (expression (literal_value (string_lit (template_literal) @val.value)))
         )
-    "#)
-    .types(r#"
+    "#,
+        )
+        .types(
+            r#"
         ;; Capture the resource type (e.g., "aws_s3_bucket") as a type reference
         ;; This allows heuristics to link app code importing "aws_s3_bucket" to this block.
         (block 
@@ -48,6 +54,7 @@ pub fn config() -> LanguageConfig {
             (string_lit (template_literal) @type.ref)
             (#eq? @btype "resource")
         )
-    "#)
-    .build()
+    "#,
+        )
+        .build()
 }

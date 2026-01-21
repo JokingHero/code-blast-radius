@@ -1,19 +1,19 @@
 use crate::analysis::language::{LanguageConfig, LanguageConfigBuilder, SupportedLanguage};
 
 pub fn config() -> LanguageConfig {
-    LanguageConfigBuilder::new(
-        SupportedLanguage::Toml,
-        &["toml"]
-    )
-    .skeleton("")
-    .defs(r#"
+    LanguageConfigBuilder::new(SupportedLanguage::Toml, &["toml"])
+        .skeleton("")
+        .defs(
+            r#"
         [
             (pair (bare_key) @function.name (string) @function.body)
             (table (bare_key) @function.name)
         ] @function.definition
-    "#)
-    .literals(r#"(string) @string"#)
-    .vals(r#"
+    "#,
+        )
+        .literals(r#"(string) @string"#)
+        .vals(
+            r#"
         (pair
             (bare_key) @val.name
             (string) @val.value
@@ -26,6 +26,7 @@ pub fn config() -> LanguageConfig {
             (bare_key) @val.name
             (boolean) @val.value
         )
-    "#)
-    .build()
+    "#,
+        )
+        .build()
 }

@@ -1,12 +1,10 @@
 use crate::analysis::language::{LanguageConfig, LanguageConfigBuilder, SupportedLanguage};
 
 pub fn config() -> LanguageConfig {
-    LanguageConfigBuilder::new(
-        SupportedLanguage::Ruby,
-        &["rb"]
-    )
-    .skeleton("# ... {} body hidden")
-    .defs(r#"
+    LanguageConfigBuilder::new(SupportedLanguage::Ruby, &["rb"])
+        .skeleton("# ... {} body hidden")
+        .defs(
+            r#"
         ;; Methods - body is optional for one-liners like "def foo; end"
         (method
             name: (identifier) @function.name
@@ -27,9 +25,11 @@ pub fn config() -> LanguageConfig {
             (constant) @function.name
             (scope_resolution name: (constant) @function.name)
         ]) @function.definition
-    "#)
-    // --- NEW: Inference Engine Hooks ---
-    .frameworks(r#"
+    "#,
+        )
+        // --- NEW: Inference Engine Hooks ---
+        .frameworks(
+            r#"
         ;; --- RAILS ROUTES ---
         ;; Captures: get '/login', to: 'sessions#new' -> key="get", value="'/login'"
         ;; Captures: post '/login' -> key="post", value="'/login'"
@@ -49,21 +49,28 @@ pub fn config() -> LanguageConfig {
             )
             (#eq? @framework.key "resources")
         )
-    "#)
-    // --- EXISTING LOGIC ---
-    .calls(r#"
+    "#,
+        )
+        // --- EXISTING LOGIC ---
+        .calls(
+            r#"
         (call method: (identifier) @call.name)
-    "#)
-    .imports(r#"
+    "#,
+        )
+        .imports(
+            r#"
         (call
             method: (identifier) @m
             arguments: (argument_list (string) @import.source)
             (#match? @m "^(require|require_relative|load)$")
         )
-    "#)
-    .literals(r#"
+    "#,
+        )
+        .literals(
+            r#"
         [(string) (bare_string) (heredoc_body)] @string
-    "#)
-    .project_config_files(&["Gemfile", "Rakefile"])
-    .build()
+    "#,
+        )
+        .project_config_files(&["Gemfile", "Rakefile"])
+        .build()
 }

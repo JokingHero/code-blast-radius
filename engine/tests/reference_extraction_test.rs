@@ -1,5 +1,5 @@
 use blast_radius_engine::analysis::boundary::extract_boundary;
-use blast_radius_engine::analysis::language::{ get_config_by_language, SupportedLanguage };
+use blast_radius_engine::analysis::language::{get_config_by_language, SupportedLanguage};
 use std::collections::HashSet;
 struct RefTestCase {
     lang: SupportedLanguage,
@@ -24,16 +24,16 @@ return dbResult;
 }
 "#,
             expected_refs: vec![
-                "UserDTO", // Type reference
+                "UserDTO",  // Type reference
                 "database", // Object access
-                "save", // Method call
-                "logger", // Object access
-                "info", // Method call
-                "dbResult" // Variable usage
+                "save",     // Method call
+                "logger",   // Object access
+                "info",     // Method call
+                "dbResult", // Variable usage
             ],
             should_not_contain: vec![
                 "processUser", // This is the DEFINITION, so it should be removed from refs
-                "u" // Too short (if it existed)
+                "u",           // Too short (if it existed)
             ],
         },
         RefTestCase {
@@ -46,13 +46,13 @@ return <UserProfile user={currentUser} />;
 }
 "#,
             expected_refs: vec![
-                "useState", // Hook call
+                "useState",    // Hook call
                 "UserProfile", // JSX Component usage
                 "currentUser", // Prop usage
-                "setState" // Destructured usage
+                "setState",    // Destructured usage
             ],
             should_not_contain: vec![
-                "App" // Definition
+                "App", // Definition
             ],
         },
         RefTestCase {
@@ -67,20 +67,20 @@ return <UserProfile user={currentUser} />;
             }
         "#,
             expected_refs: vec![
-                "Request", // Type
-                "Result", // Type
+                "Request",  // Type
+                "Result",   // Type
                 "Response", // Type
                 "Database", // Struct usage
-                "connect", // Static method
-                "println", // Macro
-                "vec", // Macro
-                "query" // Method
+                "connect",  // Static method
+                "println",  // Macro
+                "vec",      // Macro
+                "query",    // Method
             ],
             should_not_contain: vec![
                 "handle_request", // Definition
-                "fn", // Keyword (should be ignored by grammar queries)
-                "let", // Keyword
-                "mut" // Keyword
+                "fn",             // Keyword (should be ignored by grammar queries)
+                "let",            // Keyword
+                "mut",            // Keyword
             ],
         },
         RefTestCase {
@@ -93,15 +93,15 @@ return <UserProfile user={currentUser} />;
                 return jsonify(data)
         "#,
             expected_refs: vec![
-                "app", // Decorator object
-                "route", // Decorator method
-                "service", // Global/Import usage
+                "app",       // Decorator object
+                "route",     // Decorator method
+                "service",   // Global/Import usage
                 "get_items", // Method call
-                "jsonify" // Function call
+                "jsonify",   // Function call
             ],
             should_not_contain: vec![
                 "index", // Definition
-                "def" // Keyword
+                "def",   // Keyword
             ],
         },
         RefTestCase {
@@ -117,14 +117,14 @@ return <UserProfile user={currentUser} />;
             }
         "#,
             expected_refs: vec![
-                "List", // Type
-                "String", // Type
+                "List",      // Type
+                "String",    // Type
                 "ArrayList", // Type/Constructor
-                "add" // Method
+                "add",       // Method
             ],
             should_not_contain: vec![
-                "Manager", // Definition (Class)
-                "getNames" // Definition (Method)
+                "Manager",  // Definition (Class)
+                "getNames", // Definition (Method)
             ],
         },
         RefTestCase {
@@ -165,7 +165,7 @@ return <UserProfile user={currentUser} />;
                 "Context",        // Method call
                 "json",           // Package usage
                 "NewEncoder",     // Function call
-                "Encode"          // Method call
+                "Encode",         // Method call
             ],
             should_not_contain: vec![
                 "handleRequest", // Definition
@@ -198,7 +198,7 @@ return <UserProfile user={currentUser} />;
                 "AddDays",         // Method usage
                 "Random",          // Class usage
                 "Shared",          // Static property
-                "Next"             // Method
+                "Next",            // Method
             ],
             should_not_contain: vec![
                 "Get",    // Definition
@@ -223,7 +223,7 @@ return <UserProfile user={currentUser} />;
                 "find",                  // Method call
                 "params",                // Method/Hash usage
                 "render",                // Method call
-                "json"                   // Symbol key (often captured as identifier in Ruby TS)
+                "json",                  // Symbol key (often captured as identifier in Ruby TS)
             ],
             should_not_contain: vec![
                 "UserController", // Definition
@@ -252,7 +252,7 @@ return <UserProfile user={currentUser} />;
                 "findByEmail",    // Static method
                 "Exception",      // Class instantiation
                 "tokenGenerator", // Property access
-                "create"          // Method call
+                "create",         // Method call
             ],
             should_not_contain: vec![
                 "AuthService", // Definition
@@ -273,12 +273,12 @@ return <UserProfile user={currentUser} />;
                 "vector",    // Type
                 "push_back", // Method
                 "cout",      // Object
-                "endl"       // Manipulator
+                "endl",      // Manipulator
             ],
             should_not_contain: vec![
                 "process_vector", // Definition
                 "int",            // Primitive (usually ignored or filtered)
-                "void"            // Keyword
+                "void",           // Keyword
             ],
         },
         RefTestCase {
@@ -300,7 +300,7 @@ return <UserProfile user={currentUser} />;
                 "var",
                 "instance_type",
                 "aws_subnet",
-                "main"
+                "main",
             ],
             should_not_contain: vec![
                 "aws_instance", // Resource Type (Definition-side)
@@ -315,15 +315,9 @@ return <UserProfile user={currentUser} />;
                 FROM users 
                 WHERE active = 1 AND role_id = 5
             "#,
-            expected_refs: vec![
-                "username",
-                "email",
-                "users",
-                "active",
-                "role_id"
-            ],
+            expected_refs: vec!["username", "email", "users", "active", "role_id"],
             should_not_contain: vec![
-                "SELECT", "FROM", "WHERE" // Keywords
+                "SELECT", "FROM", "WHERE", // Keywords
             ],
         },
         RefTestCase {
@@ -341,10 +335,10 @@ return <UserProfile user={currentUser} />;
                 "build",         // Argument/Subcommand
                 "deploy_script", // Command
                 "ENV",           // Variable usage
-                "AUTH_TOKEN"     // Variable usage
+                "AUTH_TOKEN",    // Variable usage
             ],
             should_not_contain: vec![
-                "bin", "bash"    // Shebang usually ignored
+                "bin", "bash", // Shebang usually ignored
             ],
         },
         RefTestCase {
@@ -357,9 +351,9 @@ return <UserProfile user={currentUser} />;
         "#,
             expected_refs: vec![],
             should_not_contain: vec![
-                "recursive_algo" // Should be removed because it is in 'defs'
+                "recursive_algo", // Should be removed because it is in 'defs'
             ],
-        }
+        },
     ];
 
     let mut failures = Vec::new();
@@ -384,27 +378,20 @@ return <UserProfile user={currentUser} />;
         // 1. Check Expected Refs (Must exist)
         for expected in &case.expected_refs {
             if !found_refs.contains(*expected) {
-                failures.push(
-                    format!(
-                        "[{}] Missing expected usage reference: '{}'.\n   Found: {:?}",
-                        case.name,
-                        expected,
-                        found_refs
-                    )
-                );
+                failures.push(format!(
+                    "[{}] Missing expected usage reference: '{}'.\n   Found: {:?}",
+                    case.name, expected, found_refs
+                ));
             }
         }
 
         // 2. Check Negative Constraints (Must NOT exist)
         for negative in &case.should_not_contain {
             if found_refs.contains(*negative) {
-                failures.push(
-                    format!(
-                        "[{}] Found reference that should have been ignored/removed: '{}'",
-                        case.name,
-                        negative
-                    )
-                );
+                failures.push(format!(
+                    "[{}] Found reference that should have been ignored/removed: '{}'",
+                    case.name, negative
+                ));
             }
         }
     }

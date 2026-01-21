@@ -7,7 +7,6 @@ pub fn config() -> LanguageConfig {
     )
     .skeleton("{ /* ... {} ... */ }")
     .defs(r#"
-          ;; Standard Definitions
           (function_declaration
             name: (identifier) @function.name
             return_type: (type_annotation)? @function.return_type
@@ -32,7 +31,6 @@ pub fn config() -> LanguageConfig {
 
           (interface_declaration name: [(type_identifier) (identifier)] @function.name) @function.definition
 
-          ;; Type Aliases
           (type_alias_declaration
             name: (type_identifier) @function.name
             value: (_) @function.body
@@ -54,8 +52,6 @@ pub fn config() -> LanguageConfig {
             )
           ) @function.definition)
 
-          ;; --- Factories / Framework Patterns ---
-
           (variable_declarator
             name: (identifier) @function.name
             value: (call_expression
@@ -75,7 +71,6 @@ pub fn config() -> LanguageConfig {
             (#match? @fn_name "^(create|make|define|model|component|router|styled)$")
           ) @function.definition
 
-          ;; Styled Components
           (variable_declarator
             name: (identifier) @function.name
             value: (call_expression
@@ -100,36 +95,44 @@ pub fn config() -> LanguageConfig {
             (#eq? @inner_fn "styled")
           ) @function.definition
 
-          ;; Variable Fallback
           (variable_declarator
             name: (identifier) @variable.name
             type: (type_annotation)? @variable.type
           )
 
-          ;; Constructor Parameters (for DI)
           (required_parameter
             pattern: (identifier) @variable.name
             type: (type_annotation)? @variable.type
           )
     "#)
-    // --- Generic Framework Hints for Inference Engine ---
     .frameworks(r#"
         ;; --- DECORATORS (Angular / NestJS) ---
-        ;; Captures: @Component({ selector: '...' }) -> key="Component", value="{...}"
-        ;; Captures: @Get('/users') -> key="Get", value="'/users'"
+        
+        ;; 1. String Arg: @Get('/api')
         (decorator
             (call_expression
                 function: (identifier) @framework.key
-                arguments: (arguments 
-                    [
-                        (string) 
-                        (object)
-                        (template_string)
-                    ] @framework.value
-                )
+                arguments: (arguments (string) @framework.value)
             )
         )
-        ;; Captures marker decorators: @Injectable() -> key="Injectable"
+        
+        ;; 2. Object Arg: @Component({ ... })
+        (decorator
+            (call_expression
+                function: (identifier) @framework.key
+                arguments: (arguments (object) @framework.value)
+            )
+        )
+
+        ;; 3. Template String Arg
+        (decorator
+            (call_expression
+                function: (identifier) @framework.key
+                arguments: (arguments (template_string) @framework.value)
+            )
+        )
+
+        ;; 4. No Args / Marker: @Injectable()
         (decorator
             (call_expression
                 function: (identifier) @framework.key
@@ -138,7 +141,6 @@ pub fn config() -> LanguageConfig {
         )
 
         ;; --- EXPRESS / HTTP FRAMEWORKS ---
-        ;; Captures: app.get('/users') -> key="get", value="'/users'"
         (call_expression
             function: (member_expression
                 property: (property_identifier) @framework.key
@@ -149,75 +151,21 @@ pub fn config() -> LanguageConfig {
             (#match? @framework.key "^(get|post|put|delete|patch|use)$")
         )
 
-        ;; --- REDUX DISPATCH ---
-        ;; Captures: dispatch({ type: 'USER_LOGIN' }) -> key="dispatch", value="'USER_LOGIN'"
+        ;; --- REDUX ---
         (call_expression
-            function: (identifier) @framework.key
+            function: (member_expression
+                property: (property_identifier) @framework.key
+            )
             arguments: (arguments 
                 (object 
                     (pair 
-                        key: (property_identifier) @k 
+                        key: (property_identifier) @k
                         value: [(string) (identifier)] @framework.value
                     )
                 )
             )
             (#eq? @framework.key "dispatch")
-            (#eq? @k "type") 
-        )
-        
-        ;; --- NGRX / REDUX TOOLKIT ACTIONS ---
-        ;; Captures: createAction('[User] Login') -> key="createAction", value="'[User] Login'"
-        (call_expression
-            function: (identifier) @framework.key
-            arguments: (arguments (string) @framework.value)
-            (#eq? @framework.key "createAction")
-        )
-    "#)
-    // --- OLD: Preserved for Enrichment/Metadata Display ---
-    .actions(r#"
-        (call_expression
-            function: (identifier) @fn 
-            arguments: (arguments 
-                (object 
-                    (pair 
-                        key: (property_identifier) @k 
-                        value: [(string) (template_string) (identifier)] @action.dispatch
-                    )
-                )
-            )
-            (#match? @fn "^(dispatch|put|emit|commit)$")
-            (#eq? @k "type") 
-        )
-        (switch_case value: [(string) (template_string) (identifier)] @action.handle)
-        (pair key: [(string) (template_string) (identifier)] @action.handle value: [(arrow_function) (function_expression)])
-
-        (call_expression
-            function: (identifier) @fn 
-            arguments: (arguments 
-                [(string) (template_string) (identifier)] @action.dispatch
-            )
-            (#match? @fn "^(emit|dispatch|trigger|pub|publish|commit)$")
-        )
-        (call_expression
-            function: (member_expression property: (property_identifier) @fn)
-            arguments: (arguments 
-                [(string) (template_string) (identifier)] @action.dispatch
-            )
-            (#match? @fn "^(emit|dispatch|trigger|pub|publish|commit)$")
-        )
-        (call_expression
-            function: (identifier) @fn 
-            arguments: (arguments 
-                [(string) (template_string) (identifier)] @action.handle
-            )
-            (#match? @fn "^(on|once|subscribe|sub|listen)$")
-        )
-        (call_expression
-            function: (member_expression property: (property_identifier) @fn)
-            arguments: (arguments 
-                [(string) (template_string) (identifier)] @action.handle
-            )
-            (#match? @fn "^(on|once|subscribe|sub|listen)$")
+            (#eq? @k "type")
         )
     "#)
     .middleware(r#"
@@ -239,7 +187,6 @@ pub fn config() -> LanguageConfig {
             )
             (#match? @fn "^(Controller|Get|Post|Put|Delete|Patch)$")
         )
-        ;; Express Routes
         (call_expression
             function: (member_expression
                 property: (property_identifier) @method
@@ -254,159 +201,58 @@ pub fn config() -> LanguageConfig {
         [
           (call_expression 
             function: (member_expression 
-              object: [
-                (identifier) 
-                (this) 
-                (member_expression) 
-              ] @call.receiver
+              object: [ (identifier) (this) (member_expression) ] @call.receiver
               property: [(property_identifier) (identifier)] @call.name))
-          
-          (call_expression 
-            function: (identifier) @call.name)
-
-          (call_expression
-            function: (member_expression
-              property: [(property_identifier) (identifier)] @call.name))
+          (call_expression function: (identifier) @call.name)
+          (call_expression function: (member_expression property: [(property_identifier) (identifier)] @call.name))
         ]
     "#)
     .docs(r#"
-      (
-        (comment)+ @function.docs
-        .
-        [ 
-          (function_declaration) 
-          (method_definition) 
-          (method_signature)
-          (export_statement (variable_declaration)) 
-          (class_declaration) 
-          (interface_declaration) 
-          (variable_declaration)
-        ] @function.definition
-      )
+      ((comment)+ @function.docs . [ 
+          (function_declaration) (method_definition) (method_signature)
+          (export_statement (variable_declaration)) (class_declaration) 
+          (interface_declaration) (variable_declaration)
+      ] @function.definition)
     "#)
     .imports(r#"
         [
-          (import_statement
-              (import_clause
-                  (named_imports
-                      (import_specifier
-                          name: (identifier) @import.name
-                      )
-                  )
-              )
-              source: (string) @import.source
-          )
-          (import_statement
-            (import_clause
-              (namespace_import (identifier) @import.alias)
-            )
-            source: (string) @import.source
-          )
+          (import_statement (import_clause (named_imports (import_specifier name: (identifier) @import.name))) source: (string) @import.source)
+          (import_statement (import_clause (namespace_import (identifier) @import.alias)) source: (string) @import.source)
           (import_statement source: (string) @import.source)
-
-          (call_expression
-            function: (import)
-            arguments: (arguments [(string) (template_string)] @import.source)
-          )
-          
-          (call_expression
-            function: (import)
-            arguments: (arguments (identifier) @import.dynamic)
-          )
-
-          (call_expression
-            function: (identifier) @req 
-            arguments: (arguments [(string) (template_string)] @import.source)
-            (#eq? @req "require")
-          )
-          
-          (call_expression
-            function: (identifier) @req 
-            arguments: (arguments (identifier) @import.dynamic)
-            (#eq? @req "require")
-          )
+          (call_expression function: (import) arguments: (arguments [(string) (template_string)] @import.source))
+          (call_expression function: (import) arguments: (arguments (identifier) @import.dynamic))
+          (call_expression function: (identifier) @req arguments: (arguments [(string) (template_string)] @import.source) (#eq? @req "require"))
+          (call_expression function: (identifier) @req arguments: (arguments (identifier) @import.dynamic) (#eq? @req "require"))
         ]
     "#)
     .exports(r#"
         [
-            (export_statement
-              (export_clause
-                (export_specifier
-                  name: (identifier) @export.name
-                )
-              )
-              source: (string) @export.source
-            )
-            (export_statement
-              source: (string) @export.source
-            )
+            (export_statement (export_clause (export_specifier name: (identifier) @export.name)) source: (string) @export.source)
+            (export_statement source: (string) @export.source)
         ]
     "#)
     .literals(r#"[ (string) (template_string) ] @string"#)
     .implements(r#"
         [
-          (class_declaration
-            name: (type_identifier) @impl.child
-            (class_heritage 
-                (extends_clause value: (identifier) @impl.parent)?
-                (implements_clause (type_identifier) @impl.parent)?
-            )
-          )
-          (interface_declaration
-            name: [(type_identifier) (identifier)] @impl.child
-            (extends_type_clause type: [(type_identifier) (identifier)] @impl.parent)
-          )
+          (class_declaration name: (type_identifier) @impl.child (class_heritage (extends_clause value: (identifier) @impl.parent)? (implements_clause (type_identifier) @impl.parent)?))
+          (interface_declaration name: [(type_identifier) (identifier)] @impl.child (extends_type_clause type: [(type_identifier) (identifier)] @impl.parent))
         ]
     "#)
     .config_keys(r#"
         [
-          (member_expression
-            object: (member_expression
-              object: (identifier) @obj 
-              property: (property_identifier) @prop)
-            property: (property_identifier) @config.key
-            (#eq? @obj "process")
-            (#eq? @prop "env")
-          )
-
-          (subscript_expression
-            object: (member_expression
-              object: (identifier) @obj 
-              property: (property_identifier) @prop)
-            index: (string) @config.key
-            (#eq? @obj "process")
-            (#eq? @prop "env")
-          )
-
-          (call_expression
-            function: (member_expression
-              property: (property_identifier) @method)
-            arguments: (arguments (string) @config.key)
-            (#eq? @method "get")
-          )
+          (member_expression object: (member_expression object: (identifier) @obj property: (property_identifier) @prop) property: (property_identifier) @config.key (#eq? @obj "process") (#eq? @prop "env"))
+          (subscript_expression object: (member_expression object: (identifier) @obj property: (property_identifier) @prop) index: (string) @config.key (#eq? @obj "process") (#eq? @prop "env"))
+          (call_expression function: (member_expression property: (property_identifier) @method) arguments: (arguments (string) @config.key) (#eq? @method "get"))
         ]
     "#)
     .vals(r#"
-        (variable_declarator
-            name: (identifier) @val.name
-            value: [(string) (template_string)] @val.value
-        )
+        (variable_declarator name: (identifier) @val.name value: [(string) (template_string)] @val.value)
     "#)
     .types(r#"
-        [
-            (type_identifier) @type.ref
-            (predefined_type) @type.ref
-            (extends_clause value: (identifier) @type.ref)
-            (new_expression constructor: (identifier) @type.ref)
-        ]
+        [ (type_identifier) @type.ref (predefined_type) @type.ref (extends_clause value: (identifier) @type.ref) (new_expression constructor: (identifier) @type.ref) ]
     "#)
     .decorators(r#"
-        (decorator 
-            [
-                (call_expression function: (identifier) @decorator.name)
-                (identifier) @decorator.name
-            ]
-        )
+        (decorator [ (call_expression function: (identifier) @decorator.name) (identifier) @decorator.name ])
     "#)
     .di_decorators(&["Injectable", "Component", "Directive", "Pipe", "Service"])
     .constructor_names(&["constructor"])

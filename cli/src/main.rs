@@ -1,17 +1,21 @@
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process;
-use anyhow::{Context, Result};
 
-use blast_radius_engine::query::walker::JitWalker;
 use blast_radius_engine::query::output::generate_context_output;
-use blast_radius_engine::workspace::WorkspaceManager;
+use blast_radius_engine::query::walker::JitWalker;
 use blast_radius_engine::recipes::executor::RecipeExecutor;
 use blast_radius_engine::recipes::models::Recipe;
-use nucleo_matcher::{Matcher, Config, Utf32String};
+use blast_radius_engine::workspace::WorkspaceManager;
+use nucleo_matcher::{Config, Matcher, Utf32String};
 
 #[derive(Parser, Debug)]
-#[command(name = "cblast", version, about = "Code Blast Radius - Analyze code dependencies and impact")]
+#[command(
+    name = "cblast",
+    version,
+    about = "Code Blast Radius - Analyze code dependencies and impact"
+)]
 struct Cli {
     /// Path to a folder OR a .cblast workspace file
     #[arg(short, long)]
@@ -53,7 +57,7 @@ enum Commands {
     Recipe {
         #[command(subcommand)]
         action: RecipeAction,
-    }
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -71,17 +75,17 @@ enum WorkspaceAction {
 #[derive(Subcommand, Debug)]
 enum RecipeAction {
     List,
-    Add { 
+    Add {
         #[arg(short, long)]
-        json: String 
+        json: String,
     },
-    Remove { 
-        name: String 
+    Remove {
+        name: String,
     },
     /// Execute a recipe. Outputs XML by default, or JSON if metadata is requested.
-    Run { 
+    Run {
         name: String,
-        
+
         /// If set, returns a JSON list of file metadata without full content.
         /// Useful for MCP servers to preview the context size.
         #[arg(short, long)]
@@ -114,8 +118,7 @@ fn run() -> Result<()> {
     // 1. Initialize Manager based on input path type
     let mut manager = if cli.path.is_file() {
         // Assume it's a .cblast file
-        WorkspaceManager::from_file(cli.path.clone())
-            .context("Failed to load workspace file")?
+        WorkspaceManager::from_file(cli.path.clone()).context("Failed to load workspace file")?
     } else if cli.path.is_dir() {
         // Assume Ad-Hoc directory mode
         WorkspaceManager::new_in_memory(vec![cli.path.clone()])
@@ -126,7 +129,7 @@ fn run() -> Result<()> {
 
     // 2. SYNC (Incremental Update)
     manager.sync();
-    
+
     // Auto-save index for next time (optimization)
     if manager.backing_file.is_some() {
         manager.save().context("Failed to save workspace state")?;
@@ -134,38 +137,39 @@ fn run() -> Result<()> {
 
     match &cli.command {
         // --- WORKSPACE MANAGEMENT ---
-        Commands::Workspace { action } => {
-            match action {
-                WorkspaceAction::Init { name } => {
-                    manager.config.name = name.clone();
-                    if manager.backing_file.is_some() {
-                        manager.save()?;
-                        println!("Workspace config updated.");
-                    } else {
-                        println!("Initialized in-memory workspace '{}'. Use GUI to save.", name);
-                    }
-                }
-                WorkspaceAction::Add { root } => {
-                    manager.add_root(root.clone());
-                    if manager.backing_file.is_some() {
-                        manager.save()?;
-                        println!("Added root. Total roots: {}", manager.config.roots.len());
-                    } else {
-                        println!("Added root to temporary session. Changes will be lost on exit.");
-                    }
-                }
-                WorkspaceAction::Remove { root } => {
-                    manager.remove_root(root.clone());
-                    if manager.backing_file.is_some() {
-                        manager.save()?;
-                    }
-                    println!("Removed root.");
-                }
-                WorkspaceAction::Sync => {
-                    println!("Workspace synced successfully.");
+        Commands::Workspace { action } => match action {
+            WorkspaceAction::Init { name } => {
+                manager.config.name = name.clone();
+                if manager.backing_file.is_some() {
+                    manager.save()?;
+                    println!("Workspace config updated.");
+                } else {
+                    println!(
+                        "Initialized in-memory workspace '{}'. Use GUI to save.",
+                        name
+                    );
                 }
             }
-        }
+            WorkspaceAction::Add { root } => {
+                manager.add_root(root.clone());
+                if manager.backing_file.is_some() {
+                    manager.save()?;
+                    println!("Added root. Total roots: {}", manager.config.roots.len());
+                } else {
+                    println!("Added root to temporary session. Changes will be lost on exit.");
+                }
+            }
+            WorkspaceAction::Remove { root } => {
+                manager.remove_root(root.clone());
+                if manager.backing_file.is_some() {
+                    manager.save()?;
+                }
+                println!("Removed root.");
+            }
+            WorkspaceAction::Sync => {
+                println!("Workspace synced successfully.");
+            }
+        },
 
         // --- RECIPE MANAGEMENT ---
         Commands::Recipe { action } => {
@@ -175,8 +179,8 @@ fn run() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&names)?);
                 }
                 RecipeAction::Add { json } => {
-                    let recipe: Recipe = serde_json::from_str(json)
-                        .context("Invalid recipe JSON")?;
+                    let recipe: Recipe =
+                        serde_json::from_str(json).context("Invalid recipe JSON")?;
                     let name = recipe.name.clone();
                     manager.config.recipes.insert(name.clone(), recipe);
                     if manager.backing_file.is_some() {
@@ -198,11 +202,14 @@ fn run() -> Result<()> {
                     }
                 }
                 RecipeAction::Run { name, metadata } => {
-                    let recipe = manager.config.recipes.get(name)
+                    let recipe = manager
+                        .config
+                        .recipes
+                        .get(name)
                         .ok_or_else(|| anyhow::anyhow!("Recipe '{}' not found", name))?;
                     // map manager.index instead of manager.indexer
                     let executor = RecipeExecutor::new(&manager.index, manager.get_root_map());
-                    
+
                     if *metadata {
                         // MCP Mode: Return JSON list of files (no heavy content)
                         let output = executor.execute_metadata(recipe)?;
@@ -217,12 +224,18 @@ fn run() -> Result<()> {
         }
 
         // --- QUERY: RADIUS ---
-        Commands::Radius { symbol, no_tests, depth } => {
+        Commands::Radius {
+            symbol,
+            no_tests,
+            depth,
+        } => {
             let index = &manager.index;
-            
+
             // Step A: Check if input is a File Path
             // FIX: Using as_str() to satisfy ends_with trait bound
-            let matching_file_id = index.files.values()
+            let matching_file_id = index
+                .files
+                .values()
                 .find(|f| f.path.ends_with(symbol.as_str()) || f.path == *symbol)
                 .map(|f| f.id);
 
@@ -242,12 +255,14 @@ fn run() -> Result<()> {
             let d = depth.unwrap_or(5);
 
             let mut related_ids = std::collections::HashSet::new();
-            for &id in &start_ids { related_ids.insert(id); }
+            for &id in &start_ids {
+                related_ids.insert(id);
+            }
             let deps = walker.walk_dependencies(&start_ids, d);
             related_ids.extend(deps);
             let impacted = walker.walk_impact(&start_ids, d);
             related_ids.extend(impacted);
-            
+
             let final_ids: Vec<u32> = related_ids.into_iter().collect();
             // -------------------------------
 
@@ -264,10 +279,12 @@ fn run() -> Result<()> {
             }
 
             // Radius command always uses full content output
-            let id_map: std::collections::HashMap<u32, String> = index.files.values()
+            let id_map: std::collections::HashMap<u32, String> = index
+                .files
+                .values()
                 .map(|f| (f.id, f.path.clone()))
                 .collect();
-                
+
             // Pass final_filtered_ids instead of related_ids
             let output = generate_context_output(index, &final_filtered_ids, &id_map);
             println!("{}", serde_json::to_string_pretty(&output)?);
@@ -281,9 +298,14 @@ fn run() -> Result<()> {
             let query_utf32 = Utf32String::from(query.as_str());
 
             for (name, ids) in &index.symbol_map {
-                 if let Some(score) = matcher.fuzzy_match(Utf32String::from(name.as_str()).slice(..), query_utf32.slice(..)) {
+                if let Some(score) = matcher.fuzzy_match(
+                    Utf32String::from(name.as_str()).slice(..),
+                    query_utf32.slice(..),
+                ) {
                     // For display, just pick the first file defining it
-                    let file_path = ids.first().and_then(|id| index.files.get(id))
+                    let file_path = ids
+                        .first()
+                        .and_then(|id| index.files.get(id))
                         .map(|f| f.path.as_str())
                         .unwrap_or("unknown");
 
@@ -293,11 +315,14 @@ fn run() -> Result<()> {
                         path: file_path.to_string(),
                         score,
                     });
-                 }
+                }
             }
 
             for file in index.files.values() {
-                if let Some(score) = matcher.fuzzy_match(Utf32String::from(file.path.as_str()).slice(..), query_utf32.slice(..)) {
+                if let Some(score) = matcher.fuzzy_match(
+                    Utf32String::from(file.path.as_str()).slice(..),
+                    query_utf32.slice(..),
+                ) {
                     results.push(MatchResult {
                         name: file.path.clone(),
                         kind: "File".to_string(),

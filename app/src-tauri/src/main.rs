@@ -1,18 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::collections::HashMap;
-use std::path::{ PathBuf };
+use std::path::PathBuf;
+use tauri::{Emitter, Manager};
 use tokio::sync::RwLock;
-use tauri::{ Manager, Emitter };
 // File Watching
-use notify::{ RecommendedWatcher, RecursiveMode, Watcher, Event, EventKind };
+use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::sync::Mutex;
 
 // Engine Imports
-use blast_radius_engine::workspace::WorkspaceManager;
-use blast_radius_engine::recipes::executor::RecipeExecutor;
-use blast_radius_engine::recipes::models::{ Recipe, RecipeOperation };
 use blast_radius_engine::models::FileId; // u32
-use nucleo_matcher::{ Matcher, Config, Utf32String };
+use blast_radius_engine::recipes::executor::RecipeExecutor;
+use blast_radius_engine::recipes::models::{Recipe, RecipeOperation};
+use blast_radius_engine::workspace::WorkspaceManager;
+use nucleo_matcher::{Config, Matcher, Utf32String};
 
 // Local Modules
 mod settings;
@@ -39,7 +39,7 @@ struct SearchResult {
 struct ResolvedPathDTO {
     original: String,
     // If successfully resolved to an indexed file:
-    relative_path: Option<String>, 
+    relative_path: Option<String>,
     root_id: Option<String>,
     // If not found in index, is it at least inside a root?
     is_indexed: bool,
@@ -77,12 +77,16 @@ fn map_to_dto(manager: &WorkspaceManager) -> WorkspaceConfigDTO {
         "ad-hoc".to_string()
     };
 
-    let roots = manager.config.roots
+    let roots = manager
+        .config
+        .roots
         .iter()
         .map(|r| {
             let path_str = r.path.to_string_lossy().to_string();
             // Simple heuristic for a name: last component of the path
-            let name = r.path.file_name()
+            let name = r
+                .path
+                .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| path_str.clone());
 
@@ -105,30 +109,28 @@ fn setup_watcher(app: &tauri::AppHandle, roots: Vec<PathBuf>) -> Option<Recommen
     let app_handle = app.clone();
     let last_emit = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
 
-    let event_handler = move |res: notify::Result<Event>| {
-        match res {
-            Ok(event) => {
-                if let EventKind::Access(_) = event.kind {
-                    return;
-                }
+    let event_handler = move |res: notify::Result<Event>| match res {
+        Ok(event) => {
+            if let EventKind::Access(_) = event.kind {
+                return;
+            }
 
-                let is_relevant = event.paths.iter().any(|p| {
-                    let path_str = p.to_string_lossy();
-                    !path_str.contains(".cblast") &&
-                        !path_str.contains(".git") &&
-                        !path_str.contains("node_modules")
-                });
+            let is_relevant = event.paths.iter().any(|p| {
+                let path_str = p.to_string_lossy();
+                !path_str.contains(".cblast")
+                    && !path_str.contains(".git")
+                    && !path_str.contains("node_modules")
+            });
 
-                if is_relevant {
-                    let mut last = last_emit.lock().unwrap();
-                    if last.elapsed().as_millis() > 500 {
-                         let _ = app_handle.emit("workspace:dirty", ());
-                         *last = std::time::Instant::now();
-                    }
+            if is_relevant {
+                let mut last = last_emit.lock().unwrap();
+                if last.elapsed().as_millis() > 500 {
+                    let _ = app_handle.emit("workspace:dirty", ());
+                    *last = std::time::Instant::now();
                 }
             }
-            Err(e) => eprintln!("Watch error: {:?}", e),
         }
+        Err(e) => eprintln!("Watch error: {:?}", e),
     };
 
     let mut watcher = notify::recommended_watcher(event_handler).ok()?;
@@ -156,7 +158,8 @@ fn normalize_recipe(manager: &WorkspaceManager, mut recipe: Recipe) -> Recipe {
                 if path_buf.is_absolute() {
                     // Only try to resolve if the file actually exists on disk
                     if path_buf.exists() {
-                        let canonical = std::fs::canonicalize(&path_buf).unwrap_or(path_buf.clone());
+                        let canonical =
+                            std::fs::canonicalize(&path_buf).unwrap_or(path_buf.clone());
 
                         // Try to find which root contains this path
                         for root in &manager.config.roots {
@@ -169,12 +172,12 @@ fn normalize_recipe(manager: &WorkspaceManager, mut recipe: Recipe) -> Recipe {
                             }
                         }
                     }
-                } 
+                }
                 // Case 2: Handle Relative Paths (e.g. typed manually)
                 else {
-                    // Do NOT check path_buf.exists() here, as that relies on the process CWD 
+                    // Do NOT check path_buf.exists() here, as that relies on the process CWD
                     // (Current Working Directory), which is unpredictable in a GUI app.
-                    
+
                     // Skip glob patterns, we can't resolve existence for them
                     if pattern.contains('*') || pattern.contains('?') {
                         continue;
@@ -201,7 +204,7 @@ fn normalize_recipe(manager: &WorkspaceManager, mut recipe: Recipe) -> Recipe {
 
 #[tauri::command]
 async fn get_global_settings(
-    state: tauri::State<'_, SettingsState>
+    state: tauri::State<'_, SettingsState>,
 ) -> Result<AppSettingsDTO, String> {
     let settings = state.settings.lock().unwrap();
     Ok(AppSettingsDTO {
@@ -221,7 +224,7 @@ async fn set_workspace(
     path: String,
     state: tauri::State<'_, AppState>,
     settings_state: tauri::State<'_, SettingsState>,
-    app_handle: tauri::AppHandle
+    app_handle: tauri::AppHandle,
 ) -> Result<WorkspaceConfigDTO, String> {
     let target_path = PathBuf::from(&path);
 
@@ -242,7 +245,9 @@ async fn set_workspace(
 
     let dto = map_to_dto(&manager);
     // extract paths from RootConfig for watcher
-    let roots = manager.config.roots
+    let roots = manager
+        .config
+        .roots
         .iter()
         .map(|r| r.path.clone())
         .collect();
@@ -260,13 +265,15 @@ async fn set_workspace(
 async fn save_current_workspace(
     path: String,
     state: tauri::State<'_, AppState>,
-    settings_state: tauri::State<'_, SettingsState>
+    settings_state: tauri::State<'_, SettingsState>,
 ) -> Result<WorkspaceConfigDTO, String> {
     let mut guard = state.manager.write().await;
     let manager = guard.as_mut().ok_or("No active workspace")?;
 
     let target_path = PathBuf::from(&path);
-    manager.save_as(target_path.clone()).map_err(|e| e.to_string())?;
+    manager
+        .save_as(target_path.clone())
+        .map_err(|e| e.to_string())?;
 
     settings_state.update_recent(path);
 
@@ -277,7 +284,7 @@ async fn save_current_workspace(
 async fn add_root_to_workspace(
     root_path: String,
     state: tauri::State<'_, AppState>,
-    app_handle: tauri::AppHandle
+    app_handle: tauri::AppHandle,
 ) -> Result<WorkspaceConfigDTO, String> {
     let mut guard = state.manager.write().await;
     let manager = guard.as_mut().ok_or("No active workspace")?;
@@ -294,7 +301,9 @@ async fn add_root_to_workspace(
     }
 
     let dto = map_to_dto(manager);
-    let roots = manager.config.roots
+    let roots = manager
+        .config
+        .roots
         .iter()
         .map(|r| r.path.clone())
         .collect();
@@ -309,7 +318,7 @@ async fn add_root_to_workspace(
 async fn remove_root_from_workspace(
     root_path: String,
     state: tauri::State<'_, AppState>,
-    app_handle: tauri::AppHandle
+    app_handle: tauri::AppHandle,
 ) -> Result<WorkspaceConfigDTO, String> {
     let mut guard = state.manager.write().await;
     let manager = guard.as_mut().ok_or("No active workspace")?;
@@ -322,7 +331,9 @@ async fn remove_root_from_workspace(
     }
 
     let dto = map_to_dto(manager);
-    let roots = manager.config.roots
+    let roots = manager
+        .config
+        .roots
         .iter()
         .map(|r| r.path.clone())
         .collect();
@@ -350,7 +361,7 @@ async fn refresh_workspace(state: tauri::State<'_, AppState>) -> Result<(), Stri
 #[tauri::command]
 async fn search_symbols(
     query: String,
-    state: tauri::State<'_, AppState>
+    state: tauri::State<'_, AppState>,
 ) -> Result<Vec<SearchResult>, String> {
     let guard = state.manager.read().await;
     let manager = guard.as_ref().ok_or("Workspace not loaded")?;
@@ -363,23 +374,23 @@ async fn search_symbols(
     // 1. Search Symbols
     // index.symbol_map is HashMap<String, Vec<FileId>>
     for (name, ids) in &index.symbol_map {
-        if
-            let Some(score) = matcher.fuzzy_match(
-                Utf32String::from(name.as_str()).slice(..),
-                query_utf32.slice(..)
-            )
-        {
+        if let Some(score) = matcher.fuzzy_match(
+            Utf32String::from(name.as_str()).slice(..),
+            query_utf32.slice(..),
+        ) {
             // Find Relative Path and Kind
             // Just use the first file occurrence
             if let Some(&file_id) = ids.first() {
                 if let Some(file_node) = index.files.get(&file_id) {
-                     // Look for definition to get kind
-                     let kind = file_node.defs.iter()
+                    // Look for definition to get kind
+                    let kind = file_node
+                        .defs
+                        .iter()
                         .find(|d| d.name == *name)
                         .map(|d| format!("{:?}", d.kind))
                         .unwrap_or_else(|| "Unknown".to_string());
 
-                     results.push(SearchResult {
+                    results.push(SearchResult {
                         name: name.clone(),
                         kind,
                         path: file_node.path.clone(),
@@ -394,12 +405,10 @@ async fn search_symbols(
     for file in index.files.values() {
         let display_name = file.path.clone();
 
-        if
-            let Some(score) = matcher.fuzzy_match(
-                Utf32String::from(display_name.as_str()).slice(..),
-                query_utf32.slice(..)
-            )
-        {
+        if let Some(score) = matcher.fuzzy_match(
+            Utf32String::from(display_name.as_str()).slice(..),
+            query_utf32.slice(..),
+        ) {
             results.push(SearchResult {
                 name: display_name.clone(),
                 kind: "File".to_string(),
@@ -415,21 +424,23 @@ async fn search_symbols(
 }
 
 fn get_root_map(manager: &WorkspaceManager) -> HashMap<String, String> {
-    manager.config.roots.iter().map(|r| {
-        (r.id.clone(), r.path.to_string_lossy().to_string())
-    }).collect()
+    manager
+        .config
+        .roots
+        .iter()
+        .map(|r| (r.id.clone(), r.path.to_string_lossy().to_string()))
+        .collect()
 }
 
 #[tauri::command]
 async fn execute_recipe(
     recipe_json: serde_json::Value,
-    state: tauri::State<'_, AppState>
+    state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
     let guard = state.manager.read().await;
     let manager = guard.as_ref().ok_or("Workspace not loaded")?;
-    let mut recipe: Recipe = serde_json
-        ::from_value(recipe_json)
-        .map_err(|e| format!("Invalid recipe format: {}", e))?;
+    let mut recipe: Recipe =
+        serde_json::from_value(recipe_json).map_err(|e| format!("Invalid recipe format: {}", e))?;
 
     // Normalize paths (Abs -> Rel)
     recipe = normalize_recipe(manager, recipe);
@@ -449,13 +460,12 @@ async fn execute_recipe(
 async fn get_file_content(
     file_id: FileId,
     recipe_json: serde_json::Value,
-    state: tauri::State<'_, AppState>
+    state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
     let guard = state.manager.read().await;
     let manager = guard.as_ref().ok_or("Workspace not loaded")?;
-    let mut recipe: Recipe = serde_json
-        ::from_value(recipe_json)
-        .map_err(|e| format!("Invalid recipe format: {}", e))?;
+    let mut recipe: Recipe =
+        serde_json::from_value(recipe_json).map_err(|e| format!("Invalid recipe format: {}", e))?;
 
     recipe = normalize_recipe(manager, recipe);
     let root_map = get_root_map(manager);
@@ -471,20 +481,21 @@ async fn get_file_content(
 #[tauri::command]
 async fn generate_xml_bundle(
     recipe_json: serde_json::Value,
-    state: tauri::State<'_, AppState>
+    state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
     let guard = state.manager.read().await;
     let manager = guard.as_ref().ok_or("Workspace not loaded")?;
-    let mut recipe: Recipe = serde_json
-        ::from_value(recipe_json)
-        .map_err(|e| format!("Invalid recipe format: {}", e))?;
+    let mut recipe: Recipe =
+        serde_json::from_value(recipe_json).map_err(|e| format!("Invalid recipe format: {}", e))?;
 
     recipe = normalize_recipe(manager, recipe);
     let root_map = get_root_map(manager);
     let executor = RecipeExecutor::new(&manager.index, root_map);
 
     // Full content execution
-    let output = executor.execute_full(&recipe).map_err(|e| format!("Execution failed: {}", e))?;
+    let output = executor
+        .execute_full(&recipe)
+        .map_err(|e| format!("Execution failed: {}", e))?;
 
     Ok(output.to_xml())
 }
@@ -500,13 +511,12 @@ async fn get_saved_recipes(state: tauri::State<'_, AppState>) -> Result<Vec<Reci
 #[tauri::command]
 async fn save_named_recipe(
     recipe_json: serde_json::Value,
-    state: tauri::State<'_, AppState>
+    state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let mut guard = state.manager.write().await;
     let manager = guard.as_mut().ok_or("No active workspace")?;
-    let mut recipe: Recipe = serde_json
-        ::from_value(recipe_json)
-        .map_err(|e| format!("Invalid recipe format: {}", e))?;
+    let mut recipe: Recipe =
+        serde_json::from_value(recipe_json).map_err(|e| format!("Invalid recipe format: {}", e))?;
 
     // Normalize before saving so the saved recipe is portable
     recipe = normalize_recipe(manager, recipe);
@@ -524,7 +534,7 @@ async fn save_named_recipe(
 #[tauri::command]
 async fn delete_named_recipe(
     name: String,
-    state: tauri::State<'_, AppState>
+    state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let mut guard = state.manager.write().await;
     let manager = guard.as_mut().ok_or("No active workspace")?;
@@ -540,7 +550,7 @@ async fn delete_named_recipe(
 #[tauri::command]
 async fn resolve_paths(
     paths: Vec<String>,
-    state: tauri::State<'_, AppState>
+    state: tauri::State<'_, AppState>,
 ) -> Result<Vec<ResolvedPathDTO>, String> {
     let guard = state.manager.read().await;
     let manager = guard.as_ref().ok_or("Workspace not loaded")?;
@@ -560,36 +570,36 @@ async fn resolve_paths(
         // 1. Manually match against Roots to get Relative Path
         // Because index.path_map only stores relative segments
         let mut found_match = false;
-        
+
         for root in &manager.config.roots {
             if lookup_path.starts_with(&root.path) {
                 if let Ok(rel) = lookup_path.strip_prefix(&root.path) {
                     let rel_str = rel.to_string_lossy().replace('\\', "/");
-                    
+
                     // Now check if this relative path exists in our index
                     // We can check path_map for the exact relative path string
                     if let Some(ids) = index.path_map.get(&rel_str) {
-                         // Double check against file nodes to be sure we have the exact file
-                         if let Some(&file_id) = ids.iter().find(|&&id| {
-                             if let Some(f) = index.files.get(&id) {
-                                 return f.path == rel_str;
-                             }
-                             false
-                         }) {
-                             // SUCCESS
-                             if let Some(file_node) = index.files.get(&file_id) {
-                                 results.push(ResolvedPathDTO {
+                        // Double check against file nodes to be sure we have the exact file
+                        if let Some(&file_id) = ids.iter().find(|&&id| {
+                            if let Some(f) = index.files.get(&id) {
+                                return f.path == rel_str;
+                            }
+                            false
+                        }) {
+                            // SUCCESS
+                            if let Some(file_node) = index.files.get(&file_id) {
+                                results.push(ResolvedPathDTO {
                                     original: path_str.clone(),
                                     relative_path: Some(file_node.path.clone()),
                                     root_id: Some(file_node.root_id.clone()),
                                     is_indexed: true,
-                                 });
-                                 found_match = true;
-                                 break;
-                             }
-                         }
+                                });
+                                found_match = true;
+                                break;
+                            }
+                        }
                     }
-                    
+
                     // If not found in index, but it is inside a root (e.g. valid file but ignored/new)
                     if !found_match {
                         results.push(ResolvedPathDTO {
@@ -597,9 +607,9 @@ async fn resolve_paths(
                             relative_path: Some(rel_str),
                             root_id: Some(root.id.clone()),
                             is_indexed: false,
-                         });
-                         found_match = true;
-                         break;
+                        });
+                        found_match = true;
+                        break;
                     }
                 }
             }
@@ -621,8 +631,7 @@ async fn resolve_paths(
 
 // --- Entry Point ---
 fn main() {
-    tauri::Builder
-        ::default()
+    tauri::Builder::default()
         .setup(|app| {
             let settings_state = SettingsState::new(app.handle());
             app.manage(settings_state);
@@ -637,25 +646,23 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .invoke_handler(
-            tauri::generate_handler![
-                set_workspace,
-                add_root_to_workspace,
-                remove_root_from_workspace,
-                save_current_workspace,
-                search_symbols,
-                refresh_workspace,
-                get_global_settings,
-                clear_recent_history,
-                get_saved_recipes,
-                save_named_recipe,
-                delete_named_recipe,
-                execute_recipe,
-                get_file_content,
-                generate_xml_bundle,
-                resolve_paths,
-            ]
-        )
+        .invoke_handler(tauri::generate_handler![
+            set_workspace,
+            add_root_to_workspace,
+            remove_root_from_workspace,
+            save_current_workspace,
+            search_symbols,
+            refresh_workspace,
+            get_global_settings,
+            clear_recent_history,
+            get_saved_recipes,
+            save_named_recipe,
+            delete_named_recipe,
+            execute_recipe,
+            get_file_content,
+            generate_xml_bundle,
+            resolve_paths,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

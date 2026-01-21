@@ -1,5 +1,5 @@
 use blast_radius_engine::analysis::language::{
-    get_config_by_language, ALL_LANGUAGES, SupportedLanguage
+    get_config_by_language, SupportedLanguage, ALL_LANGUAGES,
 };
 
 #[test]
@@ -16,7 +16,7 @@ fn test_core_queries_compile() {
         };
 
         let name = format!("{:?}", lang);
-        
+
         // 1. Definitions Query
         if config.queries.definitions.is_none() {
             failures.push(format!("[{}] Definitions query failed to compile", name));
@@ -29,18 +29,18 @@ fn test_core_queries_compile() {
 
         // 3. Imports Query
         let expects_imports = match lang {
-            SupportedLanguage::Json | 
-            SupportedLanguage::Yaml | 
-            SupportedLanguage::Toml | 
-            SupportedLanguage::Sql | 
-            SupportedLanguage::Dotenv |
-            SupportedLanguage::Prisma |
-            SupportedLanguage::Hcl => false,
+            SupportedLanguage::Json
+            | SupportedLanguage::Yaml
+            | SupportedLanguage::Toml
+            | SupportedLanguage::Sql
+            | SupportedLanguage::Dotenv
+            | SupportedLanguage::Prisma
+            | SupportedLanguage::Hcl => false,
             _ => true,
         };
 
         if expects_imports && config.queries.imports.is_none() {
-             failures.push(format!("[{}] Imports query failed to compile", name));
+            failures.push(format!("[{}] Imports query failed to compile", name));
         }
     }
 

@@ -1,5 +1,5 @@
 use blast_radius_engine::analysis::extract_boundary;
-use blast_radius_engine::analysis::language::{ get_config_by_language, SupportedLanguage };
+use blast_radius_engine::analysis::language::{get_config_by_language, SupportedLanguage};
 struct TestCase {
     lang: SupportedLanguage,
     name: &'static str,
@@ -25,8 +25,8 @@ fn test_body_capture_across_languages() {
             lang: SupportedLanguage::Rust,
             name: "Rust Impl",
             code: "impl Foo { fn bar() {} }",
-            symbol_name: "anonymous", 
-            expected_body_start: Some("{"), 
+            symbol_name: "anonymous",
+            expected_body_start: Some("{"),
         },
         // --- TYPESCRIPT ---
         TestCase {
@@ -64,7 +64,6 @@ fn test_body_capture_across_languages() {
             symbol_name: "useStore",
             expected_body_start: Some("((set) => ({ bears: 0 }))"), // Captures arguments
         },
-
         // --- JAVASCRIPT ---
         TestCase {
             lang: SupportedLanguage::JavaScript,
@@ -80,14 +79,13 @@ fn test_body_capture_across_languages() {
             symbol_name: "App",
             expected_body_start: Some("{"),
         },
-
         // --- PYTHON ---
         TestCase {
             lang: SupportedLanguage::Python,
             name: "Python Function",
             code: "def foo():\n    pass",
             symbol_name: "foo",
-            expected_body_start: Some("pass"), 
+            expected_body_start: Some("pass"),
         },
         TestCase {
             lang: SupportedLanguage::Python,
@@ -96,7 +94,6 @@ fn test_body_capture_across_languages() {
             symbol_name: "User",
             expected_body_start: Some("def __init__"),
         },
-
         // --- GO ---
         TestCase {
             lang: SupportedLanguage::Go,
@@ -112,7 +109,6 @@ fn test_body_capture_across_languages() {
             symbol_name: "User",
             expected_body_start: Some("{"),
         },
-
         // --- JAVA ---
         TestCase {
             lang: SupportedLanguage::Java,
@@ -128,7 +124,6 @@ fn test_body_capture_across_languages() {
             symbol_name: "foo",
             expected_body_start: Some("{"),
         },
-
         // --- C ---
         TestCase {
             lang: SupportedLanguage::C,
@@ -144,7 +139,6 @@ fn test_body_capture_across_languages() {
             symbol_name: "Point",
             expected_body_start: Some("{"),
         },
-
         // --- C++ ---
         TestCase {
             lang: SupportedLanguage::Cpp,
@@ -153,7 +147,6 @@ fn test_body_capture_across_languages() {
             symbol_name: "MyClass",
             expected_body_start: Some("{"),
         },
-
         // --- PHP ---
         TestCase {
             lang: SupportedLanguage::Php,
@@ -162,31 +155,28 @@ fn test_body_capture_across_languages() {
             symbol_name: "foo",
             expected_body_start: Some("{"),
         },
-
         // --- RUBY ---
         TestCase {
             lang: SupportedLanguage::Ruby,
             name: "Ruby Method",
             code: "def foo\n  puts 'hi'\nend",
             symbol_name: "foo",
-            // In Ruby tree-sitter, the body node for 'method' is often the list of statements 
-            // inside, or sometimes null if empty. 
+            // In Ruby tree-sitter, the body node for 'method' is often the list of statements
+            // inside, or sometimes null if empty.
             // Note: Ruby definition usually covers the whole 'def...end'.
-            // The logic we added captures `(_)?` as body. 
+            // The logic we added captures `(_)?` as body.
             // It might capture the first statement.
-            expected_body_start: Some("puts"), 
+            expected_body_start: Some("puts"),
         },
-
         // --- HCL (Terraform) ---
         TestCase {
             lang: SupportedLanguage::Hcl,
             name: "Terraform Resource",
             code: "resource \"aws_s3_bucket\" \"b\" { bucket = \"my-bucket\" }",
-            symbol_name: "b", 
+            symbol_name: "b",
             // The parser captures the content inside the braces for HCL
             expected_body_start: Some("bucket"),
         },
-
         // --- PRISMA ---
         TestCase {
             lang: SupportedLanguage::Prisma,
@@ -195,7 +185,6 @@ fn test_body_capture_across_languages() {
             symbol_name: "User",
             expected_body_start: Some("{"),
         },
-
         // --- SQL ---
         TestCase {
             lang: SupportedLanguage::Sql,
@@ -204,7 +193,6 @@ fn test_body_capture_across_languages() {
             symbol_name: "users",
             expected_body_start: Some("("), // Column defs start with (
         },
-
         // --- DOTENV ---
         TestCase {
             lang: SupportedLanguage::Dotenv,
@@ -213,7 +201,6 @@ fn test_body_capture_across_languages() {
             symbol_name: "API_KEY",
             expected_body_start: Some("12345"),
         },
-        
         // --- JSON ---
         TestCase {
             lang: SupportedLanguage::Json,
@@ -222,7 +209,6 @@ fn test_body_capture_across_languages() {
             symbol_name: "myKey",
             expected_body_start: Some("{"),
         },
-
         // --- TOML ---
         TestCase {
             lang: SupportedLanguage::Toml,
@@ -231,7 +217,6 @@ fn test_body_capture_across_languages() {
             symbol_name: "key",
             expected_body_start: Some("\"value\""),
         },
-        
         // --- YAML ---
         TestCase {
             lang: SupportedLanguage::Yaml,
@@ -253,7 +238,7 @@ fn test_body_capture_across_languages() {
         // --- Call extract_boundary with a dummy hash ---
         // We provide a dummy 32-byte hash since we aren't testing caching here.
         let result = extract_boundary("test", case.code, config, [0u8; 32]);
-        
+
         if let Err(e) = result {
             failures.push(format!("[{}] Analysis failed: {}", case.name, e));
             continue;
@@ -265,7 +250,10 @@ fn test_body_capture_across_languages() {
         let symbol = boundary.defs.iter().find(|d| d.name == case.symbol_name);
 
         if symbol.is_none() {
-            failures.push(format!("[{}] Symbol '{}' not found", case.name, case.symbol_name));
+            failures.push(format!(
+                "[{}] Symbol '{}' not found",
+                case.name, case.symbol_name
+            ));
             // Debug print found symbols
             let found_names: Vec<_> = boundary.defs.iter().map(|d| d.name.clone()).collect();
             println!("   > Found: {:?}", found_names);
@@ -276,7 +264,10 @@ fn test_body_capture_across_languages() {
 
         // --- Update Range Accessors ---
         if sym.range.0 >= sym.range.1 {
-            failures.push(format!("[{}] Invalid range: {}..{}", case.name, sym.range.0, sym.range.1));
+            failures.push(format!(
+                "[{}] Invalid range: {}..{}",
+                case.name, sym.range.0, sym.range.1
+            ));
         }
 
         // --- Update Body Start Accessor ---
@@ -287,28 +278,33 @@ fn test_body_capture_across_languages() {
             (Some(actual_idx), Some(expected_str)) => {
                 // Check bounds using sym.range.0 / sym.range.1
                 if actual_idx < sym.range.0 || actual_idx >= sym.range.1 {
-                     failures.push(format!("[{}] body_start {} is outside range {}..{}", 
-                        case.name, actual_idx, sym.range.0, sym.range.1));
+                    failures.push(format!(
+                        "[{}] body_start {} is outside range {}..{}",
+                        case.name, actual_idx, sym.range.0, sym.range.1
+                    ));
                 } else {
                     // Check content
                     if actual_idx >= case.code.len() {
-                        failures.push(format!("[{}] body_start {} is out of bounds of source code", case.name, actual_idx));
+                        failures.push(format!(
+                            "[{}] body_start {} is out of bounds of source code",
+                            case.name, actual_idx
+                        ));
                         continue;
                     }
-                    
+
                     let actual_slice = &case.code[actual_idx..];
                     if !actual_slice.trim().starts_with(expected_str) {
-                         failures.push(format!("[{}] body content mismatch.\n   Expected start: '{}'\n   Actual start:   '{}...'", 
+                        failures.push(format!("[{}] body content mismatch.\n   Expected start: '{}'\n   Actual start:   '{}...'", 
                             case.name, expected_str, &actual_slice.chars().take(20).collect::<String>()));
                     }
                 }
-            },
+            }
             (None, Some(_)) => {
                 failures.push(format!("[{}] Expected body_start, but got None", case.name));
-            },
+            }
             (Some(_), None) => {
                 failures.push(format!("[{}] Expected None, but got Some", case.name));
-            },
+            }
             (None, None) => {
                 // OK
             }

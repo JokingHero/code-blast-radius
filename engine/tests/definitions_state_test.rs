@@ -1,5 +1,5 @@
 use blast_radius_engine::analysis::boundary::extract_boundary;
-use blast_radius_engine::analysis::language::{ get_config_by_language, SupportedLanguage };
+use blast_radius_engine::analysis::language::{get_config_by_language, SupportedLanguage};
 use blast_radius_engine::models::SymbolKind;
 
 struct DefTestCase {
@@ -45,13 +45,12 @@ fn test_comprehensive_definitions_extraction() {
             "#,
             expected: vec![
                 ("my_macro", SymbolKind::Function), // Macros often treat as Function or Macro
-                ("KEY", SymbolKind::Function), // Thread locals captured as defs
+                ("KEY", SymbolKind::Function),      // Thread locals captured as defs
                 ("CACHE", SymbolKind::Function),
                 ("GetUsers", SymbolKind::Function), // Heuristic capture
             ],
             should_not_contain: vec![],
         },
-
         // ========================================================
         // TYPESCRIPT / JAVASCRIPT
         // ========================================================
@@ -70,7 +69,7 @@ fn test_comprehensive_definitions_extraction() {
                 ("find", SymbolKind::Function),
                 ("IUser", SymbolKind::Interface),
                 // "type" alias usually maps to Class or Unknown in current heuristics
-                ("UserID", SymbolKind::Class), 
+                ("UserID", SymbolKind::Class),
             ],
             should_not_contain: vec![],
         },
@@ -85,15 +84,14 @@ fn test_comprehensive_definitions_extraction() {
                 const Title = styled.h1`color: red`;
             "#,
             expected: vec![
-                ("sum", SymbolKind::Function),       // Variable with arrow fn
-                ("logger", SymbolKind::Function),    // Variable with fn expr
-                ("useStore", SymbolKind::Function),  // Factory pattern
-                ("User", SymbolKind::Function),      // Mongoose pattern
-                ("Title", SymbolKind::Function),     // Styled components pattern
+                ("sum", SymbolKind::Function),      // Variable with arrow fn
+                ("logger", SymbolKind::Function),   // Variable with fn expr
+                ("useStore", SymbolKind::Function), // Factory pattern
+                ("User", SymbolKind::Function),     // Mongoose pattern
+                ("Title", SymbolKind::Function),    // Styled components pattern
             ],
             should_not_contain: vec![],
         },
-
         // ========================================================
         // PYTHON
         // ========================================================
@@ -114,7 +112,6 @@ fn test_comprehensive_definitions_extraction() {
             ],
             should_not_contain: vec![],
         },
-
         // ========================================================
         // JAVA & C#
         // ========================================================
@@ -154,7 +151,6 @@ fn test_comprehensive_definitions_extraction() {
             ],
             should_not_contain: vec![],
         },
-
         // ========================================================
         // GO
         // ========================================================
@@ -173,7 +169,6 @@ fn test_comprehensive_definitions_extraction() {
             ],
             should_not_contain: vec![],
         },
-
         // ========================================================
         // RUBY & PHP
         // ========================================================
@@ -213,7 +208,6 @@ fn test_comprehensive_definitions_extraction() {
             ],
             should_not_contain: vec![],
         },
-
         // ========================================================
         // C & C++
         // ========================================================
@@ -235,7 +229,6 @@ fn test_comprehensive_definitions_extraction() {
             ],
             should_not_contain: vec![],
         },
-        
         // ========================================================
         // CONFIG & INFRASTRUCTURE (HCL, SQL, PRISMA, BASH)
         // ========================================================
@@ -261,10 +254,7 @@ fn test_comprehensive_definitions_extraction() {
                 CREATE TABLE users (id int);
                 create table orders (id int);
             "#,
-            expected: vec![
-                ("users", SymbolKind::Class),
-                ("orders", SymbolKind::Class),
-            ],
+            expected: vec![("users", SymbolKind::Class), ("orders", SymbolKind::Class)],
             should_not_contain: vec![],
         },
         DefTestCase {
@@ -275,9 +265,7 @@ fn test_comprehensive_definitions_extraction() {
                     id Int @id
                 }
             "#,
-            expected: vec![
-                ("User", SymbolKind::Class),
-            ],
+            expected: vec![("User", SymbolKind::Class)],
             should_not_contain: vec![],
         },
         DefTestCase {
@@ -293,11 +281,10 @@ fn test_comprehensive_definitions_extraction() {
             ],
             should_not_contain: vec![],
         },
-        
         // ========================================================
         // DATA LANGUAGES (JSON, YAML, TOML)
         // ========================================================
-        // Note: Data languages often map SymbolKind to Unknown because 
+        // Note: Data languages often map SymbolKind to Unknown because
         // the node kinds (pair, entry) don't match Class/Function heuristics.
         DefTestCase {
             lang: SupportedLanguage::Json,
@@ -324,7 +311,6 @@ fn test_comprehensive_definitions_extraction() {
             ],
             should_not_contain: vec![],
         },
-        
         // ========================================================
         // SCIENTIFIC (R, JULIA)
         // ========================================================
@@ -334,9 +320,7 @@ fn test_comprehensive_definitions_extraction() {
             code: r#"
                 calculate_mean <- function(x) { mean(x) }
             "#,
-            expected: vec![
-                ("calculate_mean", SymbolKind::Function),
-            ],
+            expected: vec![("calculate_mean", SymbolKind::Function)],
             should_not_contain: vec![],
         },
         DefTestCase {
@@ -361,7 +345,7 @@ fn test_comprehensive_definitions_extraction() {
             .expect(&format!("Config not found for {:?}", case.lang));
 
         let hash = [0u8; 32];
-        
+
         // We handle parse errors gracefully to allow test suite to continue
         let result = extract_boundary("test_file", case.code, config, hash);
 
@@ -374,7 +358,9 @@ fn test_comprehensive_definitions_extraction() {
 
         // Convert found definitions to a format easy to check
         // Note: boundary.rs logic might produce Unknown for things that aren't strictly class/interface/function keywords
-        let found_symbols: Vec<(String, SymbolKind)> = boundary.defs.iter()
+        let found_symbols: Vec<(String, SymbolKind)> = boundary
+            .defs
+            .iter()
             .map(|f| (f.name.clone(), f.kind))
             .collect();
 
@@ -382,24 +368,26 @@ fn test_comprehensive_definitions_extraction() {
         for (exp_name, exp_kind) in &case.expected {
             // Flexible kind check: Some heuristics in boundary.rs are broad (e.g. Unknown vs Class).
             // We strictly check name, and loosely check kind if it matches strict expectation.
-            
+
             let match_found = found_symbols.iter().any(|(n, k)| {
                 n == exp_name && (*k == *exp_kind || *exp_kind == SymbolKind::Unknown)
             });
-            
+
             if !match_found {
                 // Try to find if the name exists with a different kind, for better error message
                 let name_exists = found_symbols.iter().find(|(n, _)| n == exp_name);
-                
+
                 if let Some((_, actual_kind)) = name_exists {
-                     failures.push(format!(
+                    failures.push(format!(
                         "[{}] Symbol '{}' found but kind mismatch.\n   Expected: {:?}\n   Found:    {:?}", 
                         case.name, exp_name, exp_kind, actual_kind
                     ));
                 } else {
                     failures.push(format!(
-                        "[{}] Missing expected definition: '{}'.\n   All Found: {:?}", 
-                        case.name, exp_name, found_symbols.iter().map(|s| &s.0).collect::<Vec<_>>()
+                        "[{}] Missing expected definition: '{}'.\n   All Found: {:?}",
+                        case.name,
+                        exp_name,
+                        found_symbols.iter().map(|s| &s.0).collect::<Vec<_>>()
                     ));
                 }
             }
@@ -409,7 +397,7 @@ fn test_comprehensive_definitions_extraction() {
         for not_exp in &case.should_not_contain {
             if let Some((name, kind)) = found_symbols.iter().find(|(n, _)| n == not_exp) {
                 failures.push(format!(
-                    "[{}] Found symbol that should be ignored: '{}' ({:?})", 
+                    "[{}] Found symbol that should be ignored: '{}' ({:?})",
                     case.name, name, kind
                 ));
             }
@@ -418,8 +406,8 @@ fn test_comprehensive_definitions_extraction() {
 
     if !failures.is_empty() {
         panic!(
-            "\n\nDefinition Scope Test Failures ({}):\n==================================\n{}\n", 
-            failures.len(), 
+            "\n\nDefinition Scope Test Failures ({}):\n==================================\n{}\n",
+            failures.len(),
             failures.join("\n\n")
         );
     }

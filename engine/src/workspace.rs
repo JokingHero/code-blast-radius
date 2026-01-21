@@ -1,13 +1,13 @@
+use crate::models::BoundaryIndex; // Removed unused FileId
+use crate::recipes::models::Recipe;
+use crate::resolution::persistence::PersistenceManager;
+use crate::resolution::scanner::FileScanner;
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::fs;
-use anyhow::{Result, Context, anyhow};
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
-use crate::recipes::models::Recipe;
-use crate::models::{BoundaryIndex}; // Removed unused FileId
-use crate::resolution::scanner::FileScanner;
-use crate::resolution::persistence::PersistenceManager;
 
 // --- Config Structs ---
 #[derive(Debug, Clone)]
@@ -50,10 +50,12 @@ impl WorkspaceManager {
         let absolute = if path.is_absolute() {
             path
         } else {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(path)
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(path)
         };
         let canonical = fs::canonicalize(&absolute).unwrap_or(absolute);
-        
+
         let s = canonical.to_string_lossy();
         if s.starts_with(r"\\?\") {
             PathBuf::from(&s[4..])
@@ -69,14 +71,22 @@ impl WorkspaceManager {
         // 1. Load Config
         let content = fs::read_to_string(&abs_path)
             .context(format!("Could not read workspace file: {:?}", abs_path))?;
-        let persisted: PersistedWorkspaceConfig = serde_json::from_str(&content)
-            .context("Failed to parse workspace JSON")?;
+        let persisted: PersistedWorkspaceConfig =
+            serde_json::from_str(&content).context("Failed to parse workspace JSON")?;
 
         let mut roots = Vec::new();
         for pr in persisted.roots {
-            let os_path = if cfg!(windows) { pr.path.replace('/', "\\") } else { pr.path };
+            let os_path = if cfg!(windows) {
+                pr.path.replace('/', "\\")
+            } else {
+                pr.path
+            };
             let raw = PathBuf::from(os_path);
-            let final_path = if raw.is_relative() { base_dir.join(raw) } else { raw };
+            let final_path = if raw.is_relative() {
+                base_dir.join(raw)
+            } else {
+                raw
+            };
             roots.push(RootConfig {
                 id: pr.id,
                 path: fs::canonicalize(&final_path).unwrap_or(final_path),
@@ -92,7 +102,9 @@ impl WorkspaceManager {
         // 2. Load Index
         let index_path = abs_path.with_extension("cblast.index");
         let persistence = PersistenceManager::new();
-        let index = persistence.load_index(&index_path).unwrap_or_else(|_| BoundaryIndex::new());
+        let index = persistence
+            .load_index(&index_path)
+            .unwrap_or_else(|_| BoundaryIndex::new());
 
         let mut manager = Self {
             backing_file: Some(abs_path),
@@ -117,7 +129,8 @@ impl WorkspaceManager {
         }
 
         let config = WorkspaceConfig {
-            name: roots.first()
+            name: roots
+                .first()
                 .and_then(|r| r.path.file_name())
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "Untitled".to_string()),
@@ -136,18 +149,25 @@ impl WorkspaceManager {
     }
 
     pub fn save(&self) -> Result<()> {
-        let path = self.backing_file.as_ref()
+        let path = self
+            .backing_file
+            .as_ref()
             .ok_or_else(|| anyhow!("Cannot save in-memory workspace. Use save_as()"))?;
         let base_dir = path.parent().unwrap_or(Path::new("."));
 
         // 1. Save Config JSON
-        let persisted_roots: Vec<PersistedRoot> = self.config.roots.iter().map(|r| {
-             let rel = pathdiff::diff_paths(&r.path, base_dir).unwrap_or_else(|| r.path.clone());
-            PersistedRoot {
-                id: r.id.clone(),
-                path: rel.to_string_lossy().replace('\\', "/"),
-            }
-        }).collect();
+        let persisted_roots: Vec<PersistedRoot> = self
+            .config
+            .roots
+            .iter()
+            .map(|r| {
+                let rel = pathdiff::diff_paths(&r.path, base_dir).unwrap_or_else(|| r.path.clone());
+                PersistedRoot {
+                    id: r.id.clone(),
+                    path: rel.to_string_lossy().replace('\\', "/"),
+                }
+            })
+            .collect();
 
         let p_config = PersistedWorkspaceConfig {
             name: self.config.name.clone(),
@@ -179,13 +199,13 @@ impl WorkspaceManager {
         if self.config.roots.iter().any(|r| abs.starts_with(&r.path)) {
             return; // Skip nested
         }
-        
+
         let new_root = RootConfig {
             id: Uuid::new_v4().to_string(),
             path: abs,
         };
         self.config.roots.push(new_root.clone());
-        
+
         // Scan only the new root
         let scanner = FileScanner::new();
         scanner.scan(&new_root.path, &mut self.index, &new_root.id);
@@ -196,20 +216,23 @@ impl WorkspaceManager {
         if let Some(idx) = self.config.roots.iter().position(|r| r.path == abs) {
             let root_id = self.config.roots[idx].id.clone();
             self.config.roots.remove(idx);
-            
+
             // Cleanup files in index
-            let ids_to_remove: Vec<_> = self.index.files.values()
+            let ids_to_remove: Vec<_> = self
+                .index
+                .files
+                .values()
                 .filter(|f| f.root_id == root_id)
                 .map(|f| f.id)
                 .collect();
-            
+
             for id in ids_to_remove {
                 self.index.files.remove(&id);
             }
-            
+
             // Rebuild maps to clear symbols from removed files
             if let Some(first) = self.config.roots.first() {
-                let scanner = FileScanner::new(); 
+                let scanner = FileScanner::new();
                 scanner.scan(&first.path, &mut self.index, &first.id);
             } else {
                 self.index.symbol_map.clear();
@@ -224,10 +247,12 @@ impl WorkspaceManager {
             scanner.scan(&root.path, &mut self.index, &root.id);
         }
     }
-    
+
     // Helper for RecipeExecutor
     pub fn get_root_map(&self) -> HashMap<String, String> {
-        self.config.roots.iter()
+        self.config
+            .roots
+            .iter()
             .map(|r| (r.id.clone(), r.path.to_string_lossy().to_string()))
             .collect()
     }

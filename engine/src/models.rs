@@ -25,10 +25,10 @@ pub enum SymbolKind {
 pub struct Definition {
     pub name: String,
     pub kind: SymbolKind,
-    
+
     // Start/End byte offsets for the entire definition (e.g., "fn foo() { ... }")
     pub range: (usize, usize),
-    
+
     // Start/End byte offsets for the body to be skeletonized (e.g., "{ ... }")
     // If None, the whole definition is atomic/one-line or cannot be skeletonized.
     pub body_range: Option<(usize, usize)>,
@@ -37,37 +37,37 @@ pub struct Definition {
 #[derive(Archive, Deserialize, Serialize, Debug, Clone, Default)]
 #[archive(check_bytes)]
 pub struct FrameworkHint {
-    pub key: String,      // e.g., "@Controller", "render", "route"
-    pub value: String,    // e.g., "/api/users", "user_view", "{ selector: 'app-root' }"
+    pub key: String,           // e.g., "@Controller", "render", "route"
+    pub value: String,         // e.g., "/api/users", "user_view", "{ selector: 'app-root' }"
     pub range: (usize, usize), // Where it was found (for debugging/highlighting)
 }
 
-/// The atomic unit of our index. 
+/// The atomic unit of our index.
 /// Represents one file and its public boundary (definitions and outgoing references).
 #[derive(Archive, Deserialize, Serialize, Debug, Clone, Default)]
 #[archive(check_bytes)]
 pub struct FileBoundary {
     pub id: FileId,
-    
+
     // Relative path from the workspace root (e.g., "src/utils.rs")
-    pub path: String, 
-    
+    pub path: String,
+
     // Tracks which root config this file belongs to (for multi-root workspaces)
     pub root_id: String,
-    
+
     // Blake3 hash of the file content for change detection
     pub hash: [u8; 32],
-    
+
     // 1. What does this file define? (The API)
     pub defs: Vec<Definition>,
-    
+
     // 2. What files does it explicitly import? (Structural Dependencies)
     // Stored as raw strings from source (e.g., "./utils", "react", "crate::models")
-    pub imports: Vec<String>, 
-    
+    pub imports: Vec<String>,
+
     // 3. What symbols does it mention? (Logical Dependencies)
     // Extracted identifiers from the code flow (e.g., "User", "AuthService", "login")
-    pub symbol_refs: Vec<String>, 
+    pub symbol_refs: Vec<String>,
 
     // Raw string literals found in the file (e.g. "/api/users", "GET")
     // These are candidates for "Synthetic Reference" promotion.
@@ -79,7 +79,7 @@ pub struct FileBoundary {
 
     // Carries framework-specific raw data extracted during parsing.
     // The parser doesn't know what it means, it just knows it looks interesting.
-    pub framework_hints: Vec<FrameworkHint>, 
+    pub framework_hints: Vec<FrameworkHint>,
 }
 
 /// The Main Index.
@@ -104,14 +104,14 @@ pub struct BoundaryIndex {
     // Key: Path segments (e.g., "utils.ts", "src/utils.ts")
     // Value: List of matching FileIds
     pub path_map: HashMap<String, Vec<FileId>>,
-    pub package_map: HashMap<String, String>, 
+    pub package_map: HashMap<String, String>,
 
     // Key: "Significant Token" (lowercase stem of import or symbol).
     // Value: List of files that contain this token in their imports or refs.
     pub usage_map: HashMap<String, Vec<FileId>>,
 
     // Maps prefixes ("@components/") to relative paths ("src/components/")
-    pub alias_map: HashMap<String, String>, 
+    pub alias_map: HashMap<String, String>,
 }
 
 impl BoundaryIndex {
@@ -121,7 +121,7 @@ impl BoundaryIndex {
             files: HashMap::new(),
             symbol_map: HashMap::new(),
             path_map: HashMap::new(),
-            package_map: HashMap::new(), 
+            package_map: HashMap::new(),
             usage_map: HashMap::new(),
             alias_map: HashMap::new(),
         }

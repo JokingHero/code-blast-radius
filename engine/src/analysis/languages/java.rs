@@ -17,29 +17,35 @@ pub fn config() -> LanguageConfig {
             (record_declaration name: (identifier) @function.name) @function.definition
         ]
     "#)
-    // --- NEW: Inference Engine Hooks ---
     .frameworks(r#"
         ;; --- SPRING BOOT / JAKARTA EE ---
 
-        ;; 1. DI Providers (Implicit Class Name)
-        ;; Captures: @Service class UserService -> key="Service", value="UserService"
+        ;; 1. Class Level Marker Annotations (@Service class UserService)
+        ;; Context: Key=Service, Value=UserService
         (class_declaration
-            modifiers: (modifiers (marker_annotation name: (identifier) @framework.key))
+            (modifiers
+                (marker_annotation name: (identifier) @framework.key)
+            )
             name: (identifier) @framework.value
             (#match? @framework.key "^(Service|Component|Repository|Controller|RestController|Configuration)$")
         )
 
-        ;; 2. Routes & Config (Simple Value)
-        ;; Captures: @GetMapping("/users") -> key="GetMapping", value="'/users'"
-        ;; Captures: @Service("myService") -> key="Service", value="'myService'"
+        ;; 1b. Class Level Normal Annotations (@Component("myBean") class UserService)
+        (class_declaration
+            (modifiers
+                (annotation name: (identifier) @framework.key)
+            )
+            name: (identifier) @framework.value
+            (#match? @framework.key "^(Service|Component|Repository|Controller|RestController|Configuration)$")
+        )
+
+        ;; 2. Annotations with String Argument (@RequestMapping("/api"))
         (annotation
             name: (identifier) @framework.key
             arguments: (annotation_argument_list (string_literal) @framework.value)
         )
 
-        ;; 3. Routes & Config (Named Attributes)
-        ;; Captures: @RequestMapping(value = "/users") -> key="RequestMapping", value="'/users'"
-        ;; Captures: @Table(name = "users") -> key="Table", value="'users'"
+        ;; 3. Annotations with Key-Value Arguments (@Table(name="users"))
         (annotation
             name: (identifier) @framework.key
             arguments: (annotation_argument_list
@@ -52,14 +58,12 @@ pub fn config() -> LanguageConfig {
         )
 
         ;; 4. Bean Producers (Methods)
-        ;; Captures: @Bean public DataSource myDataSource() -> key="Bean", value="myDataSource"
         (method_declaration
-            modifiers: (modifiers (marker_annotation name: (identifier) @framework.key))
+            (modifiers (marker_annotation name: (identifier) @framework.key))
             name: (identifier) @framework.value
             (#eq? @framework.key "Bean")
         )
     "#)
-    // --- EXISTING LOGIC PRESERVED BELOW ---
     .calls(r#"
         [
             (method_invocation name: (identifier) @call.name)
@@ -67,64 +71,31 @@ pub fn config() -> LanguageConfig {
         ]
     "#)
     .imports(r#"
-        (import_declaration
-            (scoped_identifier) @import.source
-        )
+        (import_declaration (scoped_identifier) @import.source)
     "#)
     .docs(r#"
-        (
-            (block_comment) @function.docs 
-            . 
-            [
-                (class_declaration)
-                (interface_declaration)
-                (annotation_type_declaration)
-                (enum_declaration)
-                (method_declaration)
-                (constructor_declaration)
-                (record_declaration)
-            ] @function.definition
-        )
+        ((block_comment) @function.docs . [
+            (class_declaration) (interface_declaration) (annotation_type_declaration)
+            (enum_declaration) (method_declaration) (constructor_declaration) (record_declaration)
+        ] @function.definition)
     "#)
     .literals(r#"(string_literal) @string"#)
     .implements(r#"
-        (class_declaration
-            name: (identifier) @impl.child
-            superclass: (superclass (type_identifier) @impl.parent)?
-            interfaces: (super_interfaces (type_list (type_identifier) @impl.parent))?
-        )
-        (interface_declaration
-            name: (identifier) @impl.child
-        )
-        (record_declaration
-            name: (identifier) @impl.child
-            interfaces: (super_interfaces (type_list (type_identifier) @impl.parent))?
-        )
+        (class_declaration name: (identifier) @impl.child superclass: (superclass (type_identifier) @impl.parent)? interfaces: (super_interfaces (type_list (type_identifier) @impl.parent))?)
+        (interface_declaration name: (identifier) @impl.child)
+        (record_declaration name: (identifier) @impl.child interfaces: (super_interfaces (type_list (type_identifier) @impl.parent))?)
     "#)
     .vals(r#"
-        (variable_declarator
-            name: (identifier) @val.name
-            value: (string_literal) @val.value
-        )
+        (variable_declarator name: (identifier) @val.name value: (string_literal) @val.value)
     "#)
     .types(r#"
-        [
-            (formal_parameter type: (type_identifier) @type.ref)
-            (method_declaration type: (type_identifier) @type.ref)
-            (field_declaration type: (type_identifier) @type.ref)
-            (local_variable_declaration type: (type_identifier) @type.ref)
-        ]
+        [ (formal_parameter type: (type_identifier) @type.ref) (method_declaration type: (type_identifier) @type.ref)
+          (field_declaration type: (type_identifier) @type.ref) (local_variable_declaration type: (type_identifier) @type.ref) ]
     "#)
     .decorators(r#"
         (marker_annotation name: (identifier) @decorator.name)
-        (annotation 
-            name: (identifier) @decorator.name
-            arguments: (_)?
-        )
+        (annotation name: (identifier) @decorator.name arguments: (_)? )
     "#)
-    .di_decorators(&[
-        "Service", "Component", "Repository", "Controller", 
-        "RestController", "Bean", "Configuration", "Inject", "Autowired"
-    ])
+    .di_decorators(&["Service", "Component", "Repository", "Controller", "RestController", "Bean", "Configuration", "Inject", "Autowired"])
     .build()
 }

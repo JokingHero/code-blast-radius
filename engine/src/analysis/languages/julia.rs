@@ -1,12 +1,10 @@
 use crate::analysis::language::{LanguageConfig, LanguageConfigBuilder, SupportedLanguage};
 
 pub fn config() -> LanguageConfig {
-    LanguageConfigBuilder::new(
-        SupportedLanguage::Julia,
-        &["jl"]
-    )
-    .skeleton("# ... {} ...")
-    .defs(r#"
+    LanguageConfigBuilder::new(SupportedLanguage::Julia, &["jl"])
+        .skeleton("# ... {} ...")
+        .defs(
+            r#"
         [
             (function_definition
                 (signature
@@ -23,9 +21,11 @@ pub fn config() -> LanguageConfig {
                 )
             ) @function.definition
         ]
-    "#)
-    // --- NEW: Inference Engine Hooks ---
-    .frameworks(r#"
+    "#,
+        )
+        // --- NEW: Inference Engine Hooks ---
+        .frameworks(
+            r#"
         ;; --- GENIE.JL ROUTES ---
         ;; Captures: route("/hello") -> key="route", value="/hello"
         (call_expression
@@ -44,9 +44,11 @@ pub fn config() -> LanguageConfig {
             )
             (#eq? @framework.key "@route")
         )
-    "#)
-    // --- EXISTING LOGIC ---
-    .calls(r#"
+    "#,
+        )
+        // --- EXISTING LOGIC ---
+        .calls(
+            r#"
         [
             (call_expression
                 (identifier) @call.name
@@ -57,8 +59,10 @@ pub fn config() -> LanguageConfig {
                 )
             )
         ]
-    "#)
-    .docs(r#"
+    "#,
+        )
+        .docs(
+            r#"
         (
             (string_literal) @function.docs
             .
@@ -70,37 +74,48 @@ pub fn config() -> LanguageConfig {
                 (assignment)
             ] @function.definition
         )
-    "#)
-    .imports(r#"
+    "#,
+        )
+        .imports(
+            r#"
         [
             (using_statement (identifier) @import.source)
             (import_statement (identifier) @import.source)
             ;; relative imports: using .SubModule
             (using_statement (scoped_identifier) @import.source)
         ]
-    "#)
-    .exports(r#"
+    "#,
+        )
+        .exports(
+            r#"
         (export_statement (identifier) @export.name)
-    "#)
-    .literals(r#"
+    "#,
+        )
+        .literals(
+            r#"
         [
             (string_literal)
         ] @string
-    "#)
-    .vals(r#"
+    "#,
+        )
+        .vals(
+            r#"
         [
             (assignment
                 (identifier) @val.name
                 (string_literal) @val.value
             )
         ]
-    "#)
-    .types(r#"
+    "#,
+        )
+        .types(
+            r#"
         [
             (typed_expression
                 (identifier) @type.ref
             )
         ]
-    "#)
-    .build()
+    "#,
+        )
+        .build()
 }

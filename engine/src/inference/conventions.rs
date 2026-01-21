@@ -1,5 +1,5 @@
-use crate::models::FileBoundary;
 use super::InferenceRule;
+use crate::models::FileBoundary;
 
 /// A single, stateless rule that checks a file path and infers definitions.
 trait ConventionRule: Send + Sync {
@@ -19,7 +19,7 @@ impl ConventionRule for NextJsPagesRouter {
                 if route.ends_with("/index") {
                     route = route.trim_end_matches("/index").to_string();
                 }
-                 // Handle empty route after trimming index (e.g., /pages/api/index.ts)
+                // Handle empty route after trimming index (e.g., /pages/api/index.ts)
                 if route.is_empty() {
                     route.push('/');
                 }
@@ -57,7 +57,6 @@ impl ConventionRule for RailsControllerConvention {
         vec![]
     }
 }
-
 
 // --- The Main Engine for this file ---
 

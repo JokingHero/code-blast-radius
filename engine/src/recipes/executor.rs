@@ -1,13 +1,13 @@
+use anyhow::{Context, Result};
+use globset::Glob;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
-use anyhow::{Result, Context};
-use globset::Glob;
 
-use crate::models::{BoundaryIndex, FileId, Definition};
-use crate::query::walker::JitWalker;
-use crate::recipes::models::{Recipe, RecipeOperation, FileTransform};
+use crate::models::{BoundaryIndex, Definition, FileId};
 use crate::query::output::{ContextOutput, FileContent, FileContextMetadata, LineRange};
+use crate::query::walker::JitWalker;
+use crate::recipes::models::{FileTransform, Recipe, RecipeOperation};
 use crate::resolution::utils::is_test_path;
 
 pub struct RecipeExecutor<'a> {
@@ -19,10 +19,14 @@ pub struct RecipeExecutor<'a> {
 
 impl<'a> RecipeExecutor<'a> {
     pub fn new(index: &'a BoundaryIndex, roots: HashMap<String, String>) -> Self {
-        let parsed_roots = roots.into_iter()
+        let parsed_roots = roots
+            .into_iter()
             .map(|(k, v)| (k, PathBuf::from(v)))
             .collect();
-        Self { index, roots: parsed_roots }
+        Self {
+            index,
+            roots: parsed_roots,
+        }
     }
 
     /// Phase 1: File Discovery (Resolving the list of files)
@@ -34,7 +38,7 @@ impl<'a> RecipeExecutor<'a> {
                 RecipeOperation::AddFiles { pattern } => {
                     let normalized = pattern.replace('\\', "/");
                     let glob = Glob::new(&normalized)?.compile_matcher();
-                    
+
                     for file in self.index.files.values() {
                         if glob.is_match(&file.path) {
                             working_set.insert(file.id);
@@ -52,22 +56,26 @@ impl<'a> RecipeExecutor<'a> {
                         }
                     });
                 }
-                RecipeOperation::BlastRadius { symbol, max_depth, exclude_tests } => {
+                RecipeOperation::BlastRadius {
+                    symbol,
+                    max_depth,
+                    exclude_tests,
+                } => {
                     // 1. Find seeds
                     let mut seeds = Vec::new();
-                    
+
                     // Is it a symbol name?
                     if let Some(ids) = self.index.symbol_map.get(symbol) {
                         seeds.extend(ids);
                     }
-                    
+
                     // Is it a file path?
                     for file in self.index.files.values() {
                         if file.path.ends_with(symbol) {
                             seeds.push(file.id);
                         }
                     }
-                    
+
                     if seeds.is_empty() {
                         continue;
                     }
@@ -91,17 +99,27 @@ impl<'a> RecipeExecutor<'a> {
                 }
             }
         }
-        
+
         Ok(working_set)
     }
 
     /// Phase 2: Processing (Reading & masking content)
-    fn process_file(&self, file_id: FileId, transform: Option<&FileTransform>) -> Result<FileContent> {
-        let file_node = self.index.files.get(&file_id).context("File ID not found")?;
-        
-        let root_path = self.roots.get(&file_node.root_id)
+    fn process_file(
+        &self,
+        file_id: FileId,
+        transform: Option<&FileTransform>,
+    ) -> Result<FileContent> {
+        let file_node = self
+            .index
+            .files
+            .get(&file_id)
+            .context("File ID not found")?;
+
+        let root_path = self
+            .roots
+            .get(&file_node.root_id)
             .context("Root ID not found for file")?;
-            
+
         let absolute_path = root_path.join(&file_node.path);
         let raw_content = fs::read_to_string(&absolute_path)
             .with_context(|| format!("Failed to read {:?}", absolute_path))?;
@@ -114,7 +132,11 @@ impl<'a> RecipeExecutor<'a> {
         };
 
         let line_count = final_content.lines().count();
-        let ext = absolute_path.extension().and_then(|s| s.to_str()).unwrap_or("txt").to_string();
+        let ext = absolute_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("txt")
+            .to_string();
 
         Ok(FileContent {
             metadata: FileContextMetadata {
@@ -123,13 +145,21 @@ impl<'a> RecipeExecutor<'a> {
                 root_name: None, // Filled by UI if needed
                 language: ext,
                 is_test: false, // We could infer this from path if needed
-                relevant_lines: vec![LineRange { start: 1, end: line_count }],
+                relevant_lines: vec![LineRange {
+                    start: 1,
+                    end: line_count,
+                }],
             },
             content: final_content,
         })
     }
 
-    fn apply_transform(&self, content: &str, defs: &[Definition], transform: &FileTransform) -> String {
+    fn apply_transform(
+        &self,
+        content: &str,
+        defs: &[Definition],
+        transform: &FileTransform,
+    ) -> String {
         let mut masks: Vec<(usize, usize)> = Vec::new();
 
         for def in defs {
@@ -164,10 +194,10 @@ impl<'a> RecipeExecutor<'a> {
 
             // Append text before mask
             result.push_str(&content[last_pos..start]);
-            
+
             // Append replacement
             result.push_str(" { /* ... */ } ");
-            
+
             last_pos = end;
         }
 
@@ -187,9 +217,11 @@ impl<'a> RecipeExecutor<'a> {
 
         for id in ids {
             let file_node = self.index.files.get(&id).unwrap();
-            
+
             // Match transforms to file paths
-            let transform = recipe.transforms.iter()
+            let transform = recipe
+                .transforms
+                .iter()
                 .find(|(k, _)| file_node.path.ends_with(*k))
                 .map(|(_, v)| v);
 
@@ -205,28 +237,31 @@ impl<'a> RecipeExecutor<'a> {
             files,
         })
     }
-    
+
     // Metadata-only version (faster, no file reading)
     pub fn execute_metadata(&self, recipe: &Recipe) -> Result<ContextOutput<FileContextMetadata>> {
         let ids = self.resolve_files(&recipe.operations)?;
         let mut meta = Vec::new();
 
         for id in ids {
-             if let Some(file_node) = self.index.files.get(&id) {
-                 let ext = std::path::Path::new(&file_node.path)
-                    .extension().and_then(|s| s.to_str()).unwrap_or("txt").to_string();
-                 
-                 meta.push(FileContextMetadata {
+            if let Some(file_node) = self.index.files.get(&id) {
+                let ext = std::path::Path::new(&file_node.path)
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("txt")
+                    .to_string();
+
+                meta.push(FileContextMetadata {
                     file_id: file_node.id,
                     path: file_node.path.clone(),
                     root_name: None,
                     language: ext,
-                    is_test: false, 
+                    is_test: false,
                     relevant_lines: vec![], // No lines calculated for metadata-only
-                 });
-             }
+                });
+            }
         }
-        
+
         meta.sort_by(|a, b| a.path.cmp(&b.path));
 
         Ok(ContextOutput {
@@ -237,13 +272,15 @@ impl<'a> RecipeExecutor<'a> {
 
     pub fn get_file_content(&self, file_id: FileId, recipe: &Recipe) -> Result<Option<String>> {
         if let Some(file_node) = self.index.files.get(&file_id) {
-             let transform = recipe.transforms.iter()
+            let transform = recipe
+                .transforms
+                .iter()
                 .find(|(k, _)| file_node.path.ends_with(*k))
                 .map(|(_, v)| v);
-            
+
             match self.process_file(file_id, transform) {
                 Ok(fc) => Ok(Some(fc.content)),
-                Err(e) => Err(e)
+                Err(e) => Err(e),
             }
         } else {
             Ok(None)

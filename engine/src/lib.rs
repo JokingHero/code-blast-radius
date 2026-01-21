@@ -1,9 +1,9 @@
-pub mod models;
 pub mod analysis;
-pub mod manifest;
-pub mod workspace;
-pub mod recipes;
-pub mod resolution; 
-pub mod query;
-pub mod topic;
 pub mod inference;
+pub mod manifest;
+pub mod models;
+pub mod query;
+pub mod recipes;
+pub mod resolution;
+pub mod topic;
+pub mod workspace;

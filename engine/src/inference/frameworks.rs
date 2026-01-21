@@ -1,6 +1,6 @@
-use crate::models::{FileBoundary, FrameworkHint};
-use crate::inference::InferenceRule;
 use crate::analysis::language::SupportedLanguage;
+use crate::inference::InferenceRule;
+use crate::models::{FileBoundary, FrameworkHint};
 use regex::Regex;
 use std::collections::HashMap;
 
@@ -37,7 +37,7 @@ pub struct ConceptRule {
     /// 3. Template: How to format the final string. Use `{}` for the captured value.
     /// e.g., "route:GET:{}" or "html:tag:{}"
     pub output_template: String,
-    
+
     /// 4. Context Requirement: Does this rule depend on another hint existing?
     /// e.g., NestJS methods (@Get) depend on the class (@Controller) path.
     pub parent_context_key: Option<String>,
@@ -47,7 +47,7 @@ pub struct ConceptRule {
 pub struct FrameworkSpec {
     pub name: String,
     pub language: SupportedLanguage,
-    
+
     /// How do we know this file uses this framework?
     /// e.g., file extension (".component.ts") OR generic import ("org.springframework")
     pub detection_import: Option<String>,
@@ -76,33 +76,41 @@ impl InferenceRule for FrameworkManager {
         let mut results = Vec::new();
 
         // 1. Identify which frameworks apply to this file
-        let active_specs: Vec<&FrameworkSpec> = self.specs.iter().filter(|spec| {
-            // Check File Extension
-            /* (Logic to check boundary.path extension vs spec.language) */
-            
-            // Check Suffix (e.g. .component.ts)
-            if let Some(suffix) = &spec.detection_suffix {
-                if !boundary.path.ends_with(suffix) { return false; }
-            }
+        let active_specs: Vec<&FrameworkSpec> = self
+            .specs
+            .iter()
+            .filter(|spec| {
+                // Check File Extension
+                /* (Logic to check boundary.path extension vs spec.language) */
 
-            // Check Imports (Did we import 'flask', 'spring', etc?)
-            if let Some(imp) = &spec.detection_import {
-                // heuristic: check if any import contains the marker
-                if !boundary.imports.iter().any(|i| i.contains(imp)) {
-                    return false;
+                // Check Suffix (e.g. .component.ts)
+                if let Some(suffix) = &spec.detection_suffix {
+                    if !boundary.path.ends_with(suffix) {
+                        return false;
+                    }
                 }
-            }
-            
-            true
-        }).collect();
 
-        if active_specs.is_empty() { return results; }
+                // Check Imports (Did we import 'flask', 'spring', etc?)
+                if let Some(imp) = &spec.detection_import {
+                    // heuristic: check if any import contains the marker
+                    if !boundary.imports.iter().any(|i| i.contains(imp)) {
+                        return false;
+                    }
+                }
+
+                true
+            })
+            .collect();
+
+        if active_specs.is_empty() {
+            return results;
+        }
 
         // 2. Execute Rules
         for spec in active_specs {
             // Pre-calculation for "Context" (e.g. finding the Controller base path)
             let mut context_values: HashMap<String, String> = HashMap::new();
-            
+
             // Pass 1: Gather Context (Rules that don't depend on parents)
             for rule in &spec.rules {
                 if rule.parent_context_key.is_none() {
@@ -127,7 +135,11 @@ impl InferenceRule for FrameworkManager {
                                 if let Some(val) = extract_value(hint, &rule.extraction_regex) {
                                     // Combine Parent + Child (e.g. /api + /users)
                                     // We pass the parent_val to the formatter
-                                    results.push(format_output(&rule.output_template, &val, Some(parent_val)));
+                                    results.push(format_output(
+                                        &rule.output_template,
+                                        &val,
+                                        Some(parent_val),
+                                    ));
                                 }
                             }
                         }
@@ -145,7 +157,7 @@ impl InferenceRule for FrameworkManager {
 fn extract_value(hint: &FrameworkHint, regex: &Option<Regex>) -> Option<String> {
     if let Some(re) = regex {
         re.captures(&hint.value)
-          .and_then(|cap| cap.get(1).map(|m| m.as_str().to_string()))
+            .and_then(|cap| cap.get(1).map(|m| m.as_str().to_string()))
     } else {
         Some(hint.value.clone())
     }

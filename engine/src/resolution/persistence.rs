@@ -1,10 +1,10 @@
+use crate::models::BoundaryIndex;
+use anyhow::{Context, Result};
+use memmap2::MmapOptions;
+use rkyv::{check_archived_root, to_bytes};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
-use memmap2::MmapOptions;
-use rkyv::{to_bytes, check_archived_root};
-use anyhow::{Result, Context};
-use crate::models::BoundaryIndex;
 
 /// Handles the serialization and deserialization of the simplified BoundaryIndex.
 pub struct PersistenceManager;
@@ -17,16 +17,16 @@ impl PersistenceManager {
     /// Serializes the BoundaryIndex to the specified path using rkyv.
     /// This is extremely fast and zero-copy friendly.
     pub fn save_index(&self, index: &BoundaryIndex, path: &Path) -> Result<()> {
-        let bytes = to_bytes::<_, 4096>(index).map_err(|e| 
-            anyhow::anyhow!("Serialization failed: {}", e)
-        )?;
+        let bytes = to_bytes::<_, 4096>(index)
+            .map_err(|e| anyhow::anyhow!("Serialization failed: {}", e))?;
 
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
         let mut file = File::create(path).context("Failed to create index file")?;
-        file.write_all(&bytes).context("Failed to write index bytes")?;
+        file.write_all(&bytes)
+            .context("Failed to write index bytes")?;
         Ok(())
     }
 
@@ -47,12 +47,11 @@ impl PersistenceManager {
             return Ok(BoundaryIndex::new());
         }
 
-        // Deserialize fully into memory. 
-        // While rkyv supports zero-copy access, we want a mutable HashMap 
+        // Deserialize fully into memory.
+        // While rkyv supports zero-copy access, we want a mutable HashMap
         // to update the index during scans, so we deserialize to owned types.
-        let index: BoundaryIndex = unsafe { 
-            rkyv::from_bytes_unchecked(&mmap[..]).map_err(|e| anyhow::anyhow!(e))? 
-        };
+        let index: BoundaryIndex =
+            unsafe { rkyv::from_bytes_unchecked(&mmap[..]).map_err(|e| anyhow::anyhow!(e))? };
 
         Ok(index)
     }

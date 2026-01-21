@@ -10,9 +10,13 @@ pub fn matches_topic(pattern: &str, concrete: &str) -> bool {
     }
 
     // Determine delimiter (heuristic based on what is present)
-    let delimiter = if pattern.contains('/') { '/' } 
-                   else if pattern.contains(':') { ':' } 
-                   else { '.' };
+    let delimiter = if pattern.contains('/') {
+        '/'
+    } else if pattern.contains(':') {
+        ':'
+    } else {
+        '.'
+    };
 
     let p_parts: Vec<&str> = pattern.split(delimiter).collect();
     let c_parts: Vec<&str> = concrete.split(delimiter).collect();
@@ -24,7 +28,7 @@ pub fn matches_topic(pattern: &str, concrete: &str) -> bool {
         let p_token = p_parts[p_idx];
 
         if p_token == "#" || p_token == ">" {
-            // Multi-level wildcard must be the last token in standard MQTT, 
+            // Multi-level wildcard must be the last token in standard MQTT,
             // but RabbitMQ allows it elsewhere. Let's assume it matches "the rest".
             return true;
         }

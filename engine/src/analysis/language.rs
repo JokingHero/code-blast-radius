@@ -1,6 +1,6 @@
-use tree_sitter::{ Language, Query };
-use std::sync::{ Arc, OnceLock };
 use crate::analysis::languages;
+use std::sync::{Arc, OnceLock};
+use tree_sitter::{Language, Query};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SupportedLanguage {
@@ -193,7 +193,7 @@ impl LanguageConfigBuilder {
         let language = get_language(self.lang);
 
         let compile = |q: Option<&str>| -> Option<Arc<Query>> {
-            q.and_then(|source| { Query::new(&language, source).ok().map(Arc::new) })
+            q.and_then(|source| Query::new(&language, source).ok().map(Arc::new))
         };
 
         // Inject the generic reference query automatically
@@ -220,99 +220,125 @@ impl LanguageConfigBuilder {
 /// This replaces the specific 'calls', 'types', 'decorators' queries.
 fn get_default_refs_query(lang: SupportedLanguage) -> &'static str {
     match lang {
-        SupportedLanguage::Rust =>
+        SupportedLanguage::Rust => {
             r#"
             (identifier) @ref
             (type_identifier) @ref
             (field_identifier) @ref
-        "#,
-        SupportedLanguage::TypeScript =>
+        "#
+        }
+        SupportedLanguage::TypeScript => {
             r#"
             (identifier) @ref
             (property_identifier) @ref
             (type_identifier) @ref
             (shorthand_property_identifier_pattern) @ref
-        "#,
-        SupportedLanguage::JavaScript =>
+        "#
+        }
+        SupportedLanguage::JavaScript => {
             r#"
             (identifier) @ref
             (property_identifier) @ref
             (shorthand_property_identifier_pattern) @ref
-        "#,
-        SupportedLanguage::Python =>
+        "#
+        }
+        SupportedLanguage::Python => {
             r#"
             (identifier) @ref
             (attribute attribute: (identifier) @ref)
-        "#,
-        SupportedLanguage::Go =>
+        "#
+        }
+        SupportedLanguage::Go => {
             r#"
             (identifier) @ref
             (field_identifier) @ref
             (type_identifier) @ref
             (package_identifier) @ref
-        "#,
-        SupportedLanguage::Java =>
+        "#
+        }
+        SupportedLanguage::Java => {
             r#"
             (identifier) @ref
             (type_identifier) @ref
-        "#,
-        SupportedLanguage::CSharp => r#"
+        "#
+        }
+        SupportedLanguage::CSharp => {
+            r#"
             (identifier) @ref
-        "#,
-        SupportedLanguage::Ruby =>
+        "#
+        }
+        SupportedLanguage::Ruby => {
             r#"
             (identifier) @ref
             (constant) @ref
             (simple_symbol) @ref
             (hash_key_symbol) @ref
-        "#,
-        SupportedLanguage::Php =>
+        "#
+        }
+        SupportedLanguage::Php => {
             r#"
             (name) @ref
             (variable_name) @ref
-        "#,
-        SupportedLanguage::Bash | SupportedLanguage::Dotenv =>
+        "#
+        }
+        SupportedLanguage::Bash | SupportedLanguage::Dotenv => {
             r#"
             (variable_name) @ref
             (word) @ref
             (command_name) @ref
-        "#,
-        SupportedLanguage::Html =>
+        "#
+        }
+        SupportedLanguage::Html => {
             r#"
             (tag_name) @ref
             (attribute_name) @ref
-        "#,
-        SupportedLanguage::Json => r#"
+        "#
+        }
+        SupportedLanguage::Json => {
+            r#"
             (string_content) @ref
-        "#,
-        SupportedLanguage::Yaml => r#"
+        "#
+        }
+        SupportedLanguage::Yaml => {
+            r#"
             (string_scalar) @ref
-        "#,
-        SupportedLanguage::Toml => r#"
+        "#
+        }
+        SupportedLanguage::Toml => {
+            r#"
             (bare_key) @ref
-        "#,
-        SupportedLanguage::Hcl => r#"
+        "#
+        }
+        SupportedLanguage::Hcl => {
+            r#"
             (identifier) @ref
-        "#,
-        SupportedLanguage::Sql => r#"
+        "#
+        }
+        SupportedLanguage::Sql => {
+            r#"
             (identifier) @ref
-        "#,
-        SupportedLanguage::Prisma => r#"
+        "#
+        }
+        SupportedLanguage::Prisma => {
+            r#"
             (identifier) @ref
-        "#,
-        SupportedLanguage::C =>
+        "#
+        }
+        SupportedLanguage::C => {
             r#"
             (identifier) @ref
             (type_identifier) @ref
             (field_identifier) @ref
-        "#,
-        SupportedLanguage::Cpp =>
+        "#
+        }
+        SupportedLanguage::Cpp => {
             r#"
             (identifier) @ref
             (type_identifier) @ref
             (field_identifier) @ref
             (namespace_identifier) @ref
-        "#,
+        "#
+        }
         _ => "(identifier) @ref",
     }
 }
@@ -345,12 +371,7 @@ pub fn get_config_for_extension(ext: &str) -> Option<&'static LanguageConfig> {
         "toml" => Some(get_toml_config()),
         "tf" | "hcl" | "tfvars" => Some(get_hcl_config()),
         "prisma" => Some(get_prisma_config()),
-        | "env"
-        | "env.example"
-        | "env.template"
-        | "env.local"
-        | "env.development"
-        | "env.test"
+        "env" | "env.example" | "env.template" | "env.local" | "env.development" | "env.test"
         | "env.production" => Some(get_dotenv_config()),
 
         // Scripts / Other
