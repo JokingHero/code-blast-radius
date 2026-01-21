@@ -304,7 +304,7 @@ fn register_ruby_rails(manager: &mut FrameworkManager) {
     manager.register(FrameworkSpec {
         name: "Rails".to_string(),
         language: SupportedLanguage::Ruby,
-        detection_import: Some("Rails".to_string()),
+        detection_import: Some("rails".to_string()),
         detection_suffix: Some(".rb".to_string()),
         rules: vec![
             ConceptRule {
