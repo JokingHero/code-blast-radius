@@ -36,6 +36,7 @@ impl FileScanner {
         Self
     }
 
+    /// The main entry point for scanning a directory.
     pub fn scan(&self, root: &Path, index: &mut BoundaryIndex, root_id: &str) {
         let root_abs = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
 
@@ -79,6 +80,8 @@ impl FileScanner {
 
                 let is_manifest =
                     matches!(filename, "package.json" | "Cargo.toml" | "pyproject.toml");
+                
+                // Skip files we don't know how to parse, unless they are manifests
                 if !is_manifest && get_config_for_extension(&extension).is_none() {
                     return None;
                 }
@@ -104,7 +107,7 @@ impl FileScanner {
             .map(|f| f.relative_path.clone())
             .collect();
 
-        // Prepare existing state for Change Detection
+        // Prepare existing state for Change Detection (Incremental Scan)
         let existing_files: HashMap<String, [u8; 32]> = index
             .files
             .values()
@@ -248,22 +251,23 @@ impl FileScanner {
             index.files.remove(&id);
         }
 
-        // 6. Global Map Rebuild
+        // 6. Global Map Rebuild (Crucial for Topic Linking)
         self.rebuild_maps(index);
     }
 
+    /// Rebuilds inverted indices (Symbol Map, Path Map, Usage Map).
+    /// Updated to split literals and topics into segments for fuzzy matching.
     fn rebuild_maps(&self, index: &mut BoundaryIndex) {
         index.symbol_map.clear();
         index.path_map.clear();
         index.usage_map.clear();
 
         // --- PASS 1: Build Knowledge Base (Definitions) ---
-        // We need to know what "Concepts" exist in the workspace before we can
-        // link literals to them.
+        // We identify "Concepts" and also index them by their constituent parts.
         let mut known_concepts: HashSet<String> = HashSet::new();
 
         for file in index.files.values() {
-            // A. Path Map
+            // A. Path Map (Fuzzy file resolution)
             let parts: Vec<&str> = file.path.split('/').collect();
             let len = parts.len();
             for i in 0..len {
@@ -271,7 +275,7 @@ impl FileScanner {
                 index.path_map.entry(suffix).or_default().push(file.id);
             }
 
-            // B. Symbol Map (Physical)
+            // B. Symbol Map (Physical Definitions)
             for def in &file.defs {
                 index
                     .symbol_map
@@ -280,7 +284,7 @@ impl FileScanner {
                     .push(file.id);
             }
 
-            // C. Symbol Map (Synthetic/Logical)
+            // C. Symbol Map (Synthetic/Logical Concepts)
             for syn_def in &file.synthetic_defs {
                 index
                     .symbol_map
@@ -288,6 +292,15 @@ impl FileScanner {
                     .or_default()
                     .push(file.id);
                 known_concepts.insert(syn_def.clone());
+
+                // NEW: Index synthetic definition segments into usage_map.
+                // If this file defines "topic:user/created", we want to be found
+                // by walkers looking for "user" anchors.
+                if let Some(tokens) = extract_topic_tokens(syn_def) {
+                    for token in tokens {
+                        index.usage_map.entry(token).or_default().push(file.id);
+                    }
+                }
             }
         }
 
@@ -300,43 +313,51 @@ impl FileScanner {
                 }
             }
 
-            // 2. Symbol References (Code)
+            // 2. Symbol References (Code identifiers)
             for ref_str in &file.symbol_refs {
                 let token = ref_str.to_lowercase();
                 index.usage_map.entry(token).or_default().push(file.id);
             }
 
-            // 3. Literal Promotion (The Magic)
-            // If a literal matches a Known Concept, promote it to a usage.
+            // 3. Literals (The Magic Glue)
             for literal in &file.literals {
-                // Heuristic A: Exact Match (Rare, but possible for internal IDs)
+                // Heuristic A: Exact Match (Promote literal to usage if Concept exists)
                 if known_concepts.contains(literal) {
                     index
                         .usage_map
                         .entry(literal.clone())
                         .or_default()
                         .push(file.id);
-                    continue;
                 }
 
-                // Heuristic B: Route Promotion
-                // If the literal looks like a path ("/api/foo") and we have a concept "route:/api/foo"
-                if literal.starts_with('/') {
+                // Heuristic B: Route/Topic Promotion
+                // If the literal looks like a path ("/api/foo") or topic ("user.created"),
+                // check if it matches a known concept prefixed with route/topic/etc.
+                if literal.contains('/') || literal.contains('.') {
+                    // Try to match specific prefixes
                     let route_key = format!("route:{}", literal);
                     if known_concepts.contains(&route_key) {
-                        // Crucial: We map the *Concept Key* to this file.
-                        // The Walker will search for "route:/api/foo", find it in usage_map (this file),
-                        // and find it in symbol_map (the definition file).
                         index.usage_map.entry(route_key).or_default().push(file.id);
                     }
-                }
+                    
+                    let topic_key = format!("topic:{}", literal);
+                    if known_concepts.contains(&topic_key) {
+                        index.usage_map.entry(topic_key).or_default().push(file.id);
+                    }
 
-                // Heuristic C: Database Tables / Topics (Future extensions)
-                // if literal.contains('_') && known_concepts.contains(&format!("db:{}", literal)) ...
+                    // NEW: Tokenize the literal.
+                    // If this file has literal "user/#", we index it under "user".
+                    // This allows the Walker (starting at "user/created") to find this file.
+                    if let Some(tokens) = extract_topic_tokens(literal) {
+                        for token in tokens {
+                            index.usage_map.entry(token).or_default().push(file.id);
+                        }
+                    }
+                }
             }
         }
 
-        // Deduplicate usage entries
+        // Deduplicate usage entries to keep index small
         for list in index.usage_map.values_mut() {
             list.sort_unstable();
             list.dedup();
@@ -344,7 +365,9 @@ impl FileScanner {
     }
 }
 
-// Helper to normalize tokens consistently
+// --- Helpers ---
+
+/// Extracts the "significant" part of a file path or import (last segment).
 fn extract_significant_token(path: &str) -> Option<String> {
     let last_segment = path.split('/').last()?;
     if last_segment.is_empty() || last_segment == "." || last_segment == ".." {
@@ -355,4 +378,46 @@ fn extract_significant_token(path: &str) -> Option<String> {
         .and_then(|s| s.to_str())
         .unwrap_or(last_segment);
     Some(stem.to_lowercase())
+}
+
+/// Extracts semantic segments from a topic string.
+/// e.g. "topic:user/created" -> ["user", "created"]
+/// e.g. "user/#" -> ["user"]
+fn extract_topic_tokens(text: &str) -> Option<Vec<String>> {
+    // 1. Strip synthetic prefixes if present
+    let clean = if let Some(idx) = text.find(':') {
+        // Heuristic: only strip if prefix is short (likely a category)
+        if idx < 15 {
+            &text[idx + 1..]
+        } else {
+            text
+        }
+    } else {
+        text
+    };
+
+    let mut tokens = Vec::new();
+    let delimiters = ['/', '.', ':'];
+    
+    for part in clean.split(|c| delimiters.contains(&c)) {
+        // Filter out noise:
+        // - Wildcards (*, #, +)
+        // - Parameters ({id}, :id)
+        // - Very short segments (v1, a, b) - optional, but helps precision
+        if part.len() > 2 
+            && !part.contains('*') 
+            && !part.contains('#') 
+            && !part.contains('+') 
+            && !part.starts_with('{') 
+            && !part.starts_with(':') 
+        {
+            tokens.push(part.to_lowercase());
+        }
+    }
+
+    if tokens.is_empty() {
+        None
+    } else {
+        Some(tokens)
+    }
 }
