@@ -336,6 +336,66 @@ fn test_comprehensive_definitions_extraction() {
             ],
             should_not_contain: vec![],
         },
+        // ========================================================
+        // DART
+        // ========================================================
+        DefTestCase {
+            lang: SupportedLanguage::Dart,
+            name: "Dart: Classes and Functions",
+            code: r#"
+                class MyClass {
+                    void myMethod() {}
+                }
+                void main() {}
+            "#,
+            expected: vec![
+                ("MyClass", SymbolKind::Class),
+                ("myMethod", SymbolKind::Function),
+                ("main", SymbolKind::Function),
+            ],
+            should_not_contain: vec![],
+        },
+        // ========================================================
+        // GDScript
+        // ========================================================
+        DefTestCase {
+            lang: SupportedLanguage::GdScript,
+            name: "GDScript: Classes and Functions",
+            code: r#"
+                class Player:
+                    func _ready():
+                        pass
+            "#,
+            expected: vec![
+                ("Player", SymbolKind::Class),
+                ("_ready", SymbolKind::Function),
+            ],
+            should_not_contain: vec![],
+        },
+        // ========================================================
+        // FirebaseRules
+        // ========================================================
+        DefTestCase {
+            lang: SupportedLanguage::FirebaseRules,
+            name: "FirebaseRules: Services, Matches, and Functions",
+            code: r#"
+                service cloud.firestore {
+                  match /users/{userId} {
+                    allow read: if true;
+                  }
+                  
+                  function isLoggedIn() {
+                    return request.auth != null;
+                  }
+                }
+            "#,
+            expected: vec![
+                ("cloud.firestore", SymbolKind::Class),
+                ("/users/{userId}", SymbolKind::Class),
+                ("isLoggedIn", SymbolKind::Function),
+            ],
+            should_not_contain: vec![],
+        },
     ];
 
     let mut failures = Vec::new();

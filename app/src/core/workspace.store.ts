@@ -13,6 +13,7 @@ export interface ContextFile {
   is_test: boolean;
   relevant_lines: { start: number; end: number }[];
   content?: string | null; 
+  token_count: number;
 }
 
 export interface RootConfig {

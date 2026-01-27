@@ -5,29 +5,12 @@ import { useWorkspace, ContextFile } from "../../core/workspace.store";
 import { useRecipe } from "../../core/recipe.store";
 import { EngineRecipe } from "../../core/types";
 
-/**
- * Heuristic for token estimation based on line counts.
- * Average line of code ~40 chars / 3 chars per token ~= 13 tokens.
- * Plus XML overhead.
- */
-const estimateTokensFromMetadata = (file: ContextFile) => {
-  if (!file.relevant_lines) return 0;
-  
-  // Calculate total lines
-  const totalLines = file.relevant_lines.reduce((acc, range) => {
-    return acc + (range.end - range.start + 1);
-  }, 0);
-
-  // Approx 15 tokens per line + 25 overhead for XML tags
-  return (totalLines * 15) + 25;
-};
-
 const formatTokenCount = (num: number) => {
-  return new Intl.NumberFormat('en-US', { 
-    notation: "compact", 
-    maximumFractionDigits: 1 
-  }).format(num);
-};
+    return new Intl.NumberFormat('en-US', { 
+      notation: "compact", 
+      maximumFractionDigits: 1 
+    }).format(num);
+  };
 
 // --- Single File Component ---
 
@@ -131,9 +114,14 @@ const ContextFileItem = (props: {
         </div>
         
         <div class="flex items-center gap-3">
-            <span class="text-sm opacity-40 font-mono hidden sm:inline-block">
-                {props.file.relevant_lines?.length || 0} RANGES
+            <span class="text-sm font-mono hidden sm:inline-block">
+               ~{props.file.token_count} tokens
             </span>
+            <Show when={props.file.relevant_lines && props.file.relevant_lines.length > 0}>
+                <span class="text-sm opacity-40 font-mono hidden sm:inline-block">
+                    {props.file.relevant_lines.length} RANGES
+                </span>
+            </Show>
             <button
                 onClick={handleCopyFile}
                 class={`
@@ -203,7 +191,7 @@ export const ContextComposer = () => {
   // Estimate total tokens from metadata
   const totalTokens = createMemo(() => {
     return workspaceState.contextFiles.reduce((acc, file) => {
-      return acc + estimateTokensFromMetadata(file);
+      return acc + (file.token_count || 0); 
     }, 0);
   });
 

@@ -9,6 +9,7 @@ pub fn extract_boundary(
     config: &LanguageConfig,
     file_hash: [u8; 32],
 ) -> Result<FileBoundary, String> {
+    let token_count = (source_code.len() / 4) as u32;
     let mut parser = Parser::new();
     let language = get_language(config.lang);
     parser.set_language(&language).map_err(|e| e.to_string())?;
@@ -48,7 +49,17 @@ pub fn extract_boundary(
                         let k = node.kind();
 
                         // Detailed Symbol Inference Logic
-                        kind = if k.contains("class")
+                        kind = if k == "class_member_definition"
+                            || k == "lambda_expression"
+                            || k.contains("function")
+                            || k.contains("fn")
+                            || k.contains("method")
+                            || k.contains("macro")
+                        {
+                            SymbolKind::Function
+                        } else if k == "service_declaration"
+                            || k == "match_declaration"
+                            || k.contains("class")
                             || k.contains("struct")
                             || k.contains("record")
                             || k.contains("object")
@@ -64,12 +75,6 @@ pub fn extract_boundary(
                         } else if k.contains("type") && !k.contains("type_identifier") {
                             // "type_alias_declaration" (TS) or "type_spec" (Go)
                             SymbolKind::Class
-                        } else if k.contains("function")
-                            || k.contains("fn")
-                            || k.contains("method")
-                            || k.contains("macro")
-                        {
-                            SymbolKind::Function
                         } else if k.contains("module")
                             || k.contains("namespace")
                             || k.contains("package")
@@ -296,6 +301,7 @@ pub fn extract_boundary(
         path: path.to_string(),
         root_id: String::new(),
         hash: file_hash,
+        token_count, 
         defs,
         imports,
         symbol_refs: symbol_refs.into_iter().collect(),

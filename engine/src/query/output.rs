@@ -20,6 +20,7 @@ pub struct FileContextMetadata {
     pub language: String,
     pub is_test: bool,
     pub relevant_lines: Vec<LineRange>,
+    pub token_count: u32,
 }
 
 /// Heavyweight struct containing the actual source code.
@@ -83,22 +84,7 @@ pub fn escape_xml_content(input: &str) -> String {
 pub fn generate_context_output(
     index: &BoundaryIndex,
     file_ids: &[FileId],
-    id_map: &HashMap<FileId, String>, // Map FileId -> Relative Path? No, we need Absolute path to read file.
-                                      // Wait, the caller (CLI) passed id_map from files.values(), which are relative.
-                                      // CLI does NOT know absolute paths unless it resolved them.
-                                      // WorkspaceManager knows roots.
-                                      // For now, let's assume the CLI passes a map of FileId -> Absolute Path String if it can?
-                                      // Actually, in CLI main.rs:
-                                      // let id_map = index.files.values().map(|f| (f.id, f.path.clone())).collect();
-                                      // This passes RELATIVE paths.
-                                      // But we need to READ the file.
-                                      // If we only have relative path, we can't read it unless we know the CWD or Root.
-                                      // The WorkspaceManager knows the roots.
-                                      // The CLI manages the WorkspaceManager.
-                                      // So the CLI *could* resolve absolute paths.
-                                      // However, `generate_context_output` takes `id_map`.
-                                      // Let's change `id_map` to be `HashMap<FileId, PathBuf>` which are ABSOLUTE paths.
-                                      // The CLI will be responsible for creating this map correctly (joining root + relative).
+    id_map: &HashMap<FileId, String>,
 ) -> ContextOutput<FileContent> {
     // 1. Identify Target
     // Just use the first file name
@@ -147,7 +133,7 @@ pub fn generate_context_output(
             .to_string();
 
         let line_count = source_code.lines().count();
-
+        let token_count = (source_code.len() / 4) as u32;
         // Construct the Split Object
         let metadata = FileContextMetadata {
             file_id: file_node.id,
@@ -159,6 +145,7 @@ pub fn generate_context_output(
                 start: 1,
                 end: line_count.max(1),
             }],
+            token_count,
         };
 
         output_files.push(FileContent {

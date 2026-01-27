@@ -28,6 +28,66 @@ fn test_body_capture_across_languages() {
             symbol_name: "anonymous",
             expected_body_start: Some("{"),
         },
+        // --- GDSCRIPT (Godot) ---
+        TestCase {
+            lang: SupportedLanguage::GdScript,
+            name: "GDScript Function",
+            // GDScript relies on indentation. The body node usually starts at the first statement.
+            code: "func _ready():\n    pass",
+            symbol_name: "_ready",
+            expected_body_start: Some("pass"),
+        },
+        TestCase {
+            lang: SupportedLanguage::GdScript,
+            name: "GDScript Class",
+            code: "class Player:\n    var health = 100",
+            symbol_name: "Player",
+            expected_body_start: Some("var health"),
+        },
+
+        // --- DART (Flutter) ---
+        TestCase {
+            lang: SupportedLanguage::Dart,
+            name: "Dart Function",
+            code: "void main() { print('hello'); }",
+            symbol_name: "main",
+            expected_body_start: Some("{"),
+        },
+        TestCase {
+            lang: SupportedLanguage::Dart,
+            name: "Dart Class",
+            code: "class User {\n  String name;\n}",
+            symbol_name: "User",
+            expected_body_start: Some("{"),
+        },
+
+        // --- FIREBASE RULES ---
+        TestCase {
+            lang: SupportedLanguage::FirebaseRules,
+            name: "Firestore Service",
+            code: "service cloud.firestore {\n  match /databases/{database}/documents { }\n}",
+            symbol_name: "cloud.firestore",
+            // Grammar structure has no single body node for service
+            expected_body_start: None, 
+        },
+        TestCase {
+            lang: SupportedLanguage::FirebaseRules,
+            name: "Firestore Match",
+            // WRAP IN SERVICE
+            code: "service cloud.firestore {\n  match /users/{userId} {\n    allow read: if true;\n  }\n}",
+            symbol_name: "/users/{userId}",
+            // Grammar structure has no single body node for match (children are direct fields)
+            expected_body_start: None, 
+        },
+        TestCase {
+            lang: SupportedLanguage::FirebaseRules,
+            name: "Rules Function",
+            // WRAP IN SERVICE
+            code: "service cloud.firestore {\n  function isLoggedIn() { return request.auth != null; }\n}",
+            symbol_name: "isLoggedIn",
+            // Functions DO have a body node
+            expected_body_start: Some("return"),
+        },
         // --- TYPESCRIPT ---
         TestCase {
             lang: SupportedLanguage::TypeScript,

@@ -132,6 +132,8 @@ impl<'a> RecipeExecutor<'a> {
         };
 
         let line_count = final_content.lines().count();
+        // Since we might have skeletonized the file, calculate exact size of result
+        let token_count = (final_content.len() / 4) as u32;
         let ext = absolute_path
             .extension()
             .and_then(|s| s.to_str())
@@ -149,6 +151,7 @@ impl<'a> RecipeExecutor<'a> {
                     start: 1,
                     end: line_count,
                 }],
+                token_count,
             },
             content: final_content,
         })
@@ -258,6 +261,7 @@ impl<'a> RecipeExecutor<'a> {
                     language: ext,
                     is_test: false,
                     relevant_lines: vec![], // No lines calculated for metadata-only
+                    token_count: file_node.token_count,
                 });
             }
         }

@@ -26,6 +26,9 @@ pub enum SupportedLanguage {
     Ruby,
     C,
     Cpp,
+    GdScript,
+    Dart,
+    FirebaseRules,
 }
 
 pub fn get_language(lang: SupportedLanguage) -> Language {
@@ -51,6 +54,9 @@ pub fn get_language(lang: SupportedLanguage) -> Language {
         SupportedLanguage::Ruby => tree_sitter_ruby::LANGUAGE.into(),
         SupportedLanguage::C => tree_sitter_c::LANGUAGE.into(),
         SupportedLanguage::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+        SupportedLanguage::GdScript => tree_sitter_gdscript::LANGUAGE.into(),
+        SupportedLanguage::Dart => tree_sitter_dart::language(),
+        SupportedLanguage::FirebaseRules => tree_sitter_rules::LANGUAGE.into(),
     }
 }
 
@@ -380,6 +386,10 @@ pub fn get_config_for_extension(ext: &str) -> Option<&'static LanguageConfig> {
         "jl" => Some(get_julia_config()),
         "R" | "r" | "Rscript" => Some(get_r_config()),
 
+        "gd" => Some(get_gdscript_config()),
+        "dart" => Some(get_dart_config()),
+        "rules" => Some(get_rules_config()),
+
         _ => None,
     }
 }
@@ -421,6 +431,9 @@ define_lazy_configs!(
     get_ruby_config => ruby,
     get_c_config => c,
     get_cpp_config => cpp,
+    get_gdscript_config => gdscript,
+    get_dart_config => dart,
+    get_rules_config => rules,
 );
 
 /// A list of all supported languages, primarily used for integrity testing.
@@ -447,6 +460,9 @@ pub const ALL_LANGUAGES: &[SupportedLanguage] = &[
     SupportedLanguage::Sql,
     SupportedLanguage::Prisma,
     SupportedLanguage::Hcl,
+    SupportedLanguage::GdScript,
+    SupportedLanguage::Dart,
+    SupportedLanguage::FirebaseRules,
 ];
 
 /// Helper for tests and internal logic to get a config directly from the Enum.
@@ -474,6 +490,9 @@ pub fn get_config_by_language(lang: SupportedLanguage) -> Option<&'static Langua
         SupportedLanguage::Ruby => "rb",
         SupportedLanguage::C => "c",
         SupportedLanguage::Cpp => "cpp",
+        SupportedLanguage::GdScript => "gd",
+        SupportedLanguage::Dart => "dart",
+        SupportedLanguage::FirebaseRules => "rules",
     };
 
     if lang == SupportedLanguage::Dotenv {

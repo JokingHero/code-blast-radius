@@ -57,6 +57,8 @@ pub struct FileBoundary {
 
     // Blake3 hash of the file content for change detection
     pub hash: [u8; 32],
+    
+    pub token_count: u32,
 
     // 1. What does this file define? (The API)
     pub defs: Vec<Definition>,

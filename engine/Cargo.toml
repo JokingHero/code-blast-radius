@@ -36,6 +36,9 @@ tree-sitter-html = "0.23"
 tree-sitter-julia = "0.23"
 tree-sitter-r = "1.2"
 tree-sitter-json = "0.24"
+tree-sitter-gdscript = "6.1.0"
+tree-sitter-dart = "0.0.4"
+tree-sitter-rules = "0.0.5"
 
 # Use these specific modern replacements
 tree-sitter-yaml = "0.7.2"      # Maintained by amaanq/tree-sitter-grammars

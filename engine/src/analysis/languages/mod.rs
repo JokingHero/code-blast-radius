@@ -20,3 +20,6 @@ pub mod sql;
 pub mod toml;
 pub mod typescript;
 pub mod yaml;
+pub mod gdscript;
+pub mod rules;
+pub mod dart;

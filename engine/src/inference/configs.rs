@@ -16,6 +16,8 @@ pub fn register_all(manager: &mut FrameworkManager) {
     register_ruby_rails(manager);
     register_aspnet_core(manager);
     register_cpp_frameworks(manager);
+    register_flutter(manager);
+    register_godot(manager);
 }
 
 fn register_go_gin(manager: &mut FrameworkManager) {
@@ -370,5 +372,50 @@ fn register_cpp_frameworks(manager: &mut FrameworkManager) {
             output_template: "route:GET:{}".to_string(),
             parent_context_key: None,
         }],
+    });
+}
+
+fn register_flutter(manager: &mut FrameworkManager) {
+    manager.register(FrameworkSpec {
+        name: "Flutter".to_string(),
+        language: SupportedLanguage::Dart,
+        detection_import: Some("flutter".to_string()),
+        detection_suffix: Some(".dart".to_string()),
+        rules: vec![
+            // Detect View Components
+            ConceptRule {
+                concept: ConceptType::View,
+                trigger_key: "StatelessWidget".to_string(),
+                extraction_regex: None,
+                output_template: "view:{}".to_string(),
+                parent_context_key: None,
+            },
+            ConceptRule {
+                concept: ConceptType::View,
+                trigger_key: "StatefulWidget".to_string(),
+                extraction_regex: None,
+                output_template: "view:{}".to_string(),
+                parent_context_key: None,
+            },
+        ],
+    });
+}
+
+fn register_godot(manager: &mut FrameworkManager) {
+    manager.register(FrameworkSpec {
+        name: "Godot".to_string(),
+        language: SupportedLanguage::GdScript,
+        detection_import: None, // GDScript doesn't always import, it extends
+        detection_suffix: Some(".gd".to_string()),
+        rules: vec![
+            // Heuristic: If we see "_ready", it's likely a node script
+            ConceptRule {
+                concept: ConceptType::DependencyProvider,
+                trigger_key: "_ready".to_string(),
+                extraction_regex: None,
+                output_template: "godot:node".to_string(),
+                parent_context_key: None,
+            },
+        ],
     });
 }

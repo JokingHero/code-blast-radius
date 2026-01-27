@@ -365,29 +365,46 @@ async fn search_symbols(
 ) -> Result<Vec<SearchResult>, String> {
     let guard = state.manager.read().await;
     let manager = guard.as_ref().ok_or("Workspace not loaded")?;
-    let index = &manager.index; // Renamed from indexer
+    let index = &manager.index;
 
     let mut matcher = Matcher::new(Config::DEFAULT);
     let mut results = Vec::new();
     let query_utf32 = Utf32String::from(query.as_str());
 
-    // 1. Search Symbols
-    // index.symbol_map is HashMap<String, Vec<FileId>>
     for (name, ids) in &index.symbol_map {
         if let Some(score) = matcher.fuzzy_match(
             Utf32String::from(name.as_str()).slice(..),
             query_utf32.slice(..),
         ) {
-            // Find Relative Path and Kind
             // Just use the first file occurrence
             if let Some(&file_id) = ids.first() {
                 if let Some(file_node) = index.files.get(&file_id) {
-                    // Look for definition to get kind
+                    
+                    // Try to find the physical definition first (Function, Class, etc.)
                     let kind = file_node
                         .defs
                         .iter()
                         .find(|d| d.name == *name)
                         .map(|d| format!("{:?}", d.kind))
+                        // If not found, check Synthetic Definitions (Routes, DI, etc.)
+                        .or_else(|| {
+                            if file_node.synthetic_defs.contains(name) {
+                                // Extract the "Concept Type" from the string.
+                                // Examples: 
+                                // "route:GET:/api/users" -> "ROUTE"
+                                // "di:UserService"       -> "DI"
+                                // "view:UserCard"        -> "VIEW"
+                                let concept_type = name
+                                    .split(':')
+                                    .next()
+                                    .unwrap_or("Concept")
+                                    .to_uppercase();
+                                
+                                Some(concept_type)
+                            } else {
+                                None
+                            }
+                        })
                         .unwrap_or_else(|| "Unknown".to_string());
 
                     results.push(SearchResult {
@@ -401,7 +418,7 @@ async fn search_symbols(
         }
     }
 
-    // 2. Search Files (Match against Relative Path)
+    // Search Files (Match against Relative Path)
     for file in index.files.values() {
         let display_name = file.path.clone();
 
@@ -559,49 +576,73 @@ async fn resolve_paths(
     let mut results = Vec::new();
 
     for path_str in paths {
-        let path_buf = PathBuf::from(&path_str);
-        // Ensure we are comparing canonical paths if possible
-        let lookup_path = if path_buf.exists() {
-            std::fs::canonicalize(&path_buf).unwrap_or(path_buf.clone())
+        let raw_path = PathBuf::from(&path_str);
+        let abs_path = if raw_path.exists() {
+            std::fs::canonicalize(&raw_path).unwrap_or(raw_path)
         } else {
-            path_buf.clone()
+            raw_path
         };
 
-        // 1. Manually match against Roots to get Relative Path
-        // Because index.path_map only stores relative segments
+        // Strip Windows UNC prefix (\\?\) for consistent matching
+        // The engine logic usually stores clean paths, so we must match clean paths.
+        let to_clean_path = |p: &PathBuf| -> PathBuf {
+            let s = p.to_string_lossy().to_string();
+            if s.starts_with(r"\\?\") {
+                PathBuf::from(&s[4..])
+            } else {
+                p.clone()
+            }
+        };
+
+        let clean_lookup = to_clean_path(&abs_path);
         let mut found_match = false;
 
         for root in &manager.config.roots {
-            if lookup_path.starts_with(&root.path) {
-                if let Ok(rel) = lookup_path.strip_prefix(&root.path) {
+            let clean_root = to_clean_path(&root.path);
+
+            if clean_lookup.starts_with(&clean_root) {
+                if let Ok(rel) = clean_lookup.strip_prefix(&clean_root) {
+                    
+                    // Normalize to Forward Slashes for Index Lookup
+                    // The Engine's BoundaryIndex strictly uses "/" as a separator.
                     let rel_str = rel.to_string_lossy().replace('\\', "/");
 
-                    // Now check if this relative path exists in our index
-                    // We can check path_map for the exact relative path string
-                    if let Some(ids) = index.path_map.get(&rel_str) {
-                        // Double check against file nodes to be sure we have the exact file
-                        if let Some(&file_id) = ids.iter().find(|&&id| {
-                            if let Some(f) = index.files.get(&id) {
-                                return f.path == rel_str;
-                            }
-                            false
-                        }) {
-                            // SUCCESS
-                            if let Some(file_node) = index.files.get(&file_id) {
-                                results.push(ResolvedPathDTO {
-                                    original: path_str.clone(),
-                                    relative_path: Some(file_node.path.clone()),
-                                    root_id: Some(file_node.root_id.clone()),
-                                    is_indexed: true,
-                                });
-                                found_match = true;
-                                break;
+                    // We check path_map (which handles fuzzy matches) AND exact file paths
+                    let mut indexed_file_node = None;
+
+                    // A. Direct exact match check
+                    for file in index.files.values() {
+                        if file.path == rel_str && file.root_id == root.id {
+                            indexed_file_node = Some(file);
+                            break;
+                        }
+                    }
+
+                    // B. Fallback to path_map if A failed (though A should suffice for exact paths)
+                    if indexed_file_node.is_none() {
+                        if let Some(ids) = index.path_map.get(&rel_str) {
+                            for &id in ids {
+                                if let Some(f) = index.files.get(&id) {
+                                    // Ensure we matched the file in THIS root
+                                    if f.root_id == root.id {
+                                        indexed_file_node = Some(f);
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
 
-                    // If not found in index, but it is inside a root (e.g. valid file but ignored/new)
-                    if !found_match {
+                    if let Some(file_node) = indexed_file_node {
+                        results.push(ResolvedPathDTO {
+                            original: path_str.clone(),
+                            relative_path: Some(file_node.path.clone()),
+                            root_id: Some(file_node.root_id.clone()),
+                            is_indexed: true,
+                        });
+                        found_match = true;
+                    } else {
+                        // File exists physically in root, but not in index (e.g. .gitignore or new file)
                         results.push(ResolvedPathDTO {
                             original: path_str.clone(),
                             relative_path: Some(rel_str),
@@ -609,8 +650,9 @@ async fn resolve_paths(
                             is_indexed: false,
                         });
                         found_match = true;
-                        break;
                     }
+
+                    if found_match { break; }
                 }
             }
         }
