@@ -6,7 +6,6 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-/// Handles the serialization and deserialization of the simplified BoundaryIndex.
 pub struct PersistenceManager;
 
 impl PersistenceManager {
@@ -14,8 +13,6 @@ impl PersistenceManager {
         Self
     }
 
-    /// Serializes the BoundaryIndex to the specified path using rkyv.
-    /// This is extremely fast and zero-copy friendly.
     pub fn save_index(&self, index: &BoundaryIndex, path: &Path) -> Result<()> {
         let bytes = to_bytes::<_, 4096>(index)
             .map_err(|e| anyhow::anyhow!("Serialization failed: {}", e))?;
@@ -30,26 +27,35 @@ impl PersistenceManager {
         Ok(())
     }
 
-    /// Loads the BoundaryIndex from the specified path.
     pub fn load_index(&self, path: &Path) -> Result<BoundaryIndex> {
         if !path.exists() {
             return Ok(BoundaryIndex::new());
         }
 
         let file = File::open(path).context("Failed to open index file")?;
-
-        // Safety: We assume the file is not modified externally while mapped.
-        // For a single-user GUI/CLI tool, this is an acceptable tradeoff for performance.
+        
+        // Safety: We assume single-user access lock via OS is unnecessary for this tool context
         let mmap = unsafe { MmapOptions::new().map(&file)? };
+        let archived = match check_archived_root::<BoundaryIndex>(&mmap[..]) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("Index corrupted or schema mismatch: {}", e);
+                return Ok(BoundaryIndex::new());
+            }
+        };
 
-        if let Err(e) = check_archived_root::<BoundaryIndex>(&mmap[..]) {
-            eprintln!("Index corrupted or version mismatch: {}", e);
+        let current_version = env!("CARGO_PKG_VERSION");
+        
+        // Access the archived field directly without full deserialization first
+        if archived.app_version.as_str() != current_version {
+            eprintln!(
+                "Index version mismatch (Disk: {}, App: {}). Rebuilding index...", 
+                archived.app_version.as_str(), 
+                current_version
+            );
             return Ok(BoundaryIndex::new());
         }
 
-        // Deserialize fully into memory.
-        // While rkyv supports zero-copy access, we want a mutable HashMap
-        // to update the index during scans, so we deserialize to owned types.
         let index: BoundaryIndex =
             unsafe { rkyv::from_bytes_unchecked(&mmap[..]).map_err(|e| anyhow::anyhow!(e))? };
 

@@ -92,6 +92,7 @@ pub struct FileBoundary {
 #[derive(Archive, Deserialize, Serialize, Debug, Default)]
 #[archive(check_bytes)]
 pub struct BoundaryIndex {
+    pub app_version: String,
     // Stability: Ensures consistent IDs across incremental scans
     pub next_file_id: u32,
 
@@ -121,6 +122,7 @@ pub struct BoundaryIndex {
 impl BoundaryIndex {
     pub fn new() -> Self {
         Self {
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
             next_file_id: 1, // Start at 1, 0 is reserved
             files: HashMap::new(),
             symbol_map: HashMap::new(),
