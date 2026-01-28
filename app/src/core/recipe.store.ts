@@ -5,7 +5,7 @@ import {
   SavedRecipe,
   UiRecipeStep,
   RecipeOperation,
-  BlastRadiusParams
+  BlastRadiusParams,
 } from "./types";
 import { useWorkspace } from "./workspace.store";
 
@@ -25,30 +25,32 @@ const [state, setState] = createStore<RecipeState>({
   isDirty: false,
 });
 
+let latestAnalysisId = 0;
 export const useRecipe = () => {
-  const { 
-    state: workspaceState, 
-    setContextFiles, 
-    setLoading, 
-    refreshWorkspace 
+  const {
+    state: workspaceState,
+    setContextFiles,
+    setLoading,
+    refreshWorkspace,
   } = useWorkspace();
-
   const markDirty = () => setState("isDirty", true);
-
   // Helper to allow UI components to pass loose data that we sanitize here
-  type AddStepInput = 
+  type AddStepInput =
     | { kind: "file"; path: string; mode?: "include" | "exclude" }
-    | { kind: "symbol"; name: string; max_depth?: number; exclude_tests?: boolean };
-
+    | {
+        kind: "symbol";
+        name: string;
+        max_depth?: number;
+        exclude_tests?: boolean;
+      };
   const addStep = (input: AddStepInput) => {
     const id = crypto.randomUUID();
     let newOp: RecipeOperation;
-
     if (input.kind === "file") {
       const type = input.mode === "exclude" ? "RemoveFiles" : "AddFiles";
       newOp = {
         type,
-        params: { pattern: input.path }
+        params: { pattern: input.path },
       };
     } else {
       newOp = {
@@ -64,15 +66,15 @@ export const useRecipe = () => {
 
     const exists = state.steps.find((s) => {
       if (s.op.type !== newOp.type) return false;
-      
+
       if (s.op.type === "AddFiles" && newOp.type === "AddFiles") {
-         return s.op.params.pattern === newOp.params.pattern;
+        return s.op.params.pattern === newOp.params.pattern;
       }
       if (s.op.type === "RemoveFiles" && newOp.type === "RemoveFiles") {
-         return s.op.params.pattern === newOp.params.pattern;
+        return s.op.params.pattern === newOp.params.pattern;
       }
       if (s.op.type === "BlastRadius" && newOp.type === "BlastRadius") {
-         return s.op.params.symbol === newOp.params.symbol;
+        return s.op.params.symbol === newOp.params.symbol;
       }
       return false;
     });
@@ -83,55 +85,62 @@ export const useRecipe = () => {
       runAnalysis();
     }
   };
-
   const removeStep = (id: string) => {
     setState("steps", (prev) => prev.filter((s) => s.id !== id));
     markDirty();
     runAnalysis();
   };
-
   const moveStep = (fromIndex: number, toIndex: number) => {
-      if (fromIndex === toIndex) return;
-      setState("steps", (prev) => {
-          const newSteps = [...prev];
-          const [moved] = newSteps.splice(fromIndex, 1);
-          newSteps.splice(toIndex, 0, moved);
-          return newSteps;
-      });
-      markDirty();
-      runAnalysis();
-  };
-
-  const updateStepParams = (id: string, params: Partial<BlastRadiusParams>) => {
-    setState("steps", (step) => step.id === id, "op", "params", (prev: any) => ({
-       ...prev, 
-       ...params 
-    }));
-    markDirty();
-    runAnalysis();
-  };
-
-  const toggleStepType = (id: string) => {
-    setState("steps", (step) => step.id === id, "op", (prevOp) => {
-      if (prevOp.type === "AddFiles") {
-        return { 
-            type: "RemoveFiles", 
-            params: { pattern: prevOp.params.pattern } 
-        } as RecipeOperation;
-      }
-      if (prevOp.type === "RemoveFiles") {
-        return { 
-            type: "AddFiles", 
-            params: { pattern: prevOp.params.pattern } 
-        } as RecipeOperation;
-      }
-      return prevOp;
+    if (fromIndex === toIndex) return;
+    setState("steps", (prev) => {
+      const newSteps = [...prev];
+      const [moved] = newSteps.splice(fromIndex, 1);
+      newSteps.splice(toIndex, 0, moved);
+      return newSteps;
     });
     markDirty();
     runAnalysis();
   };
-
+  const updateStepParams = (id: string, params: Partial<BlastRadiusParams>) => {
+    setState(
+      "steps",
+      (step) => step.id === id,
+      "op",
+      "params",
+      (prev: any) => ({
+        ...prev,
+        ...params,
+      }),
+    );
+    markDirty();
+    runAnalysis();
+  };
+  const toggleStepType = (id: string) => {
+    setState(
+      "steps",
+      (step) => step.id === id,
+      "op",
+      (prevOp) => {
+        if (prevOp.type === "AddFiles") {
+          return {
+            type: "RemoveFiles",
+            params: { pattern: prevOp.params.pattern },
+          } as RecipeOperation;
+        }
+        if (prevOp.type === "RemoveFiles") {
+          return {
+            type: "AddFiles",
+            params: { pattern: prevOp.params.pattern },
+          } as RecipeOperation;
+        }
+        return prevOp;
+      },
+    );
+    markDirty();
+    runAnalysis();
+  };
   const runAnalysis = async () => {
+    const currentId = ++latestAnalysisId;
     if (state.steps.length === 0) {
       setContextFiles([]);
       return;
@@ -139,6 +148,9 @@ export const useRecipe = () => {
 
     if (workspaceState.isDirty) {
       await refreshWorkspace();
+      // If a refresh takes a long time, user might have triggered another analysis.
+      // We check immediately after the await.
+      if (currentId !== latestAnalysisId) return;
     }
 
     setState("isExecuting", true);
@@ -155,15 +167,21 @@ export const useRecipe = () => {
       const resultJson = await invoke<string>("execute_recipe", {
         recipeJson: payload,
       });
-      const result = JSON.parse(resultJson);
-      setContextFiles(result.files || []);
+
+      if (currentId === latestAnalysisId) {
+        const result = JSON.parse(resultJson);
+        setContextFiles(result.files || []);
+      }
     } catch (e) {
-      console.error("Analysis failed", e);
+      if (currentId === latestAnalysisId) {
+        console.error("Analysis failed", e);
+      }
     } finally {
-      setState("isExecuting", false);
+      if (currentId === latestAnalysisId) {
+        setState("isExecuting", false);
+      }
     }
   };
-
   const fetchSavedRecipes = async () => {
     try {
       const recipes = await invoke<SavedRecipe[]>("get_saved_recipes");
@@ -173,7 +191,6 @@ export const useRecipe = () => {
       console.error("Failed to fetch recipes", e);
     }
   };
-
   const saveCurrentRecipe = async (name: string) => {
     const payload: EngineRecipe = {
       name,
@@ -194,13 +211,11 @@ export const useRecipe = () => {
       setLoading(false);
     }
   };
-
   const loadSavedRecipe = (recipe: SavedRecipe) => {
     const newSteps = recipe.operations.map((op) => ({
       id: crypto.randomUUID(),
       op,
     }));
-    
     setState({
       steps: newSteps,
       activeRecipeName: recipe.name,
@@ -209,7 +224,6 @@ export const useRecipe = () => {
 
     runAnalysis();
   };
-
   const deleteSavedRecipe = async (name: string) => {
     try {
       await invoke("delete_named_recipe", { name });
@@ -222,16 +236,17 @@ export const useRecipe = () => {
       console.error(e);
     }
   };
-
   const resetRecipe = () => {
-      setState({
-          steps: [],
-          activeRecipeName: null,
-          isDirty: false
-      });
-      setContextFiles([]);
-  }
-
+    // Increment ID to invalidate any pending runs when clearing
+    latestAnalysisId++;
+    setState({
+      steps: [],
+      activeRecipeName: null,
+      isDirty: false,
+      isExecuting: false, // Force stop spinner
+    });
+    setContextFiles([]);
+  };
   return {
     recipeState: state,
     addStep,
@@ -244,6 +259,6 @@ export const useRecipe = () => {
     saveCurrentRecipe,
     loadSavedRecipe,
     deleteSavedRecipe,
-    resetRecipe
+    resetRecipe,
   };
 };
