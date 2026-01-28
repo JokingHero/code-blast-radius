@@ -1,14 +1,16 @@
-use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use anyhow::{ Context, Result };
+use blast_radius_engine::recipe_service::RecipeOutput;
+use blast_radius_engine::search_service::SearchService;
+use clap::{ Parser, Subcommand };
 use std::path::PathBuf;
 use std::process;
 
-use blast_radius_engine::query::output::generate_context_output;
-use blast_radius_engine::query::walker::JitWalker;
-use blast_radius_engine::recipes::executor::RecipeExecutor;
+use blast_radius_engine::{
+    query::analysis_service::AnalysisService,
+    recipe_service::RecipeService,
+};
 use blast_radius_engine::recipes::models::Recipe;
 use blast_radius_engine::workspace::WorkspaceManager;
-use nucleo_matcher::{Config, Matcher, Utf32String};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -63,11 +65,17 @@ enum Commands {
 #[derive(Subcommand, Debug)]
 enum WorkspaceAction {
     /// Initialize a new empty workspace file
-    Init { name: String },
+    Init {
+        name: String,
+    },
     /// Add a root folder to the workspace
-    Add { root: PathBuf },
+    Add {
+        root: PathBuf,
+    },
     /// Remove a root folder from the workspace
-    Remove { root: PathBuf },
+    Remove {
+        root: PathBuf,
+    },
     /// Refresh/Sync the workspace
     Sync,
 }
@@ -93,14 +101,6 @@ enum RecipeAction {
     },
 }
 
-#[derive(serde::Serialize)]
-struct MatchResult {
-    name: String,
-    kind: String,
-    path: String,
-    score: u16,
-}
-
 fn report_error(err: anyhow::Error) {
     eprintln!("{}", serde_json::json!({ "error": format!("{:?}", err) }));
     process::exit(1);
@@ -121,8 +121,9 @@ fn run() -> Result<()> {
         WorkspaceManager::from_file(cli.path.clone()).context("Failed to load workspace file")?
     } else if cli.path.is_dir() {
         // Assume Ad-Hoc directory mode
-        WorkspaceManager::new_in_memory(vec![cli.path.clone()])
-            .context("Failed to initialize workspace from directory")?
+        WorkspaceManager::new_in_memory(vec![cli.path.clone()]).context(
+            "Failed to initialize workspace from directory"
+        )?
     } else {
         anyhow::bail!("Path must be a valid directory or .cblast file");
     };
@@ -137,39 +138,37 @@ fn run() -> Result<()> {
 
     match &cli.command {
         // --- WORKSPACE MANAGEMENT ---
-        Commands::Workspace { action } => match action {
-            WorkspaceAction::Init { name } => {
-                manager.config.name = name.clone();
-                if manager.backing_file.is_some() {
-                    manager.save()?;
-                    println!("Workspace config updated.");
-                } else {
-                    println!(
-                        "Initialized in-memory workspace '{}'. Use GUI to save.",
-                        name
-                    );
+        Commands::Workspace { action } =>
+            match action {
+                WorkspaceAction::Init { name } => {
+                    manager.config.name = name.clone();
+                    if manager.backing_file.is_some() {
+                        manager.save()?;
+                        println!("Workspace config updated.");
+                    } else {
+                        println!("Initialized in-memory workspace '{}'. Use GUI to save.", name);
+                    }
+                }
+                WorkspaceAction::Add { root } => {
+                    manager.add_root(root.clone());
+                    if manager.backing_file.is_some() {
+                        manager.save()?;
+                        println!("Added root. Total roots: {}", manager.config.roots.len());
+                    } else {
+                        println!("Added root to temporary session. Changes will be lost on exit.");
+                    }
+                }
+                WorkspaceAction::Remove { root } => {
+                    manager.remove_root(root.clone());
+                    if manager.backing_file.is_some() {
+                        manager.save()?;
+                    }
+                    println!("Removed root.");
+                }
+                WorkspaceAction::Sync => {
+                    println!("Workspace synced successfully.");
                 }
             }
-            WorkspaceAction::Add { root } => {
-                manager.add_root(root.clone());
-                if manager.backing_file.is_some() {
-                    manager.save()?;
-                    println!("Added root. Total roots: {}", manager.config.roots.len());
-                } else {
-                    println!("Added root to temporary session. Changes will be lost on exit.");
-                }
-            }
-            WorkspaceAction::Remove { root } => {
-                manager.remove_root(root.clone());
-                if manager.backing_file.is_some() {
-                    manager.save()?;
-                }
-                println!("Removed root.");
-            }
-            WorkspaceAction::Sync => {
-                println!("Workspace synced successfully.");
-            }
-        },
 
         // --- RECIPE MANAGEMENT ---
         Commands::Recipe { action } => {
@@ -179,8 +178,7 @@ fn run() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&names)?);
                 }
                 RecipeAction::Add { json } => {
-                    let recipe: Recipe =
-                        serde_json::from_str(json).context("Invalid recipe JSON")?;
+                    let recipe: Recipe = serde_json::from_str(json).context("Invalid recipe JSON")?;
                     let name = recipe.name.clone();
                     manager.config.recipes.insert(name.clone(), recipe);
                     if manager.backing_file.is_some() {
@@ -202,139 +200,40 @@ fn run() -> Result<()> {
                     }
                 }
                 RecipeAction::Run { name, metadata } => {
-                    let recipe = manager
-                        .config
-                        .recipes
+                    let recipe = manager.config.recipes
                         .get(name)
-                        .ok_or_else(|| anyhow::anyhow!("Recipe '{}' not found", name))?;
-                    // map manager.index instead of manager.indexer
-                    let executor = RecipeExecutor::new(&manager.index, manager.get_root_map());
+                        .ok_or_else(|| anyhow::anyhow!("Recipe '{}' not found", name))?
+                        .clone();
+                    let result = RecipeService::execute(&manager, recipe, !metadata)?;
 
-                    if *metadata {
-                        // MCP Mode: Return JSON list of files (no heavy content)
-                        let output = executor.execute_metadata(recipe)?;
-                        println!("{}", serde_json::to_string_pretty(&output)?);
-                    } else {
-                        // Standard Mode: Return XML Bundle (with full content)
-                        let output = executor.execute_full(recipe)?;
-                        println!("{}", output.to_xml());
+                    match result {
+                        // CLI Requirement: Metadata flag -> Print JSON
+                        RecipeOutput::Metadata(output) => {
+                            println!("{}", serde_json::to_string_pretty(&output)?);
+                        }
+                        // CLI Requirement: Default -> Print XML
+                        RecipeOutput::Full(_) => {
+                            println!("{}", result.to_xml()?);
+                        }
                     }
                 }
             }
         }
 
         // --- QUERY: RADIUS ---
-        Commands::Radius {
-            symbol,
-            no_tests,
-            depth,
-        } => {
-            let index = &manager.index;
-
-            // Step A: Check if input is a File Path
-            // FIX: Using as_str() to satisfy ends_with trait bound
-            let matching_file_id = index
-                .files
-                .values()
-                .find(|f| f.path.ends_with(symbol.as_str()) || f.path == *symbol)
-                .map(|f| f.id);
-
-            let mut start_ids = Vec::new();
-
-            if let Some(fid) = matching_file_id {
-                start_ids.push(fid);
-            } else {
-                if let Some(ids) = index.symbol_map.get(symbol) {
-                    start_ids.extend(ids.iter());
-                } else {
-                    anyhow::bail!("Symbol or File not found: {}", symbol);
-                }
-            }
-
-            let walker = JitWalker::new(index);
-            let d = depth.unwrap_or(5);
-
-            let mut related_ids = std::collections::HashSet::new();
-            for &id in &start_ids {
-                related_ids.insert(id);
-            }
-            let deps = walker.walk_dependencies(&start_ids, d);
-            related_ids.extend(deps);
-            let impacted = walker.walk_impact(&start_ids, d);
-            related_ids.extend(impacted);
-
-            let final_ids: Vec<u32> = related_ids.into_iter().collect();
-            // -------------------------------
-
-            let mut final_filtered_ids = final_ids.clone();
-
-            if *no_tests {
-                final_filtered_ids.retain(|&id| {
-                    if let Some(f) = index.files.get(&id) {
-                        !f.path.contains("test") && !f.path.contains("spec")
-                    } else {
-                        true
-                    }
-                });
-            }
-
-            // Radius command always uses full content output
-            let id_map: std::collections::HashMap<u32, String> = index
-                .files
-                .values()
-                .map(|f| (f.id, f.path.clone()))
-                .collect();
-
-            // Pass final_filtered_ids instead of related_ids
-            let output = generate_context_output(index, &final_filtered_ids, &id_map);
+        Commands::Radius { symbol, no_tests, depth } => {
+            let output = AnalysisService::calculate_radius(
+                &manager.index,
+                &symbol,
+                depth.unwrap_or(5),
+                *no_tests
+            )?;
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
 
         // --- QUERY: FIND ---
         Commands::Find { query, limit } => {
-            let index = &manager.index;
-            let mut matcher = Matcher::new(Config::DEFAULT);
-            let mut results = Vec::new();
-            let query_utf32 = Utf32String::from(query.as_str());
-
-            for (name, ids) in &index.symbol_map {
-                if let Some(score) = matcher.fuzzy_match(
-                    Utf32String::from(name.as_str()).slice(..),
-                    query_utf32.slice(..),
-                ) {
-                    // For display, just pick the first file defining it
-                    let file_path = ids
-                        .first()
-                        .and_then(|id| index.files.get(id))
-                        .map(|f| f.path.as_str())
-                        .unwrap_or("unknown");
-
-                    results.push(MatchResult {
-                        name: name.clone(),
-                        kind: "Symbol".to_string(), // We don't store Kind in symbol_map anymore, would need lookup
-                        path: file_path.to_string(),
-                        score,
-                    });
-                }
-            }
-
-            for file in index.files.values() {
-                if let Some(score) = matcher.fuzzy_match(
-                    Utf32String::from(file.path.as_str()).slice(..),
-                    query_utf32.slice(..),
-                ) {
-                    results.push(MatchResult {
-                        name: file.path.clone(),
-                        kind: "File".to_string(),
-                        path: file.path.clone(),
-                        score,
-                    });
-                }
-            }
-
-            results.sort_by(|a, b| b.score.cmp(&a.score));
-            results.truncate(*limit);
-
+            let results = SearchService::search(&manager.index, query, *limit);
             println!("{}", serde_json::to_string_pretty(&results)?);
         }
     }

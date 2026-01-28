@@ -8,7 +8,6 @@ use crate::models::{BoundaryIndex, Definition, FileId};
 use crate::query::output::{ContextOutput, FileContent, FileContextMetadata, LineRange};
 use crate::query::walker::JitWalker;
 use crate::recipes::models::{FileTransform, Recipe, RecipeOperation};
-use crate::resolution::utils::is_test_path;
 
 pub struct RecipeExecutor<'a> {
     index: &'a BoundaryIndex,
