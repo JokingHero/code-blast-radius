@@ -37,9 +37,28 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
         if (!isNaN(fromIndex)) props.onMove(fromIndex, props.index);
     }
   };
+  
+  const isInfinite = () => {
+      if (props.step.op.type === 'BlastRadius') {
+          return (props.step.op.params.max_depth || 0) > 20;
+      }
+      return false;
+  };
 
-  const isInfinite = () => (props.step.op.params.max_depth || 0) > 20;
-  const depth = () => isInfinite() ? 5 : (props.step.op.params.max_depth || 5);
+  const depth = () => {
+      if (props.step.op.type === 'BlastRadius') {
+          return isInfinite() ? 5 : (props.step.op.params.max_depth || 5);
+      }
+      return 5;
+  };
+
+  const label = () => {
+      if (props.step.op.type === 'BlastRadius') {
+          return props.step.op.params.symbol;
+      }
+      // AddFiles or RemoveFiles
+      return props.step.op.params.pattern;
+  };
 
   return (
     <div 
@@ -96,9 +115,9 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
           
           <span 
             class="truncate font-mono font-bold text-matrix-highlight/90 text-base flex-1" 
-            title={props.step.op.params.pattern || props.step.op.params.symbol}
+            title={label()}
           >
-            {props.step.op.params.pattern || props.step.op.params.symbol}
+            {label()}
           </span>
         </div>
         
@@ -114,8 +133,14 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
         </button>
       </div>
 
-      {/* Controls Row */}
+      {/* Controls Row - Only for BlastRadius */}
       <Show when={props.step.op.type === 'BlastRadius'}>
+        {/* 
+            Since we are inside Show, we can safely access BlastRadius params, 
+            but strictly speaking, TypeScript might need us to narrow the type again 
+            or use the unsafe access if not using a type guard function in the Show.
+            However, our helpers (depth, isInfinite) handle this safely. 
+        */}
         <div class="mt-2 pt-2 border-t border-matrix-border/30 flex items-center gap-3 animate-[fadeIn_0.2s_ease-out]">
           
             {/* Radius */}
@@ -166,10 +191,14 @@ const StepItem = (props: { step: UiRecipeStep; index: number; onMove: (from: num
 
             {/* Tests */}
             <button
-                onClick={() => updateStepParams(props.step.id, { exclude_tests: !props.step.op.params.exclude_tests })}
+                onClick={() => {
+                    if (props.step.op.type === 'BlastRadius') {
+                        updateStepParams(props.step.id, { exclude_tests: !props.step.op.params.exclude_tests })
+                    }
+                }}
                 class={`
                     h-5 px-2 text-lg font-bold uppercase tracking-wider border transition-all flex items-center
-                    ${!props.step.op.params.exclude_tests 
+                    ${props.step.op.type === 'BlastRadius' && !props.step.op.params.exclude_tests 
                         ? "bg-matrix-primary text-matrix-bg border-matrix-primary" 
                         : "bg-transparent text-matrix-primary/50 border-matrix-border hover:border-matrix-primary/50 hover:text-matrix-primary"}
                 `}
@@ -208,6 +237,7 @@ export const RecipeBuilder = () => {
     if (rawData) {
       try {
         const data = JSON.parse(rawData);
+        // The explorer drag payload is loose, we extract the path value
         if (data.type === 'add_file' && data.value) {
           pathsToResolve.push(data.value);
         }
@@ -229,7 +259,8 @@ export const RecipeBuilder = () => {
       // 3. Add Valid Steps
       for (const res of resolved) {
         if (res.relative_path) {
-          addStep({ type: 'file', value: res.relative_path });
+          // Use the new STRICT addStep signature
+          addStep({ kind: 'file', path: res.relative_path, mode: 'include' });
         } else {
           console.warn("Dropped file is outside of any active workspace root:", res.original);
         }
@@ -239,14 +270,15 @@ export const RecipeBuilder = () => {
     }
   };
 
-  const handleAddPattern = (subtype: "AddFiles" | "RemoveFiles") => {
+  // STRICT mode argument
+  const handleAddPattern = (mode: "include" | "exclude") => {
       const val = patternInput().trim();
       if (!val) return;
       
       addStep({ 
-          type: 'file', 
-          value: val, 
-          params: { subtype } 
+          kind: 'file', 
+          path: val, 
+          mode: mode 
       });
       
       setPatternInput("");
@@ -348,7 +380,7 @@ export const RecipeBuilder = () => {
                             value={patternInput()}
                             onInput={(e) => setPatternInput(e.currentTarget.value)}
                             onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleAddPattern('AddFiles');
+                                if (e.key === 'Enter') handleAddPattern('include');
                                 if (e.key === 'Escape') setShowPatternModal(false);
                             }}
                             class="w-full bg-matrix-bg border border-matrix-border text-matrix-highlight p-3 text-lg font-mono outline-none focus:border-matrix-primary focus:shadow-[0_0_10px_rgba(0,255,65,0.2)] placeholder:text-matrix-primary/20"
@@ -416,13 +448,13 @@ export const RecipeBuilder = () => {
                         {/* Actions */}
                         <div class="flex gap-3 pt-2">
                             <button 
-                                onClick={() => handleAddPattern('RemoveFiles')}
+                                onClick={() => handleAddPattern('exclude')}
                                 class="flex-1 py-3 text-lg font-bold border border-matrix-border text-matrix-error hover:bg-matrix-error hover:text-matrix-bg transition-colors uppercase tracking-widest"
                             >
                                 [ - EXCLUDE ]
                             </button>
                             <button 
-                                onClick={() => handleAddPattern('AddFiles')}
+                                onClick={() => handleAddPattern('include')}
                                 class="flex-1 py-3 text-lg font-bold bg-matrix-primary text-matrix-bg hover:bg-matrix-highlight transition-colors uppercase tracking-widest shadow-glow"
                             >
                                 [ + INCLUDE ]

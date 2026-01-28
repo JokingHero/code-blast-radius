@@ -1,28 +1,40 @@
-export type RecipeOperationType = "AddFiles" | "RemoveFiles" | "BlastRadius";
-export interface RecipeOperation {
-  type: RecipeOperationType;
-  params: {
-    pattern?: string; // For AddFiles/RemoveFiles
-    symbol?: string; // For BlastRadius
-    max_depth?: number; // For BlastRadius
-    exclude_tests?: boolean; // For BlastRadius
-  };
+export interface AddFilesParams {
+  pattern: string;
 }
+
+export interface RemoveFilesParams {
+  pattern: string;
+}
+
+export interface BlastRadiusParams {
+  symbol: string;
+  max_depth: number;
+  exclude_tests: boolean;
+}
+
+// Define the Union matched to #[serde(tag = "type", content = "params")]
+export type RecipeOperation =
+  | { type: "AddFiles"; params: AddFilesParams }
+  | { type: "RemoveFiles"; params: RemoveFilesParams }
+  | { type: "BlastRadius"; params: BlastRadiusParams };
+
+export type RecipeOperationType = RecipeOperation["type"];
+
 export type FileTransformMode =
-  | { mode: "Skeletonize"; symbols: string[] } // Hide specific symbols
-  | { mode: "FocusOn"; symbols: string[] }; // Hide everything EXCEPT these
+  | { mode: "Skeletonize"; symbols: string[] }
+  | { mode: "FocusOn"; symbols: string[] };
+
 export interface EngineRecipe {
   name: string;
   description: string | null;
   operations: RecipeOperation[];
-  transforms: Record<string, FileTransformMode>; // Specific file overrides
-  default_transform: FileTransformMode | null; // Fallback (null = Full Text)
+  transforms: Record<string, FileTransformMode>;
+  default_transform: FileTransformMode | null;
 }
-// UI Representation of a Step (with a unique ID for drag-drop/reactivity)
+
 export interface UiRecipeStep {
   id: string;
   op: RecipeOperation;
 }
-export interface SavedRecipe extends EngineRecipe {
-  // Matches Rust struct exactly
-}
+
+export interface SavedRecipe extends EngineRecipe {}

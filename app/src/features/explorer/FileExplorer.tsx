@@ -170,7 +170,8 @@ const FileNode = (props: {
   const handleDblClick = (e: MouseEvent) => {
     e.stopPropagation();
     if (!props.entry.isDirectory) {
-        addStep({ type: "file", value: normalizePath(fullPath) });
+        // Default to including the file
+        addStep({ kind: "file", path: normalizePath(fullPath), mode: "include" });
     }
   }
 

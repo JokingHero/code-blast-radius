@@ -57,7 +57,7 @@ impl AnalysisService {
         if exclude_tests {
             final_filtered_ids.retain(|&id| {
                 if let Some(f) = index.files.get(&id) {
-                    !f.path.contains("test") && !f.path.contains("spec")
+                    !f.is_test
                 } else {
                     true
                 }

@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
+use crate::analysis::language::get_config_for_extension;
 use crate::models::{BoundaryIndex, Definition, FileId};
 use crate::query::output::{ContextOutput, FileContent, FileContextMetadata, LineRange};
 use crate::query::walker::JitWalker;
@@ -123,9 +124,26 @@ impl<'a> RecipeExecutor<'a> {
         let raw_content = fs::read_to_string(&absolute_path)
             .with_context(|| format!("Failed to read {:?}", absolute_path))?;
 
-        // Handle Masking (Skeletonization)
-        let final_content = if let Some(tr) = transform {
-            self.apply_transform(&raw_content, &file_node.defs, tr)
+        let ext = absolute_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("txt")
+            .to_string();
+        let skeleton_template = get_config_for_extension(&ext)
+            .map(|c| c.skeleton_template)
+            .unwrap_or(" ... ");
+
+        let current_hash: [u8; 32] = blake3::hash(raw_content.as_bytes()).into();
+        let is_stale = current_hash != file_node.hash;
+
+        // Apply Transform ONLY if hashes match
+        let final_content = if is_stale {
+            // If stale, we cannot trust the byte offsets in file_node.defs.
+            // We return the raw content to avoid panicking.
+            eprintln!("Warning: File '{}' is changed on disk but not in index. Skipping transforms.", file_node.path);
+            raw_content.clone()
+        } else if let Some(tr) = transform {
+            self.apply_transform(&raw_content, &file_node.defs, tr, skeleton_template)
         } else {
             raw_content.clone()
         };
@@ -161,6 +179,7 @@ impl<'a> RecipeExecutor<'a> {
         content: &str,
         defs: &[Definition],
         transform: &FileTransform,
+        skeleton_template: &str,
     ) -> String {
         let mut masks: Vec<(usize, usize)> = Vec::new();
 
@@ -193,13 +212,8 @@ impl<'a> RecipeExecutor<'a> {
             if start < last_pos || start >= content.len() || end > content.len() {
                 continue;
             }
-
-            // Append text before mask
             result.push_str(&content[last_pos..start]);
-
-            // Append replacement
-            result.push_str(" { /* ... */ } ");
-
+            result.push_str(skeleton_template);
             last_pos = end;
         }
 

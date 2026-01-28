@@ -4,6 +4,8 @@ import {
   EngineRecipe,
   SavedRecipe,
   UiRecipeStep,
+  RecipeOperation,
+  BlastRadiusParams
 } from "./types";
 import { useWorkspace } from "./workspace.store";
 
@@ -33,49 +35,50 @@ export const useRecipe = () => {
 
   const markDirty = () => setState("isDirty", true);
 
-  const addStep = (
-    step: Partial<UiRecipeStep> & {
-      type: "file" | "symbol";
-      value: string;
-      params?: any;
-    }
-  ) => {
+  // Helper to allow UI components to pass loose data that we sanitize here
+  type AddStepInput = 
+    | { kind: "file"; path: string; mode?: "include" | "exclude" }
+    | { kind: "symbol"; name: string; max_depth?: number; exclude_tests?: boolean };
+
+  const addStep = (input: AddStepInput) => {
     const id = crypto.randomUUID();
-    let newStep: UiRecipeStep;
-    
-    if (step.type === "file") {
-      const opType = step.params?.subtype === "RemoveFiles" ? "RemoveFiles" : "AddFiles";
-      newStep = {
-        id,
-        op: { type: opType, params: { pattern: step.value } },
+    let newOp: RecipeOperation;
+
+    if (input.kind === "file") {
+      const type = input.mode === "exclude" ? "RemoveFiles" : "AddFiles";
+      newOp = {
+        type,
+        params: { pattern: input.path }
       };
     } else {
-      newStep = {
-        id,
-        op: {
-          type: "BlastRadius",
-          params: {
-            symbol: step.value,
-            max_depth: step.params?.max_depth ?? 5,
-            exclude_tests: step.params?.exclude_tests ?? true,
-          },
+      newOp = {
+        type: "BlastRadius",
+        params: {
+          symbol: input.name,
+          // Defaults matching Rust/UI logic
+          max_depth: input.max_depth ?? 5,
+          exclude_tests: input.exclude_tests ?? true,
         },
       };
     }
 
     const exists = state.steps.find((s) => {
-        if (s.op.type !== newStep.op.type) return false;
-        if (s.op.type === 'AddFiles' || s.op.type === 'RemoveFiles') {
-            return s.op.params.pattern === newStep.op.params.pattern;
-        }
-        if (s.op.type === 'BlastRadius') {
-            return s.op.params.symbol === newStep.op.params.symbol;
-        }
-        return false;
+      if (s.op.type !== newOp.type) return false;
+      
+      if (s.op.type === "AddFiles" && newOp.type === "AddFiles") {
+         return s.op.params.pattern === newOp.params.pattern;
+      }
+      if (s.op.type === "RemoveFiles" && newOp.type === "RemoveFiles") {
+         return s.op.params.pattern === newOp.params.pattern;
+      }
+      if (s.op.type === "BlastRadius" && newOp.type === "BlastRadius") {
+         return s.op.params.symbol === newOp.params.symbol;
+      }
+      return false;
     });
 
     if (!exists) {
-      setState("steps", (prev) => [...prev, newStep]);
+      setState("steps", (prev) => [...prev, { id, op: newOp }]);
       markDirty();
       runAnalysis();
     }
@@ -99,14 +102,11 @@ export const useRecipe = () => {
       runAnalysis();
   };
 
-  const updateStepParams = (id: string, params: any) => {
-    setState(
-      "steps",
-      (step) => step.id === id,
-      "op",
-      "params",
-      (prev) => ({ ...prev, ...params })
-    );
+  const updateStepParams = (id: string, params: Partial<BlastRadiusParams>) => {
+    setState("steps", (step) => step.id === id, "op", "params", (prev: any) => ({
+       ...prev, 
+       ...params 
+    }));
     markDirty();
     runAnalysis();
   };
@@ -114,10 +114,16 @@ export const useRecipe = () => {
   const toggleStepType = (id: string) => {
     setState("steps", (step) => step.id === id, "op", (prevOp) => {
       if (prevOp.type === "AddFiles") {
-        return { ...prevOp, type: "RemoveFiles" as const };
+        return { 
+            type: "RemoveFiles", 
+            params: { pattern: prevOp.params.pattern } 
+        } as RecipeOperation;
       }
       if (prevOp.type === "RemoveFiles") {
-        return { ...prevOp, type: "AddFiles" as const };
+        return { 
+            type: "AddFiles", 
+            params: { pattern: prevOp.params.pattern } 
+        } as RecipeOperation;
       }
       return prevOp;
     });

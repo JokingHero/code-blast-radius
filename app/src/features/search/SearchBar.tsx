@@ -47,13 +47,10 @@ export const SearchBar = () => {
 
   const selectResult = (item: any) => {
     addStep({ 
-        type: "symbol", 
-        value: item.name,
-        // @ts-ignore
-        params: {
-            max_depth: limitRadius() ? radius() : 100, 
-            exclude_tests: !includeTests()
-        }
+        kind: "symbol", 
+        name: item.name,
+        max_depth: limitRadius() ? radius() : 100, 
+        exclude_tests: !includeTests()
     });
     setQuery("");
     setIsOpen(false);
