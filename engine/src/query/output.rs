@@ -140,7 +140,7 @@ pub fn generate_context_output(
             path: file_node.path.clone(),
             root_name: None,
             language: ext,
-            is_test: false, // We don't track is_test in BoundaryIndex yet
+            is_test: file_node.is_test, 
             relevant_lines: vec![LineRange {
                 start: 1,
                 end: line_count.max(1),

@@ -60,6 +60,8 @@ pub struct FileBoundary {
     
     pub token_count: u32,
 
+    pub is_test: bool,
+
     // 1. What does this file define? (The API)
     pub defs: Vec<Definition>,
 

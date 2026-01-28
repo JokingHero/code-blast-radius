@@ -90,7 +90,7 @@ impl<'a> RecipeExecutor<'a> {
                     if *exclude_tests {
                         working_set.retain(|id| {
                             if let Some(f) = self.index.files.get(id) {
-                                !is_test_path(std::path::Path::new(&f.path))
+                                !f.is_test 
                             } else {
                                 true
                             }
@@ -146,7 +146,7 @@ impl<'a> RecipeExecutor<'a> {
                 path: file_node.path.clone(),
                 root_name: None, // Filled by UI if needed
                 language: ext,
-                is_test: false, // We could infer this from path if needed
+                is_test: file_node.is_test, 
                 relevant_lines: vec![LineRange {
                     start: 1,
                     end: line_count,
@@ -259,7 +259,7 @@ impl<'a> RecipeExecutor<'a> {
                     path: file_node.path.clone(),
                     root_name: None,
                     language: ext,
-                    is_test: false,
+                    is_test: file_node.is_test,
                     relevant_lines: vec![], // No lines calculated for metadata-only
                     token_count: file_node.token_count,
                 });

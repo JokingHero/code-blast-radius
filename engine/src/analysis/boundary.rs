@@ -302,6 +302,7 @@ pub fn extract_boundary(
         root_id: String::new(),
         hash: file_hash,
         token_count, 
+        is_test: false, // Default to false, Scanner will update this based on path
         defs,
         imports,
         symbol_refs: symbol_refs.into_iter().collect(),

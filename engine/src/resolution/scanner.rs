@@ -13,6 +13,7 @@ use crate::inference::frameworks::FrameworkManager;
 use crate::inference::{configs, InferenceEngine};
 use crate::manifest::scan_manifest_content;
 use crate::models::{BoundaryIndex, FileBoundary, FileId};
+use crate::resolution::utils::is_test_path;
 
 pub struct FileScanner;
 
@@ -193,6 +194,9 @@ impl FileScanner {
                     ) {
                         Ok(mut boundary) => {
                             boundary.root_id = root_id.to_string();
+
+                            // --- DETECT TEST STATUS ---
+                            boundary.is_test = is_test_path(path_obj);
 
                             // --- INFERENCE STEP ---
                             // Look at physical facts and infer logical concepts
