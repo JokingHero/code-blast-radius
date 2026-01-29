@@ -1,4 +1,4 @@
-use crate::analysis::language::{get_language, LanguageConfig};
+use crate::analysis::language::{LanguageConfig, SupportedLanguage, get_language};
 use crate::models::{Definition, FileBoundary, FrameworkHint, SymbolKind};
 use std::collections::HashSet;
 use tree_sitter::{Parser, QueryCursor, StreamingIterator};
@@ -10,6 +10,24 @@ pub fn extract_boundary(
     file_hash: [u8; 32],
 ) -> Result<FileBoundary, String> {
     let token_count = (source_code.len() / 4) as u32;
+
+    if config.lang == SupportedLanguage::PlainText {
+        return Ok(FileBoundary {
+            id: 0,
+            path: path.to_string(),
+            root_id: String::new(),
+            hash: file_hash,
+            token_count,
+            is_test: false,
+            defs: Vec::new(),
+            imports: Vec::new(),
+            symbol_refs: Vec::new(),
+            literals: Vec::new(),
+            framework_hints: Vec::new(),
+            synthetic_defs: Vec::new(),
+        });
+    }
+
     let mut parser = Parser::new();
     let language = get_language(config.lang);
     parser.set_language(&language).map_err(|e| e.to_string())?;

@@ -29,6 +29,7 @@ pub enum SupportedLanguage {
     GdScript,
     Dart,
     FirebaseRules,
+    PlainText,
 }
 
 pub fn get_language(lang: SupportedLanguage) -> Language {
@@ -57,6 +58,9 @@ pub fn get_language(lang: SupportedLanguage) -> Language {
         SupportedLanguage::GdScript => tree_sitter_gdscript::LANGUAGE.into(),
         SupportedLanguage::Dart => tree_sitter_dart::language(),
         SupportedLanguage::FirebaseRules => tree_sitter_rules::LANGUAGE.into(),
+        // Fallback: We won't actually parse PlainText with TreeSitter in boundary.rs,
+        // but we need to return a valid language to satisfy the signature.
+        SupportedLanguage::PlainText => tree_sitter_bash::LANGUAGE.into(), 
     }
 }
 
@@ -345,6 +349,8 @@ fn get_default_refs_query(lang: SupportedLanguage) -> &'static str {
             (namespace_identifier) @ref
         "#
         }
+        // PlainText doesn't use TreeSitter refs, return anything to satisfy signature
+        SupportedLanguage::PlainText => "", 
         _ => "(identifier) @ref",
     }
 }
@@ -390,6 +396,7 @@ pub fn get_config_for_extension(ext: &str) -> Option<&'static LanguageConfig> {
         "dart" => Some(get_dart_config()),
         "rules" => Some(get_rules_config()),
 
+        "md" | "markdown" | "txt" | "text" | "log" | "csv" | "xml" | "svg" | "conf" | "ini" | "properties" => Some(get_plaintext_config()),
         _ => None,
     }
 }
@@ -493,6 +500,7 @@ pub fn get_config_by_language(lang: SupportedLanguage) -> Option<&'static Langua
         SupportedLanguage::GdScript => "gd",
         SupportedLanguage::Dart => "dart",
         SupportedLanguage::FirebaseRules => "rules",
+        SupportedLanguage::PlainText => "txt",
     };
 
     if lang == SupportedLanguage::Dotenv {
@@ -500,4 +508,15 @@ pub fn get_config_by_language(lang: SupportedLanguage) -> Option<&'static Langua
     }
 
     get_config_for_extension(ext)
+}
+
+fn get_plaintext_config() -> &'static LanguageConfig {
+    static CONFIG: OnceLock<LanguageConfig> = OnceLock::new();
+    CONFIG.get_or_init(|| {
+        LanguageConfigBuilder::new(
+            SupportedLanguage::PlainText,
+            &["md", "txt", "log", "csv", "xml", "svg", "conf", "ini", "properties"],
+        )
+        .build()
+    })
 }
