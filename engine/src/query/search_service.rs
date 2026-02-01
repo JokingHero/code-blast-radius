@@ -18,14 +18,17 @@ impl SearchService {
         let mut results = Vec::new();
         let query_utf32 = Utf32String::from(query);
 
-        // Search Symbols (and handle synthetic concepts like route:...)
+        // Search Symbols
         for (name, ids) in &index.symbol_map {
             if let Some(score) = matcher.fuzzy_match(
                 Utf32String::from(name.as_str()).slice(..),
                 query_utf32.slice(..),
             ) {
-                if let Some(&file_id) = ids.first() {
+                // FIXED: Iterate over ALL file_ids, not just the first one.
+                for &file_id in ids {
                     if let Some(file_node) = index.files.get(&file_id) {
+                        // We must recalculate 'kind' for every file, because 
+                        // 'init' might be a Function in one file and a Method in another.
                         let kind = file_node.defs.iter()
                             .find(|d| d.name == *name)
                             .map(|d| format!("{:?}", d.kind))
@@ -65,7 +68,12 @@ impl SearchService {
             }
         }
 
-        results.sort_by(|a, b| b.score.cmp(&a.score));
+        // Sort by score first, then alphabetically by path to ensure deterministic order for identical scores
+        results.sort_by(|a, b| {
+            b.score.cmp(&a.score)
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        
         results.truncate(limit);
         results
     }

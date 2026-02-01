@@ -12,7 +12,7 @@ const IGNORED_NAMES = new Set([
   "node_modules", "jspm_packages", "bower_components", 
   "venv", ".venv", "env", ".env",
   "target", "vendor", 
-  "dist", "build", "out", "bin", "obj",
+  "dist", "build", "out", "obj",
   "__pycache__", ".pytest_cache",
   ".git", ".svn", ".hg",
   ".idea", ".vscode", ".vs", ".DS_Store", "Thumbs.db",
