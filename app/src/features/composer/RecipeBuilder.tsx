@@ -39,15 +39,18 @@ const StepItem = (props: {
 
   const handleDragOver = (e: DragEvent) => {
     e.preventDefault();
-    e.dataTransfer!.dropEffect = "move";
+    if (e.dataTransfer?.types.includes("type")) {
+        e.dataTransfer.dropEffect = "move";
+        e.stopPropagation();
+    }
   };
 
   const handleDrop = (e: DragEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     const fromIndexStr = e.dataTransfer?.getData("text/plain");
     const type = e.dataTransfer?.getData("type");
     if (type === "reorder_step" && fromIndexStr !== undefined) {
+      e.stopPropagation(); 
       const fromIndex = parseInt(fromIndexStr);
       if (!isNaN(fromIndex)) props.onMove(fromIndex, props.index);
     }
