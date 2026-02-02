@@ -285,6 +285,28 @@ fn test_body_capture_across_languages() {
             symbol_name: "key",
             expected_body_start: Some("value"),
         },
+        // --- JULIA ---
+        TestCase {
+            lang: SupportedLanguage::Julia,
+            name: "Julia Function",
+            code: "function foo()\n  println(\"hi\")\nend",
+            symbol_name: "foo",
+            expected_body_start: Some("println"),
+        },
+        TestCase {
+            lang: SupportedLanguage::Julia,
+            name: "Julia Short Form",
+            code: "f(x) = x^2 + 1",
+            symbol_name: "f",
+            expected_body_start: Some("x^2 + 1"),
+        },
+        TestCase {
+            lang: SupportedLanguage::Julia,
+            name: "Julia Parametric Struct",
+            code: "struct Point{T}\n  x::T\nend",
+            symbol_name: "Point",
+            expected_body_start: Some("x::T"),
+        },
     ];
 
     let mut failures = Vec::new();

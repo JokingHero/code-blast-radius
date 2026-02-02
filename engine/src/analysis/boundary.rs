@@ -135,8 +135,9 @@ pub fn extract_boundary(
                             }
                         } else if k == "create_table" {
                             SymbolKind::Class // SQL Tables are data structures
-                        } else if k == "binary_operator" {
+                        } else if k == "binary_operator" || k == "assignment" {
                             // R assignments (foo <- function)
+                            // Julia short-form functions (f(x) = x^2)
                             SymbolKind::Function
                         } else if k.contains("resource") {
                             SymbolKind::Class // HCL Resources

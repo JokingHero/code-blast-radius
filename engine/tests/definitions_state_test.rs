@@ -311,7 +311,6 @@ fn test_comprehensive_definitions_extraction() {
             ],
             should_not_contain: vec![],
         },
-        // ========================================================
         // SCIENTIFIC (R, JULIA)
         // ========================================================
         DefTestCase {
@@ -325,14 +324,34 @@ fn test_comprehensive_definitions_extraction() {
         },
         DefTestCase {
             lang: SupportedLanguage::Julia,
-            name: "Julia",
+            name: "Julia: Complex Syntax",
             code: r#"
-                function solve() end
-                macro sayhello() end
+                module Physics
+                    # Parametric Struct (verified via S-Exp)
+                    struct Particle{T <: Real}
+                        x::T
+                    end
+
+                    # Short form
+                    energy(p) = p.x * 2
+
+                    # Where clause + Typed args
+                    function move!(p::Particle{T}, dx::T) where T
+                        p.x += dx
+                    end
+
+                    # Module method definition (Base.show)
+                    function Base.show(io::IO, p::Particle)
+                        print(io, "P")
+                    end
+                end
             "#,
             expected: vec![
-                ("solve", SymbolKind::Function),
-                ("sayhello", SymbolKind::Function),
+                ("Physics", SymbolKind::Module),
+                ("Particle", SymbolKind::Class),
+                ("energy", SymbolKind::Function),
+                ("move!", SymbolKind::Function),
+                ("Base.show", SymbolKind::Function),
             ],
             should_not_contain: vec![],
         },
